@@ -133,7 +133,8 @@ def create_app(cfg: dict) -> FastAPI:
     def dashboard(request: Request, sess: dict = Depends(page_user)):
         return render(request, "dashboard.html", role=sess["role"])
 
-    from . import playlists
+    from . import engine_bridge, playlists
     playlists.register(app)
+    engine_bridge.register(app)
 
     return app

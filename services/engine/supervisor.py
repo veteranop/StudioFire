@@ -216,6 +216,10 @@ class EngineSupervisor:
                 self._exit_emergency(reason="queue track started")
             self._journal.append("track_start", path=path,
                                  title=e.get("title"), source=e.get("source"))
+            # status must reflect the advance, not just mutations — P2's
+            # feeder computes pending work from these two fields
+            self._set_status(current_index=self._state.current_index,
+                             queue_len=len(self._state.entries))
             self._ensure_next_appended()
         else:
             source = "emergency" if path != self._baked_in else "baked_in"
@@ -260,6 +264,7 @@ class EngineSupervisor:
             # drop it from ahead-of-us so mpv never sees it
             del self._state.entries[self._state.current_index + 1]
             self._store.save(self._state)
+            self._set_status(queue_len=len(self._state.entries))
             return self._ensure_next_appended()
         if self._expected_next_path == nxt["path"]:
             return  # already primed
