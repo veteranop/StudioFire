@@ -1,0 +1,46 @@
+/* StudioFire — big buttons, big fonts, obvious colors (PLAN.md §5). */
+:root {
+  --bg: #10141a; --panel: #1b222c; --text: #e8edf3; --muted: #8b98a8;
+  --green: #1f9d55; --yellow: #d69e2e; --red: #c53030; --blue: #3182ce;
+  --border: #2c3644;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--text);
+  font: 18px/1.5 "Segoe UI", system-ui, sans-serif;
+}
+.topbar {
+  display: flex; align-items: center; gap: 1rem;
+  padding: .75rem 1.25rem; background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+.brand { font-size: 1.4rem; font-weight: 700; letter-spacing: .5px; }
+.nav-right { margin-left: auto; }
+.page { max-width: 1100px; margin: 2rem auto; padding: 0 1rem; }
+.card {
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: 12px; padding: 1.5rem 2rem; margin-bottom: 1.5rem;
+}
+.card.narrow { max-width: 460px; margin: 4rem auto; }
+h1 { margin-top: 0; font-size: 1.6rem; }
+label { display: block; margin: 1rem 0; font-weight: 600; }
+input {
+  display: block; width: 100%; margin-top: .35rem; padding: .7rem .9rem;
+  font-size: 1.1rem; color: var(--text); background: var(--bg);
+  border: 1px solid var(--border); border-radius: 8px;
+}
+.btn {
+  cursor: pointer; border: 1px solid var(--border); border-radius: 10px;
+  background: #26303d; color: var(--text);
+  font-size: 1.05rem; font-weight: 600; padding: .6rem 1.2rem;
+}
+.btn:hover { filter: brightness(1.15); }
+.btn-big { width: 100%; padding: 1rem; font-size: 1.3rem; margin-top: 1rem; }
+.btn-green  { background: var(--green);  border-color: var(--green); }
+.btn-yellow { background: var(--yellow); border-color: var(--yellow); color: #1a1a1a; }
+.btn-red    { background: var(--red);    border-color: var(--red); }
+.error {
+  background: #3b1d1d; border: 1px solid var(--red); color: #ffb4b4;
+  padding: .6rem .9rem; border-radius: 8px;
+}
+.muted { color: var(--muted); }

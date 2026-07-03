@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — {{ station }}{% endblock %}
+{% block nav %}
+<form method="post" action="/logout" class="nav-right">
+  <button type="submit" class="btn">Sign out</button>
+</form>
+{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>Dashboard</h1>
+  <p>Signed in as <strong>{{ role }}</strong>.</p>
+  <p class="muted">Now-playing, queue, and the big buttons land here in the
+    next milestone.</p>
+</div>
+{% endblock %}

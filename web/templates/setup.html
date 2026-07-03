@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}First-time setup — {{ station }}{% endblock %}
+{% block content %}
+<div class="card narrow">
+  <h1>Welcome to StudioFire</h1>
+  <p>Create the administrator account. You only do this once.</p>
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+  <form method="post" action="/setup">
+    <label>Admin username
+      <input name="username" autofocus required>
+    </label>
+    <label>Password <small>(at least 8 characters)</small>
+      <input name="password" type="password" minlength="8" required>
+    </label>
+    <label>Password again
+      <input name="password2" type="password" minlength="8" required>
+    </label>
+    <button type="submit" class="btn btn-big btn-green">Create account</button>
+  </form>
+</div>
+{% endblock %}
