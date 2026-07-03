@@ -26,3 +26,6 @@ media/
 # OS
 Thumbs.db
 desktop.ini
+
+# demo/test emergency content stays local
+assets/emergency/*.mp3
