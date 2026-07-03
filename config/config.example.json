@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "station_name": "STATION NAME",
+  "paths": {
+    "nas_music_root": "//SYNOLOGY/music",
+    "precache_dir": "C:/StudioFire/precache",
+    "emergency_dir": "C:/StudioFire/emergency",
+    "data_dir": "C:/StudioFire/data",
+    "logs_dir": "C:/StudioFire/logs"
+  },
+  "engine": {
+    "audio_device_guid": "",
+    "wasapi_mode": "shared",
+    "watchdog_interval_sec": 1,
+    "ipc_host": "127.0.0.1",
+    "ipc_port": 7701
+  },
+  "core": {
+    "bind_host": "0.0.0.0",
+    "bind_port": 8080,
+    "precache_target_minutes": 45
+  },
+  "poller": {
+    "interval_sec": 60,
+    "unifi": { "host": "", "api_key": "" },
+    "barix": [ { "name": "Studio Instreamer", "host": "" } ],
+    "tx150": { "host": "", "port": 0 },
+    "wireguard_peer_ip": ""
+  }
+}

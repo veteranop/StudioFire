@@ -1,0 +1,23 @@
+# StudioFire dependencies — P2 (core), P3 (worker), P4 (poller) only.
+#
+# DESIGN LAW: services/engine (P1) is STDLIB-ONLY plus the external mpv.exe.
+# Nothing in this file may be imported by P1. See PLAN.md §5 and §10.
+
+# P2 — core/web
+fastapi
+uvicorn[standard]
+jinja2
+python-multipart
+itsdangerous
+apscheduler
+
+# P3 — worker (indexer, syndication fetcher)
+mutagen
+watchdog
+paramiko          # SFTP (Phase 3)
+
+# P4 — poller
+httpx
+
+# shared (P2/P3/P4)
+pydantic
