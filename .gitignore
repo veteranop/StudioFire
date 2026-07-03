@@ -17,6 +17,12 @@ config/config.json
 queue_state.json
 heartbeat.txt
 
+# Binaries (fetched by installer, not vendored)
+bin/
+
+# Local media assets (user-managed)
+media/
+
 # OS
 Thumbs.db
 desktop.ini
