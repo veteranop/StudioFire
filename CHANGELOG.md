@@ -15,5 +15,9 @@ plain English a non-technical operator can understand.
   - Remembers exactly where it was across restarts (including emergency mode).
   - Keeps a tamper-proof log of everything that aired, even if the rest of the system is down.
   - Local control connection for the upcoming web interface (play queue, skip, pause/resume).
+- Torture-test harness: deliberately abuses the engine (floods of bad commands,
+  files corrupted or deleted mid-song, the audio player killed five times in a row)
+  and verifies the air never goes quiet for more than 2 seconds. Includes a long-run
+  "soak" mode for the 72-hour burn-in before go-live.
 - Project scaffold: four-service layout (engine / core / worker / poller), config schema,
   logging locations, and planning docs (PLAN.md v0.3).
