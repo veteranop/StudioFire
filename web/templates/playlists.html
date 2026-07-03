@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}Playlists — {{ station }}{% endblock %}
+{% block nav %}
+<nav class="nav-links">
+  <a href="/">On Air</a>
+  <a href="/playlists" class="active">Playlists</a>
+</nav>
+<form method="post" action="/logout" class="nav-right">
+  <button type="submit" class="btn">Sign out</button>
+</form>
+{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>Playlists</h1>
+  <div class="row">
+    <input id="new-name" placeholder="New playlist name…">
+    <button class="btn btn-green" onclick="createPl()">+ Create</button>
+  </div>
+  <table class="table">
+    <thead><tr><th>Name</th><th>Items</th><th></th></tr></thead>
+    <tbody>
+    {% for p in playlists %}
+      <tr>
+        <td><a class="biglink" href="/playlists/{{ p.id }}">{{ p.name }}</a></td>
+        <td>{{ p.item_count }}</td>
+        <td class="right">
+          <button class="btn btn-green"
+                  onclick="activatePl({{ p.id }}, '{{ p.name }}')">
+            ▶ PUT ON AIR</button>
+          <button class="btn" onclick="duplicatePl({{ p.id }}, '{{ p.name }}')">
+            Duplicate</button>
+          <button class="btn btn-red"
+                  onclick="deletePl({{ p.id }}, '{{ p.name }}')">Delete</button>
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="3" class="muted">No playlists yet — create one
+        above.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+<script>
+async function createPl() {
+  const name = document.getElementById("new-name").value.trim();
+  if (!name) return;
+  const r = await fetch("/api/playlists", {method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({name})});
+  if (r.status === 201) location = "/playlists/" + (await r.json()).id;
+  else alert((await r.json()).detail || "Could not create playlist");
+}
+async function activatePl(id, name) {
+  if (!confirm('Put "' + name + '" on air now? This replaces the current queue.'))
+    return;
+  const r = await fetch("/api/playlists/" + id + "/activate", {method: "POST"});
+  if (r.ok) location = "/";
+  else alert((await r.json()).detail || "Engine did not accept the playlist");
+}
+async function duplicatePl(id, name) {
+  const copy = prompt("Name for the copy:", name + " (copy)");
+  if (!copy) return;
+  const r = await fetch("/api/playlists/" + id + "/duplicate", {method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({name: copy})});
+  if (r.status === 201) location.reload();
+  else alert((await r.json()).detail || "Could not duplicate");
+}
+async function deletePl(id, name) {
+  if (!confirm('Delete playlist "' + name + '"? This cannot be undone.'))
+    return;
+  await fetch("/api/playlists/" + id, {method: "DELETE"});
+  location.reload();
+}
+</script>
+{% endblock %}

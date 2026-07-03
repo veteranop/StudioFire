@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+{% block title %}{{ playlist.name }} — {{ station }}{% endblock %}
+{% block nav %}
+<nav class="nav-links">
+  <a href="/">On Air</a>
+  <a href="/playlists" class="active">Playlists</a>
+</nav>
+<form method="post" action="/logout" class="nav-right">
+  <button type="submit" class="btn">Sign out</button>
+</form>
+{% endblock %}
+{% block content %}
+<div class="grid2">
+  <div class="card">
+    <h1>{{ playlist.name }}</h1>
+    <ol id="items" class="editlist">
+    {% for it in items %}
+      <li data-id="{{ it.id }}">
+        <span class="item-label">
+          {% if it.item_type == 'folder-newest' %}📻{% endif %}
+          {% if it.item_type == 'folder-rotation' %}🔁{% endif %}
+          {{ it.title or it.path }}
+          {% if it.item_type != 'file' %}
+            <small class="muted">({{ it.item_type }})</small>
+          {% endif %}
+        </span>
+        <span class="item-btns">
+          <button class="btn btn-sm" onclick="move(this, -1)">▲</button>
+          <button class="btn btn-sm" onclick="move(this, 1)">▼</button>
+          <button class="btn btn-sm btn-red"
+                  onclick="removeItem(this)">✕</button>
+        </span>
+      </li>
+    {% else %}
+      <li class="muted" id="empty-hint">Empty — search the library on the
+        right and add songs.</li>
+    {% endfor %}
+    </ol>
+    <div class="row">
+      <button class="btn btn-green btn-big" onclick="activateThis()">
+        ▶ PUT ON AIR</button>
+    </div>
+    <details class="advanced">
+      <summary>Advanced: add a folder item</summary>
+      <p class="muted">📻 <strong>Newest from folder</strong> always plays the
+        most recent file (syndicated shows). 🔁 <strong>Rotate through
+        folder</strong> plays a different file each time (ads/spots).</p>
+      <div class="row">
+        <input id="folder-path" placeholder="Folder path, e.g. \\NAS\shows\TheMorningShow">
+        <select id="folder-type">
+          <option value="folder-newest">📻 Newest from folder</option>
+          <option value="folder-rotation">🔁 Rotate through folder</option>
+        </select>
+        <button class="btn" onclick="addFolder()">Add</button>
+      </div>
+    </details>
+  </div>
+
+  <div class="card">
+    <h2>Find songs</h2>
+    <input id="search" placeholder="Type a song, artist, or album…"
+           oninput="searchLib()">
+    <ul id="results" class="results"></ul>
+  </div>
+</div>
+
+<script>
+const PID = {{ playlist.id }};
+
+function ids() {
+  return [...document.querySelectorAll("#items li[data-id]")]
+         .map(li => parseInt(li.dataset.id));
+}
+async function saveOrder() {
+  const r = await fetch(`/api/playlists/${PID}/order`, {method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({item_ids: ids()})});
+  if (r.status === 409) location.reload();  // someone else edited — resync
+}
+function move(btn, dir) {
+  const li = btn.closest("li");
+  const sib = dir < 0 ? li.previousElementSibling : li.nextElementSibling;
+  if (!sib || !sib.dataset.id) return;
+  li.parentNode.insertBefore(dir < 0 ? li : sib, dir < 0 ? sib : li);
+  saveOrder();
+}
+async function removeItem(btn) {
+  const li = btn.closest("li");
+  await fetch(`/api/playlists/${PID}/items/${li.dataset.id}`,
+              {method: "DELETE"});
+  li.remove();
+}
+async function addItem(item_type, path, title) {
+  const r = await fetch(`/api/playlists/${PID}/items`, {method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({item_type, path, title})});
+  if (r.status === 201) location.reload();
+}
+function addFolder() {
+  const path = document.getElementById("folder-path").value.trim();
+  if (!path) return;
+  addItem(document.getElementById("folder-type").value, path,
+          path.split(/[\\/]/).pop());
+}
+async function activateThis() {
+  if (!confirm("Put this playlist on air now? This replaces the current queue."))
+    return;
+  const r = await fetch(`/api/playlists/${PID}/activate`, {method: "POST"});
+  if (r.ok) location = "/";
+  else alert((await r.json()).detail || "Engine did not accept the playlist");
+}
+
+let searchTimer = null;
+function searchLib() {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(async () => {
+    const q = document.getElementById("search").value.trim();
+    const ul = document.getElementById("results");
+    ul.innerHTML = "";
+    if (!q) return;
+    const rows = await (await fetch(
+      "/api/library/search?q=" + encodeURIComponent(q))).json();
+    if (!rows.length)
+      ul.innerHTML = "<li class='muted'>No matches</li>";
+    for (const t of rows) {
+      const li = document.createElement("li");
+      const label = (t.artist ? t.artist + " — " : "") + (t.title || t.path);
+      const btn = document.createElement("button");
+      btn.className = "btn btn-sm btn-green";
+      btn.textContent = "+ Add";
+      btn.onclick = () => addItem("file", t.path, label);
+      const cue = document.createElement("button");
+      cue.className = "btn btn-sm btn-yellow";
+      cue.textContent = "▶ Next";
+      cue.title = "Play this right after the current song";
+      cue.onclick = async () => {
+        const r = await fetch("/api/engine/play_next", {method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({path: t.path, title: label})});
+        if (!r.ok) alert((await r.json()).detail || "Could not cue track");
+        else cue.textContent = "✓ Cued";
+      };
+      const span = document.createElement("span");
+      span.textContent = label;
+      li.append(btn, cue, span);
+      ul.appendChild(li);
+    }
+  }, 250);
+}
+</script>
+{% endblock %}

@@ -1,15 +1,112 @@
 {% extends "base.html" %}
-{% block title %}Dashboard — {{ station }}{% endblock %}
+{% block title %}On Air — {{ station }}{% endblock %}
 {% block nav %}
+<nav class="nav-links">
+  <a href="/" class="active">On Air</a>
+  <a href="/playlists">Playlists</a>
+</nav>
 <form method="post" action="/logout" class="nav-right">
   <button type="submit" class="btn">Sign out</button>
 </form>
 {% endblock %}
 {% block content %}
-<div class="card">
-  <h1>Dashboard</h1>
-  <p>Signed in as <strong>{{ role }}</strong>.</p>
-  <p class="muted">Now-playing, queue, and the big buttons land here in the
-    next milestone.</p>
+
+<div id="offline-banner" class="banner banner-red" hidden>
+  AUDIO ENGINE NOT RESPONDING — music may still be playing; do not panic,
+  check the on-air PC.
 </div>
+<div id="emergency-banner" class="banner banner-yellow" hidden>
+  EMERGENCY FILLER IS ON AIR — the normal playlist could not continue.
+</div>
+
+<div class="card">
+  <h1>Now Playing</h1>
+  <div class="nowplaying">
+    <div>
+      <div id="np-title" class="np-title">—</div>
+      <div id="np-pos" class="np-pos muted"></div>
+    </div>
+    <div class="controls">
+      <button id="btn-pause" class="btn btn-big btn-yellow"
+              onclick="engineOp(this.dataset.op)" data-op="pause">
+        ⏸ PAUSE AUTOMATION</button>
+      <button class="btn btn-big" onclick="engineOp('skip')">⏭ Skip song</button>
+    </div>
+  </div>
+</div>
+
+<div class="grid2">
+  <div class="card">
+    <h2>Coming up</h2>
+    <ol id="queue-list" class="queue"><li class="muted">loading…</li></ol>
+  </div>
+  <div class="card">
+    <h2>Studio health</h2>
+    <div id="tiles" class="tiles"></div>
+  </div>
+</div>
+
+<script>
+function fmt(sec) {
+  if (sec == null) return "";
+  sec = Math.floor(sec);
+  return Math.floor(sec / 60) + ":" + String(sec % 60).padStart(2, "0");
+}
+function basename(p) { return p ? p.split(/[\\/]/).pop() : "—"; }
+
+async function refresh() {
+  try {
+    const q = await (await fetch("/api/queue")).json();
+    document.getElementById("offline-banner").hidden = q.engine_online;
+    document.getElementById("emergency-banner").hidden = !q.emergency_mode;
+    document.getElementById("np-title").textContent =
+      q.now_playing ? basename(q.now_playing) : "Nothing playing";
+    document.getElementById("np-pos").textContent =
+      (q.position != null ? fmt(q.position) : "") +
+      (q.paused ? "  — PAUSED" : "");
+    const b = document.getElementById("btn-pause");
+    if (q.paused) {
+      b.textContent = "▶ RESUME"; b.dataset.op = "resume";
+      b.classList.remove("btn-yellow"); b.classList.add("btn-green");
+    } else {
+      b.textContent = "⏸ PAUSE AUTOMATION"; b.dataset.op = "pause";
+      b.classList.remove("btn-green"); b.classList.add("btn-yellow");
+    }
+    const ol = document.getElementById("queue-list");
+    ol.innerHTML = "";
+    if (!q.pending.length)
+      ol.innerHTML = "<li class='muted'>Queue is empty</li>";
+    for (const e of q.pending) {
+      const li = document.createElement("li");
+      li.textContent = e.title + (e.duration ? "  (" + fmt(e.duration) + ")" : "");
+      ol.appendChild(li);
+    }
+  } catch (e) {
+    document.getElementById("offline-banner").hidden = false;
+  }
+}
+async function refreshTiles() {
+  try {
+    const tiles = await (await fetch("/api/health/tiles")).json();
+    const div = document.getElementById("tiles");
+    div.innerHTML = "";
+    for (const t of tiles) {
+      const el = document.createElement("div");
+      el.className = "tile tile-" + t.state;
+      el.innerHTML = "<strong>" + t.name + "</strong><span>" +
+                     t.detail + "</span>";
+      div.appendChild(el);
+    }
+  } catch (e) { /* next poll */ }
+}
+async function engineOp(op) {
+  await fetch("/api/engine/op", {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({op})});
+  refresh();
+}
+refresh(); refreshTiles();
+setInterval(refresh, 2000);
+setInterval(refreshTiles, 10000);
+</script>
 {% endblock %}

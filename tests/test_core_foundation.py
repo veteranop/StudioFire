@@ -62,6 +62,11 @@ def main():
         "station_name": "TestFM",
         "db_path": os.path.join(td2, "web.db"),
         "secret_path": os.path.join(td2, "secret.key"),
+        "data_dir": td2,
+        "precache_dir": os.path.join(td2, "precache"),
+        "engine_url": "http://127.0.0.1:1",
+        "journal_path": os.path.join(td2, "journal.jsonl"),
+        "feeder_enabled": False,
     }
     client = TestClient(create_app(cfg), follow_redirects=False)
 

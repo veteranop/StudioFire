@@ -133,6 +133,81 @@ def create_app(cfg: dict) -> FastAPI:
     def dashboard(request: Request, sess: dict = Depends(page_user)):
         return render(request, "dashboard.html", role=sess["role"])
 
+    @app.get("/playlists", response_class=HTMLResponse)
+    def playlists_page(request: Request, sess: dict = Depends(page_user),
+                       conn=Depends(get_conn)):
+        from . import playlists as pl
+        return render(request, "playlists.html", role=sess["role"],
+                      playlists=pl.list_playlists(conn))
+
+    @app.get("/playlists/{pid}", response_class=HTMLResponse)
+    def playlist_edit_page(pid: int, request: Request,
+                           sess: dict = Depends(page_user),
+                           conn=Depends(get_conn)):
+        from . import playlists as pl
+        row = conn.execute("SELECT * FROM playlists WHERE id = ?",
+                           (pid,)).fetchone()
+        if row is None:
+            raise HTTPException(404)
+        return render(request, "playlist_edit.html", role=sess["role"],
+                      playlist=dict(row), items=pl.get_items(conn, pid))
+
+    @app.get("/api/library/search")
+    def library_search(q: str = "", conn=Depends(get_conn),
+                       _=Depends(api_user)):
+        q = q.strip()
+        if not q:
+            return []
+        like = f"%{q}%"
+        rows = conn.execute(
+            "SELECT id, path, title, artist, album, duration_sec "
+            "FROM tracks WHERE missing = 0 AND "
+            "  (title LIKE ? OR artist LIKE ? OR album LIKE ? OR path LIKE ?) "
+            "ORDER BY artist, title LIMIT 50",
+            (like, like, like, like)).fetchall()
+        return [dict(r) for r in rows]
+
+    @app.get("/api/health/tiles")
+    def health_tiles(conn=Depends(get_conn), _=Depends(api_user)):
+        import json as _json
+        import shutil as _shutil
+        tiles = []
+        nas = cfg.get("nas_music_root") or ""
+        nas_ok = bool(nas) and os.path.isdir(nas)
+        tiles.append({"name": "Music library (NAS)",
+                      "state": "green" if nas_ok else "red",
+                      "detail": "Connected" if nas_ok else
+                                ("Not configured" if not nas
+                                 else "UNREACHABLE — playing from cache")})
+        try:
+            du = _shutil.disk_usage(cfg.get("data_dir", "."))
+            free_gb = du.free / 1e9
+            state = ("green" if free_gb > 10
+                     else "yellow" if free_gb > 2 else "red")
+            tiles.append({"name": "Disk space", "state": state,
+                          "detail": f"{free_gb:.0f} GB free"})
+        except OSError:
+            tiles.append({"name": "Disk space", "state": "yellow",
+                          "detail": "Could not check"})
+        raw = db.get_setting(conn, "indexer_status")
+        if raw:
+            try:
+                s = _json.loads(raw)
+                n = conn.execute("SELECT COUNT(*) FROM tracks "
+                                 "WHERE missing = 0").fetchone()[0]
+                tiles.append({"name": "Library index",
+                              "state": "green",
+                              "detail": (f"{n} tracks"
+                                         + (" — indexing…"
+                                            if s.get("state") == "scanning"
+                                            else ""))})
+            except ValueError:
+                pass
+        else:
+            tiles.append({"name": "Library index", "state": "yellow",
+                          "detail": "Indexer has not run yet"})
+        return tiles
+
     from . import engine_bridge, playlists
     playlists.register(app)
     engine_bridge.register(app)

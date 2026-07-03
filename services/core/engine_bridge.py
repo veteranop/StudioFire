@@ -223,13 +223,18 @@ class Feeder:
             return True, "active playlist is empty"
 
         st = self._load_state(conn)
-        # reconcile: entries P1 has consumed since our last look
-        pending_count = max(0, status["queue_len"] - status["current_index"] - 1)
+        # reconcile: drop bookkeeping for entries P1 has already played,
+        # by identity (P1 publishes pending ids) with a count fallback
         if op == "replace":
             st["fed"] = []
-            pending_count = 0
-        elif len(st["fed"]) > pending_count:
-            st["fed"] = st["fed"][len(st["fed"]) - pending_count:]
+        elif "pending_ids" in status:
+            live = set(status["pending_ids"])
+            st["fed"] = [e for e in st["fed"] if e["id"] in live]
+        else:
+            pending_count = max(0, status["queue_len"]
+                                - status["current_index"] - 1)
+            if len(st["fed"]) > pending_count:
+                st["fed"] = st["fed"][len(st["fed"]) - pending_count:]
         pending_sec = sum(e["duration"] for e in st["fed"])
         if st["fed"] and pending_sec >= self.target_sec:
             self._save_state(conn, st)
@@ -254,7 +259,7 @@ class Feeder:
             batch.append({"id": uuid.uuid4().hex, "path": cached,
                           "title": title, "source": "playlist", "src": src})
             st["fed"].append({"id": batch[-1]["id"], "path": cached,
-                              "duration": duration})
+                              "duration": duration, "title": title})
             pending_sec += duration
         if not batch and op != "replace":
             self._save_state(conn, st)
@@ -354,8 +359,9 @@ def _ingest_lines(conn, path: str, offset: int) -> tuple[int, int]:
 
 # ---------------------------------------------------------------- wiring
 
-class ActivateIn(BaseModel):
-    playlist_id: int
+class PlayNextIn(BaseModel):
+    path: str
+    title: str | None = None
 
 
 def register(app: FastAPI) -> None:
@@ -384,6 +390,29 @@ def register(app: FastAPI) -> None:
             raise HTTPException(502, f"engine said {code}: {resp}")
         return resp
 
+    @app.get("/api/queue")
+    def api_queue(conn=Depends(get_conn), _=Depends(api_user)):
+        """Now playing + the pending titles the feeder has queued into P1."""
+        st = engine.status()
+        fst = feeder._load_state(conn)
+        pending = fst["fed"]
+        if st is not None and "pending_ids" in st:
+            order = {i: k for k, i in enumerate(st["pending_ids"])}
+            pending = sorted((e for e in pending if e["id"] in order),
+                             key=lambda e: order[e["id"]])
+        elif st is not None:
+            n = max(0, st["queue_len"] - st["current_index"] - 1)
+            if len(pending) > n:
+                pending = pending[len(pending) - n:]
+        return {"engine_online": st is not None,
+                "now_playing": (st or {}).get("now_playing"),
+                "position": (st or {}).get("position"),
+                "paused": (st or {}).get("paused", False),
+                "emergency_mode": (st or {}).get("emergency_mode", False),
+                "pending": [{"title": e.get("title") or "(untitled)",
+                             "duration": e.get("duration")}
+                            for e in pending]}
+
     @app.post("/api/playlists/{pid}/activate")
     def api_activate(pid: int, conn=Depends(get_conn), _=Depends(api_user)):
         row = conn.execute("SELECT id FROM playlists WHERE id = ?",
@@ -394,6 +423,38 @@ def register(app: FastAPI) -> None:
         if not ok:
             raise HTTPException(502, why)
         return {"ok": True, "detail": why}
+
+    @app.post("/api/engine/play_next")
+    def api_play_next(body: PlayNextIn, conn=Depends(get_conn),
+                      _=Depends(api_user)):
+        """Cue a track immediately after the current song (§6 Phase 1)."""
+        status = engine.status()
+        if status is None:
+            raise HTTPException(502, "engine unreachable")
+        cached = precache.ensure(body.path)
+        if cached is None:
+            raise HTTPException(400, "file could not be read/cached")
+        title = body.title or os.path.splitext(
+            os.path.basename(body.path))[0]
+        entry = {"id": uuid.uuid4().hex, "path": cached, "title": title,
+                 "source": "manual", "src": body.path}
+        mutation = {"op": "insert_next",
+                    "queue_version": status["queue_version"] + 1,
+                    "entries": [entry]}
+        code, resp = engine.queue(mutation)
+        if code == 409:
+            fresh = resp.get("status") or engine.status() or {}
+            mutation["queue_version"] = fresh.get("queue_version", 0) + 1
+            code, resp = engine.queue(mutation)
+        if code != 202:
+            raise HTTPException(502, f"engine said {code}: {resp}")
+        # tell the feeder so queue view + eviction know about it
+        st = feeder._load_state(conn)
+        st["fed"].insert(0, {"id": entry["id"], "path": cached,
+                             "duration": feeder._duration_of(conn, body.path),
+                             "title": title})
+        feeder._save_state(conn, st)
+        return {"ok": True, "title": title}
 
     # ------------------------------------------------- background loop
     stop = threading.Event()

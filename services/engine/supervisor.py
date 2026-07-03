@@ -97,7 +97,8 @@ class EngineSupervisor:
         self._status_lock = threading.Lock()
         self._status = {"now_playing": None, "position": None, "paused": False,
                         "emergency_mode": False, "mpv_alive": False,
-                        "queue_version": 0, "current_index": -1, "queue_len": 0}
+                        "queue_version": 0, "current_index": -1,
+                        "queue_len": 0, "pending_ids": []}
 
     # ------------------------------------------------------------- lifecycle
 
@@ -217,9 +218,10 @@ class EngineSupervisor:
             self._journal.append("track_start", path=path,
                                  title=e.get("title"), source=e.get("source"))
             # status must reflect the advance, not just mutations — P2's
-            # feeder computes pending work from these two fields
+            # feeder computes pending work from these fields
             self._set_status(current_index=self._state.current_index,
-                             queue_len=len(self._state.entries))
+                             queue_len=len(self._state.entries),
+                             pending_ids=self._pending_ids())
             self._ensure_next_appended()
         else:
             source = "emergency" if path != self._baked_in else "baked_in"
@@ -264,7 +266,8 @@ class EngineSupervisor:
             # drop it from ahead-of-us so mpv never sees it
             del self._state.entries[self._state.current_index + 1]
             self._store.save(self._state)
-            self._set_status(queue_len=len(self._state.entries))
+            self._set_status(queue_len=len(self._state.entries),
+                             pending_ids=self._pending_ids())
             return self._ensure_next_appended()
         if self._expected_next_path == nxt["path"]:
             return  # already primed
@@ -383,7 +386,8 @@ class EngineSupervisor:
             self._store.save(self._state)
             self._set_status(queue_version=self._state.queue_version,
                              current_index=self._state.current_index,
-                             queue_len=len(self._state.entries))
+                             queue_len=len(self._state.entries),
+                             pending_ids=self._pending_ids())
             self._expected_next_path = None  # re-evaluate prefetch
             if mutation.get("op") == "replace":
                 self._advance_or_fail("queue replaced")
@@ -498,6 +502,11 @@ class EngineSupervisor:
         self._kick(f"after mpv restart ({why})")
 
     # ----------------------------------------------------------------- misc
+
+    def _pending_ids(self) -> list:
+        """Ids of not-yet-played queue entries (P2 reconciles by identity)."""
+        return [e.get("id")
+                for e in self._state.entries[self._state.current_index + 1:]]
 
     def _try_get(self, prop: str):
         try:

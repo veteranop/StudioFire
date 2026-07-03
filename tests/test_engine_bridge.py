@@ -203,6 +203,17 @@ def main():
                           json={"op": "rm -rf"}).status_code == 400)
         r = client.post(f"/api/playlists/{pid}/activate")
         check("activate via web API", r.status_code == 200)
+        r = client.post("/api/engine/play_next",
+                        json={"path": tracks[3], "title": "Cued!"})
+        check("play-next cue accepted", r.status_code == 200)
+        r = client.get("/api/queue")
+        check("cued track heads the queue view",
+              r.json()["pending"] and
+              r.json()["pending"][0]["title"] == "Cued!")
+        check("play-next rejects unreadable file",
+              client.post("/api/engine/play_next",
+                          json={"path": tracks[3] + ".nope"})
+              .status_code == 400)
         check("activate 404 for unknown playlist",
               client.post("/api/playlists/9999/activate").status_code == 404)
     finally:
