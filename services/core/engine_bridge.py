@@ -383,8 +383,9 @@ def register(app: FastAPI) -> None:
     @app.post("/api/engine/op")
     def api_engine_op(body: dict, _=Depends(api_user)):
         op = body.get("op", "")
-        if op not in ("pause", "resume", "skip"):
-            raise HTTPException(400, "op must be pause/resume/skip")
+        if op not in ("pause", "resume", "skip", "emergency", "resume_normal"):
+            raise HTTPException(
+                400, "op must be pause/resume/skip/emergency/resume_normal")
         code, resp = engine.op(op)
         if code != 200:
             raise HTTPException(502, f"engine said {code}: {resp}")
@@ -409,6 +410,7 @@ def register(app: FastAPI) -> None:
                 "position": (st or {}).get("position"),
                 "paused": (st or {}).get("paused", False),
                 "emergency_mode": (st or {}).get("emergency_mode", False),
+                "forced_emergency": (st or {}).get("forced_emergency", False),
                 "pending": [{"title": e.get("title") or "(untitled)",
                              "duration": e.get("duration")}
                             for e in pending]}

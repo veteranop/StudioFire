@@ -8,6 +8,12 @@ plain English a non-technical operator can understand.
 ## [Unreleased]
 
 ### Added
+- EMERGENCY button on the On Air page: one press puts the emergency filler on
+  air immediately and keeps it there — the automation will NOT sneak back in —
+  until you press RESUME NORMAL. Survives restarts of the audio engine.
+- Backup & restore on the Playlists page (admin only): download one file with
+  every playlist in it; restore it later on this or another machine. Restoring
+  never overwrites — same-named playlists come back as "(restored)" copies.
 - Web control room (P2) first cut: sign in from any device on the studio network.
   - On Air page: what's playing now, what's coming up, big PAUSE AUTOMATION /
     RESUME and Skip buttons, and studio health tiles (music library reachable,

@@ -39,6 +39,7 @@ class QueueState:
     entries: list = field(default_factory=list)
     current_index: int = -1
     emergency_mode: bool = False
+    forced_emergency: bool = False  # operator hit the EMERGENCY button
     timestamp: float = 0.0
 
     def current_entry(self):
@@ -58,6 +59,7 @@ class QueueState:
             "entries": self.entries,
             "current_index": self.current_index,
             "emergency_mode": self.emergency_mode,
+            "forced_emergency": self.forced_emergency,
             "timestamp": self.timestamp,
         }
 
@@ -68,6 +70,7 @@ class QueueState:
             entries=list(d["entries"]),
             current_index=int(d["current_index"]),
             emergency_mode=bool(d["emergency_mode"]),
+            forced_emergency=bool(d.get("forced_emergency", False)),
             timestamp=float(d.get("timestamp", 0.0)),
         )
         for e in state.entries:  # structural validation, fail loud -> quarantine

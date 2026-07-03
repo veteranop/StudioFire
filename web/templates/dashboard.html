@@ -18,6 +18,10 @@
 <div id="emergency-banner" class="banner banner-yellow" hidden>
   EMERGENCY FILLER IS ON AIR — the normal playlist could not continue.
 </div>
+<div id="forced-banner" class="banner banner-red" hidden>
+  EMERGENCY BUTTON IS ACTIVE — filler stays on air until you press
+  RESUME NORMAL.
+</div>
 
 <div class="card">
   <h1>Now Playing</h1>
@@ -31,6 +35,8 @@
               onclick="engineOp(this.dataset.op)" data-op="pause">
         ⏸ PAUSE AUTOMATION</button>
       <button class="btn btn-big" onclick="engineOp('skip')">⏭ Skip song</button>
+      <button id="btn-emergency" class="btn btn-big btn-red"
+              onclick="emergencyBtn()">🚨 EMERGENCY</button>
     </div>
   </div>
 </div>
@@ -58,7 +64,19 @@ async function refresh() {
   try {
     const q = await (await fetch("/api/queue")).json();
     document.getElementById("offline-banner").hidden = q.engine_online;
-    document.getElementById("emergency-banner").hidden = !q.emergency_mode;
+    document.getElementById("emergency-banner").hidden =
+      !q.emergency_mode || q.forced_emergency;
+    document.getElementById("forced-banner").hidden = !q.forced_emergency;
+    const eb = document.getElementById("btn-emergency");
+    if (q.forced_emergency) {
+      eb.textContent = "✅ RESUME NORMAL";
+      eb.classList.remove("btn-red"); eb.classList.add("btn-green");
+      eb.dataset.forced = "1";
+    } else {
+      eb.textContent = "🚨 EMERGENCY";
+      eb.classList.remove("btn-green"); eb.classList.add("btn-red");
+      eb.dataset.forced = "";
+    }
     document.getElementById("np-title").textContent =
       q.now_playing ? basename(q.now_playing) : "Nothing playing";
     document.getElementById("np-pos").textContent =
@@ -98,6 +116,13 @@ async function refreshTiles() {
       div.appendChild(el);
     }
   } catch (e) { /* next poll */ }
+}
+async function emergencyBtn() {
+  const forced = document.getElementById("btn-emergency").dataset.forced;
+  if (forced) { engineOp("resume_normal"); return; }
+  if (confirm("Put EMERGENCY FILLER on air right now?\n\n" +
+              "Music stays on filler until you press RESUME NORMAL."))
+    engineOp("emergency");
 }
 async function engineOp(op) {
   await fetch("/api/engine/op", {

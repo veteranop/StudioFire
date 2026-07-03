@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import os
 
-from fastapi import Depends, FastAPI, Form, HTTPException, Request
+from fastapi import Depends, FastAPI, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -151,6 +151,69 @@ def create_app(cfg: dict) -> FastAPI:
             raise HTTPException(404)
         return render(request, "playlist_edit.html", role=sess["role"],
                       playlist=dict(row), items=pl.get_items(conn, pid))
+
+    @app.get("/api/backup")
+    def backup(conn=Depends(get_conn), _=Depends(api_admin)):
+        """One-click export: every playlist + its items, as a JSON file."""
+        import datetime
+        import json as _json
+        from fastapi.responses import Response
+        from . import playlists as pl
+        payload = {
+            "studiofire_backup": 1,
+            "created": datetime.datetime.now().isoformat(timespec="seconds"),
+            "station": cfg["station_name"],
+            "playlists": [
+                {"name": p["name"],
+                 "items": [{"item_type": i["item_type"], "path": i["path"],
+                            "title": i["title"]}
+                           for i in pl.get_items(conn, p["id"])]}
+                for p in pl.list_playlists(conn)],
+        }
+        stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M")
+        return Response(
+            _json.dumps(payload, indent=1),
+            media_type="application/json",
+            headers={"Content-Disposition":
+                     f'attachment; filename="studiofire-backup-{stamp}.json"'})
+
+    @app.post("/api/restore")
+    def restore(file: UploadFile, conn=Depends(get_conn),
+                _=Depends(api_admin)):
+        """Import a backup file. Existing playlists are kept; a restored
+        playlist whose name is taken gets a ' (restored)' suffix."""
+        import json as _json
+        import sqlite3
+        from . import playlists as pl
+        try:
+            payload = _json.loads(file.file.read())
+        except ValueError:
+            raise HTTPException(400, "not a valid backup file (bad JSON)")
+        if (not isinstance(payload, dict)
+                or payload.get("studiofire_backup") != 1
+                or not isinstance(payload.get("playlists"), list)):
+            raise HTTPException(400, "not a StudioFire backup file")
+        imported = 0
+        for p in payload["playlists"]:
+            name = str(p.get("name") or "").strip()
+            items = p.get("items") or []
+            if not name:
+                continue
+            for candidate in (name, name + " (restored)"):
+                try:
+                    pid = pl.create_playlist(conn, candidate)
+                    break
+                except sqlite3.IntegrityError:
+                    pid = None
+            if pid is None:
+                continue  # both names taken — skip, keep going
+            for i in items:
+                if (isinstance(i, dict) and i.get("path")
+                        and i.get("item_type") in pl.ITEM_TYPES):
+                    pl.add_item(conn, pid, i["item_type"], i["path"],
+                                i.get("title"))
+            imported += 1
+        return {"ok": True, "imported": imported}
 
     @app.get("/api/library/search")
     def library_search(q: str = "", conn=Depends(get_conn),

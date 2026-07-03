@@ -154,6 +154,34 @@ def main():
     check("API 404 unknown playlist",
           client.get("/api/playlists/9999").status_code == 404)
 
+    # ---- backup / restore
+    import json
+    r = client.get("/api/backup")
+    check("backup downloads as attachment",
+          r.status_code == 200
+          and "attachment" in r.headers.get("content-disposition", ""))
+    data = r.json()
+    check("backup contains playlist + items",
+          data["studiofire_backup"] == 1
+          and any(p["name"] == "Overnights" and len(p["items"]) == 1
+                  for p in data["playlists"]))
+    r = client.post("/api/restore", files={
+        "file": ("b.json", json.dumps(data).encode(), "application/json")})
+    check("restore imports (renamed on conflict)",
+          r.status_code == 200 and r.json()["imported"] == 1)
+    names = [p["name"] for p in client.get("/api/playlists").json()]
+    check("restored copy present", "Overnights (restored)" in names)
+    check("restored copy kept its items",
+          any(p["name"] == "Overnights (restored)"
+              and p["item_count"] == 1
+              for p in client.get("/api/playlists").json()))
+    r = client.post("/api/restore", files={
+        "file": ("x.json", b"not json at all", "application/json")})
+    check("restore rejects garbage", r.status_code == 400)
+    r = client.post("/api/restore", files={
+        "file": ("y.json", b"{\"other\": true}", "application/json")})
+    check("restore rejects non-backup JSON", r.status_code == 400)
+
     print(f"PLAYLISTS OK ({passed} checks)")
     return 0
 

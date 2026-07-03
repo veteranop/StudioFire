@@ -8,6 +8,8 @@ Scenarios (real mpv, tiny generated WAVs, null audio output):
   5. mpv killed mid-track -> watchdog restarts it, playback resumes
   6. supervisor restart while in emergency -> re-enters emergency (persisted)
   7. empty emergency folder -> baked-in tier 3 source plays
+  8. operator force-emergency: holds filler through new material, survives
+     a restart, exits only on resume_normal
 
 Run: python tests/test_supervisor_bench.py   (silent; takes ~30-60s)
 """
@@ -188,6 +190,64 @@ def main():
               "emergency_folder_empty" in journal_events(cfg3))
     finally:
         sup3.stop()
+
+    # ---- 8. operator force-emergency (big red button)
+    td4 = tempfile.mkdtemp(prefix="sf-bench4-")
+    emdir4 = os.path.join(td4, "emergency")
+    os.makedirs(emdir4)
+    make_wav(os.path.join(emdir4, "filler.wav"), seconds=1.5, freq=880)
+    t4 = []
+    for i in range(3):
+        p = os.path.join(td4, f"track{i}.wav")
+        make_wav(p, seconds=4.0, freq=300 + 100 * i)
+        t4.append(p)
+    cfg4 = build_config(td4, emdir4)
+    cfg4["pipe_name"] += "-t4"
+    sup4 = EngineSupervisor(cfg4)
+    sup4.start()
+    try:
+        sup4.submit_mutation({"op": "replace", "queue_version": 1,
+                              "entries": [entry(0, t4[0]), entry(1, t4[1])]})
+        check("t8: queue playing", wait_for(
+            lambda: sup4.status()["now_playing"] == t4[0], 8, "t8 track0"))
+        ok, _ = sup4.submit_command("emergency")
+        check("t8: emergency op accepted", ok)
+        check("t8: forced filler on air", wait_for(
+            lambda: sup4.status()["forced_emergency"]
+            and sup4.status()["emergency_mode"]
+            and (sup4.status()["now_playing"] or "").endswith("filler.wav"),
+            8, "forced filler"))
+        # new material must NOT pull us out while forced
+        sup4.submit_mutation({"op": "append", "queue_version": 2,
+                              "entries": [entry(2, t4[2])]})
+        time.sleep(4)  # long enough for filler to loop at least once
+        st = sup4.status()
+        check("t8: stays on filler despite new material",
+              st["forced_emergency"] and st["emergency_mode"]
+              and (st["now_playing"] or "").endswith("filler.wav"))
+        check("t8: journal has emergency_forced",
+              "emergency_forced" in journal_events(cfg4))
+    finally:
+        sup4.stop()
+    # forced flag survives an engine restart
+    sup5 = EngineSupervisor(cfg4)
+    sup5.start()
+    try:
+        check("t8: forced emergency survives restart", wait_for(
+            lambda: sup5.status()["forced_emergency"]
+            and sup5.status()["emergency_mode"]
+            and (sup5.status()["now_playing"] or "").endswith("filler.wav"),
+            10, "forced after restart"))
+        ok, _ = sup5.submit_command("resume_normal")
+        check("t8: resume_normal accepted", ok)
+        check("t8: back to the queue", wait_for(
+            lambda: not sup5.status()["emergency_mode"]
+            and not sup5.status()["forced_emergency"]
+            and sup5.status()["now_playing"] in t4, 10, "resume normal"))
+        check("t8: journal has emergency_force_cleared",
+              "emergency_force_cleared" in journal_events(cfg4))
+    finally:
+        sup5.stop()
 
     print(f"SUPERVISOR BENCH OK ({passed} checks)")
     return 0

@@ -40,6 +40,18 @@
     </tbody>
   </table>
 </div>
+{% if role == "admin" %}
+<div class="card">
+  <h2>Backup &amp; restore</h2>
+  <p class="muted">The backup file contains every playlist. Keep a copy
+    somewhere safe (USB stick, email it to yourself).</p>
+  <div class="row">
+    <a class="btn" href="/api/backup">⬇ Download backup</a>
+    <input type="file" id="restore-file" accept=".json,application/json">
+    <button class="btn" onclick="restoreBackup()">⬆ Restore from backup</button>
+  </div>
+</div>
+{% endif %}
 <script>
 async function createPl() {
   const name = document.getElementById("new-name").value.trim();
@@ -65,6 +77,19 @@ async function duplicatePl(id, name) {
     body: JSON.stringify({name: copy})});
   if (r.status === 201) location.reload();
   else alert((await r.json()).detail || "Could not duplicate");
+}
+async function restoreBackup() {
+  const inp = document.getElementById("restore-file");
+  if (!inp.files.length) { alert("Choose a backup file first."); return; }
+  if (!confirm("Restore playlists from this backup?\n\nExisting playlists " +
+               "are kept; restored ones with the same name get a " +
+               "'(restored)' suffix.")) return;
+  const fd = new FormData();
+  fd.append("file", inp.files[0]);
+  const r = await fetch("/api/restore", {method: "POST", body: fd});
+  const body = await r.json();
+  if (r.ok) { alert("Restored " + body.imported + " playlist(s)."); location.reload(); }
+  else alert(body.detail || "Restore failed");
 }
 async function deletePl(id, name) {
   if (!confirm('Delete playlist "' + name + '"? This cannot be undone.'))

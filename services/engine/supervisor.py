@@ -96,7 +96,8 @@ class EngineSupervisor:
 
         self._status_lock = threading.Lock()
         self._status = {"now_playing": None, "position": None, "paused": False,
-                        "emergency_mode": False, "mpv_alive": False,
+                        "emergency_mode": False, "forced_emergency": False,
+                        "mpv_alive": False,
                         "queue_version": 0, "current_index": -1,
                         "queue_len": 0, "pending_ids": []}
 
@@ -105,6 +106,13 @@ class EngineSupervisor:
     def start(self) -> None:
         self._journal.append("engine_start")
         self._state = self._store.load()
+        # publish the restored state so /status is truthful before playback
+        self._set_status(queue_version=self._state.queue_version,
+                         current_index=self._state.current_index,
+                         queue_len=len(self._state.entries),
+                         pending_ids=self._pending_ids(),
+                         emergency_mode=self._state.emergency_mode,
+                         forced_emergency=self._state.forced_emergency)
         self._validate_emergency_folder()
         self._start_mpv()
         self._owner = threading.Thread(target=self._owner_loop,
@@ -343,10 +351,13 @@ class EngineSupervisor:
 
     def _play_next_emergency(self) -> None:
         # first, has P2 given us something playable in the meantime?
-        nxt = self._state.next_entry()
-        if nxt is not None and playable(nxt["path"]):
-            self._client.command("loadfile", nxt["path"], "replace")
-            return  # start-file handler will exit emergency mode
+        # (unless the operator FORCED emergency — then stay on filler
+        # until an explicit resume_normal)
+        if not self._state.forced_emergency:
+            nxt = self._state.next_entry()
+            if nxt is not None and playable(nxt["path"]):
+                self._client.command("loadfile", nxt["path"], "replace")
+                return  # start-file handler will exit emergency mode
         candidates = [p for p in self._emergency_files if playable(p)]
         if candidates:
             p = candidates[self._emergency_idx % len(candidates)]
@@ -359,8 +370,9 @@ class EngineSupervisor:
 
     def _exit_emergency(self, reason: str) -> None:
         self._state.emergency_mode = False
+        self._state.forced_emergency = False
         self._store.save(self._state)
-        self._set_status(emergency_mode=False)
+        self._set_status(emergency_mode=False, forced_emergency=False)
         try:
             self._client.set_property("loop-file", "no")
         except (MpvDead, MpvError):
@@ -389,7 +401,9 @@ class EngineSupervisor:
                              queue_len=len(self._state.entries),
                              pending_ids=self._pending_ids())
             self._expected_next_path = None  # re-evaluate prefetch
-            if mutation.get("op") == "replace":
+            if self._state.forced_emergency:
+                pass  # queued for later; operator holds us on filler
+            elif mutation.get("op") == "replace":
                 self._advance_or_fail("queue replaced")
             elif self._state.emergency_mode:
                 self._play_next_emergency()  # new material may end emergency
@@ -414,6 +428,28 @@ class EngineSupervisor:
             self._client.set_property("pause", False)
             self._set_status(paused=False)
             self._journal.append("resume")
+            return True, "ok"
+        if op == "emergency":
+            # operator's big red button: hold on filler until resume_normal
+            if not self._state.forced_emergency:
+                self._state.forced_emergency = True
+                self._store.save(self._state)
+                self._set_status(forced_emergency=True)
+                self._journal.append("emergency_forced")
+                log.warning("operator FORCED emergency mode")
+                self._enter_emergency("operator forced")
+            return True, "ok"
+        if op == "resume_normal":
+            if self._state.forced_emergency:
+                self._state.forced_emergency = False
+                self._store.save(self._state)
+                self._set_status(forced_emergency=False)
+                self._journal.append("emergency_force_cleared")
+                log.warning("operator cleared forced emergency")
+                if self._state.emergency_mode:
+                    # picks up the queue if playable; start-file exits
+                    # emergency, otherwise filler keeps looping (correct)
+                    self._play_next_emergency()
             return True, "ok"
         return False, f"unknown op {op!r}"
 
