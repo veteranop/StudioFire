@@ -117,7 +117,13 @@ class MpvClient:
         args += self._extra_args
 
         creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-        self._proc = subprocess.Popen(args, creationflags=creationflags)
+        # DEVNULL all stdio: mpv can hang if it inherits console handles
+        # under CREATE_NO_WINDOW; IPC is the only channel we use anyway.
+        self._proc = subprocess.Popen(
+            args, creationflags=creationflags,
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
 
         deadline = time.monotonic() + connect_timeout
         while True:
