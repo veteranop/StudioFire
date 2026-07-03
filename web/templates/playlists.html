@@ -13,8 +13,14 @@
 <div class="card">
   <h1>Playlists</h1>
   <div class="row">
-    <input id="new-name" placeholder="New playlist name…">
+    <input id="new-name" placeholder="New playlist name…"
+           onkeydown="if (event.key === 'Enter') createPl()">
     <button class="btn btn-green" onclick="createPl()">+ Create</button>
+  </div>
+  <div class="row">
+    <input type="file" id="lst-file" accept=".lst">
+    <button class="btn" onclick="importLst()">⬆ Import ZaraRadio playlist
+      (.lst)</button>
   </div>
   <table class="table">
     <thead><tr><th>Name</th><th>Items</th><th></th></tr></thead>
@@ -54,13 +60,32 @@
 {% endif %}
 <script>
 async function createPl() {
-  const name = document.getElementById("new-name").value.trim();
-  if (!name) return;
+  const inp = document.getElementById("new-name");
+  const name = inp.value.trim();
+  if (!name) { inp.focus(); alert("Type a name for the playlist first."); return; }
   const r = await fetch("/api/playlists", {method: "POST",
     headers: {"Content-Type": "application/json"},
     body: JSON.stringify({name})});
   if (r.status === 201) location = "/playlists/" + (await r.json()).id;
   else alert((await r.json()).detail || "Could not create playlist");
+}
+async function importLst() {
+  const inp = document.getElementById("lst-file");
+  if (!inp.files.length) { alert("Choose a .lst file first."); return; }
+  const f = inp.files[0];
+  const name = prompt("Name for the imported playlist:",
+                      f.name.replace(/\.lst$/i, "").trim());
+  if (!name) return;
+  const fd = new FormData();
+  fd.append("file", f);
+  fd.append("name", name);
+  const r = await fetch("/api/playlists/import_lst",
+                        {method: "POST", body: fd});
+  const body = await r.json();
+  if (r.status === 201) {
+    alert("Imported " + body.imported + " tracks.");
+    location = "/playlists/" + body.id;
+  } else alert(body.detail || "Import failed");
 }
 async function activatePl(id, name) {
   if (!confirm('Put "' + name + '" on air now? This replaces the current queue.'))

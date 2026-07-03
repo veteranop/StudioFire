@@ -8,6 +8,12 @@ plain English a non-technical operator can understand.
 ## [Unreleased]
 
 ### Added
+- Import your old ZaraRadio playlists: upload a .lst file on the Playlists
+  page and it becomes a normal StudioFire playlist. Paths written on another
+  computer (like \\KDPI-Media\music) are automatically translated to where
+  the music lives on this machine.
+- Small fixes from first hands-on use: pressing Enter now creates the
+  playlist, and empty inputs tell you what to do instead of doing nothing.
 - EMERGENCY button on the On Air page: one press puts the emergency filler on
   air immediately and keeps it there — the automation will NOT sneak back in —
   until you press RESUME NORMAL. Survives restarts of the audio engine.

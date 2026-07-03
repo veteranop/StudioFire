@@ -35,6 +35,9 @@ def load_config(path: str | None = None) -> dict:
     return {
         "station_name": cfg.get("station_name", "StudioFire"),
         "nas_music_root": paths.get("nas_music_root", ""),
+        # {"\\\\SERVER\\share": "Z:"} — rewrites imported playlist paths so
+        # a .lst written on another machine resolves locally
+        "path_aliases": paths.get("path_aliases", {}),
         "precache_dir": paths.get("precache_dir",
                                   os.path.join(ROOT, "precache")),
         "emergency_dir": paths.get("emergency_dir",

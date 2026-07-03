@@ -125,7 +125,8 @@ def main():
            "precache_dir": os.path.join(td2, "precache"),
            "engine_url": "http://127.0.0.1:1",
            "journal_path": os.path.join(td2, "journal.jsonl"),
-           "feeder_enabled": False}
+           "feeder_enabled": False,
+           "path_aliases": {"\\\\STUDIO\\music": "Z:"}}
     client = TestClient(create_app(cfg), follow_redirects=False)
     check("API rejects anonymous",
           client.get("/api/playlists").status_code == 401)
@@ -154,6 +155,45 @@ def main():
     check("API 404 unknown playlist",
           client.get("/api/playlists/9999").status_code == 404)
 
+    # ---- ZaraRadio .lst import
+    lst = ("3\r\n"
+           "215457\t\\\\NAS\\music\\A\\song one.mp3\r\n"
+           "0\t.time\r\n"                       # Zara special token: skipped
+           "353906\t\\\\NAS\\music\\B\\caf\xe9 groove.mp3\r\n"
+           "not a track line\r\n"
+           "126249\t\\\\NAS\\music\\C\\notes.txt\r\n")  # non-audio: skipped
+    entries = pl.parse_lst(lst.encode("cp1252"))
+    check("lst: header/junk skipped, audio kept",
+          [e["title"] for e in entries] == ["song one", "caf\xe9 groove"])
+    entries2 = pl.parse_lst(lst.encode("utf-8"))
+    check("lst: utf-8 also accepted",
+          [e["title"] for e in entries2] == ["song one", "caf\xe9 groove"])
+    r = client.post("/api/playlists/import_lst",
+                    files={"file": ("show.lst", lst.encode("cp1252"))},
+                    data={"name": "Zara Import"})
+    check("lst API: imports as new playlist",
+          r.status_code == 201 and r.json()["imported"] == 2)
+    lid = r.json()["id"]
+    got = client.get(f"/api/playlists/{lid}").json()
+    check("lst API: items in order, type=file",
+          [i["title"] for i in got["items"]] == ["song one", "caf\xe9 groove"]
+          and all(i["item_type"] == "file" for i in got["items"]))
+    check("lst API: duplicate name -> 409",
+          client.post("/api/playlists/import_lst",
+                      files={"file": ("show.lst", lst.encode("cp1252"))},
+                      data={"name": "Zara Import"}).status_code == 409)
+    check("lst API: empty file -> 400",
+          client.post("/api/playlists/import_lst",
+                      files={"file": ("junk.lst", b"1014\r\nrubbish\r\n")},
+                      data={"name": "Junk"}).status_code == 400)
+    alias_lst = b"1\r\n1000\t\\\\STUDIO\\music\\G\\artist\\track.mp3\r\n"
+    r = client.post("/api/playlists/import_lst",
+                    files={"file": ("a.lst", alias_lst)},
+                    data={"name": "Alias Import"})
+    got = client.get(f"/api/playlists/{r.json()['id']}").json()
+    check("lst API: path alias rewrites to local drive",
+          got["items"][0]["path"] == "Z:\\G\\artist\\track.mp3")
+
     # ---- backup / restore
     import json
     r = client.get("/api/backup")
@@ -168,7 +208,7 @@ def main():
     r = client.post("/api/restore", files={
         "file": ("b.json", json.dumps(data).encode(), "application/json")})
     check("restore imports (renamed on conflict)",
-          r.status_code == 200 and r.json()["imported"] == 1)
+          r.status_code == 200 and r.json()["imported"] == 3)
     names = [p["name"] for p in client.get("/api/playlists").json()]
     check("restored copy present", "Overnights (restored)" in names)
     check("restored copy kept its items",

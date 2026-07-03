@@ -18,7 +18,7 @@ import os
 import sqlite3
 import time
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
 AUDIO_EXTS = {".mp3", ".m4a", ".mp4", ".aac", ".wav", ".flac", ".ogg"}
@@ -34,6 +34,54 @@ def create_playlist(conn: sqlite3.Connection, name: str) -> int:
             "INSERT INTO playlists (name, created_at, updated_at) "
             "VALUES (?, ?, ?)", (name, now, now))
     return cur.lastrowid
+
+
+def parse_lst(data: bytes) -> list[dict]:
+    """Parse a ZaraRadio .lst playlist.
+
+    Format: optional first line with the track count, then one track per
+    line as '<duration_ms>\\t<path>'. Zara also writes special non-file
+    tokens (time events etc.) — anything without an audio extension is
+    skipped. Zara is a Windows app, so non-UTF8 files are read as cp1252.
+    Returns [{"path": ..., "title": ...}].
+    """
+    try:
+        text = data.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        text = data.decode("cp1252", errors="replace")
+    out = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.isdigit():
+            continue  # blank line or the count header
+        if "\t" in line:
+            first, rest = line.split("\t", 1)
+            path = rest.strip() if first.strip().isdigit() else line
+        else:
+            path = line
+        if os.path.splitext(path)[1].lower() not in AUDIO_EXTS:
+            continue
+        out.append({"path": path,
+                    "title": os.path.splitext(os.path.basename(path))[0]})
+    return out
+
+
+def add_items_bulk(conn: sqlite3.Connection, pid: int,
+                   entries: list[dict]) -> int:
+    """Append many file items in one transaction (lst import)."""
+    with conn:
+        pos = conn.execute(
+            "SELECT COALESCE(MAX(position) + 1, 0) FROM playlist_items "
+            "WHERE playlist_id = ?", (pid,)).fetchone()[0]
+        conn.executemany(
+            "INSERT INTO playlist_items "
+            "  (playlist_id, position, item_type, path, title) "
+            "VALUES (?, ?, 'file', ?, ?)",
+            [(pid, pos + i, e["path"], e["title"])
+             for i, e in enumerate(entries)])
+        conn.execute("UPDATE playlists SET updated_at = ? WHERE id = ?",
+                     (time.time(), pid))
+    return len(entries)
 
 
 def rename_playlist(conn: sqlite3.Connection, pid: int, name: str) -> None:
@@ -218,6 +266,26 @@ def register(app: FastAPI) -> None:
         except sqlite3.IntegrityError:
             raise HTTPException(409, "a playlist with that name exists")
         return {"id": pid, "name": name}
+
+    @app.post("/api/playlists/import_lst", status_code=201)
+    def api_import_lst(file: UploadFile, name: str = Form(...),
+                       conn=Depends(get_conn), _=Depends(api_user)):
+        """Import a ZaraRadio .lst playlist as a new playlist."""
+        entries = parse_lst(file.file.read())
+        if not entries:
+            raise HTTPException(400, "no playable tracks found in that file")
+        aliases = app.state.cfg.get("path_aliases") or {}
+        for e in entries:
+            for prefix, repl in aliases.items():
+                if e["path"].lower().startswith(prefix.lower()):
+                    e["path"] = repl + e["path"][len(prefix):]
+                    break
+        try:
+            pid = create_playlist(conn, name.strip() or "Imported playlist")
+        except sqlite3.IntegrityError:
+            raise HTTPException(409, "a playlist with that name exists")
+        n = add_items_bulk(conn, pid, entries)
+        return {"id": pid, "name": name.strip(), "imported": n}
 
     @app.get("/api/playlists/{pid}")
     def api_get(pid: int, conn=Depends(get_conn), _=Depends(api_user)):

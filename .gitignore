@@ -29,3 +29,7 @@ desktop.ini
 
 # demo/test emergency content stays local
 assets/emergency/*.mp3
+
+# Local artifacts
+.playwright-mcp/
+*.lst

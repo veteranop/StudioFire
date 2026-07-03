@@ -46,7 +46,8 @@
         most recent file (syndicated shows). 🔁 <strong>Rotate through
         folder</strong> plays a different file each time (ads/spots).</p>
       <div class="row">
-        <input id="folder-path" placeholder="Folder path, e.g. \\NAS\shows\TheMorningShow">
+        <input id="folder-path" placeholder="Folder path, e.g. \\NAS\shows\TheMorningShow"
+               onkeydown="if (event.key === 'Enter') addFolder()">
         <select id="folder-type">
           <option value="folder-newest">📻 Newest from folder</option>
           <option value="folder-rotation">🔁 Rotate through folder</option>
@@ -95,10 +96,12 @@ async function addItem(item_type, path, title) {
     headers: {"Content-Type": "application/json"},
     body: JSON.stringify({item_type, path, title})});
   if (r.status === 201) location.reload();
+  else alert((await r.json()).detail || "Could not add item");
 }
 function addFolder() {
-  const path = document.getElementById("folder-path").value.trim();
-  if (!path) return;
+  const inp = document.getElementById("folder-path");
+  const path = inp.value.trim();
+  if (!path) { inp.focus(); alert("Type the folder path first."); return; }
   addItem(document.getElementById("folder-type").value, path,
           path.split(/[\\/]/).pop());
 }
