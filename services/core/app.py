@@ -133,4 +133,7 @@ def create_app(cfg: dict) -> FastAPI:
     def dashboard(request: Request, sess: dict = Depends(page_user)):
         return render(request, "dashboard.html", role=sess["role"])
 
+    from . import playlists
+    playlists.register(app)
+
     return app
