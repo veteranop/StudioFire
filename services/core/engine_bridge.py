@@ -25,6 +25,7 @@ import os
 import shutil
 import sqlite3
 import threading
+import time
 import uuid
 
 import httpx
@@ -34,6 +35,7 @@ from pydantic import BaseModel
 from . import db as coredb
 from . import playlists as pl
 from . import schedule as sched
+from . import spots as spotmod
 
 log = logging.getLogger("core.bridge")
 
@@ -308,6 +310,65 @@ class Feeder:
         self._save_state(conn, st)
         ok, why = self.tick(conn)
         return ok, f"show started ({why})"
+
+    # ---- spots: station IDs / ads / jingles / PSAs between songs (§ spots)
+
+    def insert_spot(self, conn, folder_key: str,
+                    label: str | None = None) -> tuple[bool, str]:
+        """Resolve one round-robin file from a settings folder and drop it in
+        right after the current song (airs at the next boundary)."""
+        status = self.engine.status()
+        if status is None:
+            return False, "engine unreachable"
+        folder = coredb.get_setting(conn, folder_key)
+        if not folder or not os.path.isdir(folder):
+            return False, f"the {label or folder_key} folder is not set up"
+        src = pl.resolve_item(conn, {"item_type": "folder-rotation",
+                                     "path": folder})
+        if src is None:
+            return False, "no playable files in that folder"
+        cached = self.precache.ensure(src)
+        if cached is None:
+            return False, "the spot file could not be cached"
+        title = f"{label or spotmod.default_label(folder_key)}: " + \
+            os.path.splitext(os.path.basename(src))[0]
+        entry = {"id": uuid.uuid4().hex, "path": cached, "title": title,
+                 "source": "spot", "src": src}
+        mutation = {"op": "insert_next",
+                    "queue_version": status["queue_version"] + 1,
+                    "entries": [entry]}
+        code, resp = self.engine.queue(mutation)
+        if code == 409:
+            fresh = resp.get("status") or self.engine.status() or {}
+            mutation["queue_version"] = fresh.get("queue_version", 0) + 1
+            code, resp = self.engine.queue(mutation)
+        if code != 202:
+            return False, f"engine said {code}: {resp}"
+        st = self._load_state(conn)
+        st["queue_version"] = mutation["queue_version"]
+        st["fed"].insert(0, {"id": entry["id"], "path": cached,
+                             "duration": self._duration_of(conn, src),
+                             "title": title, "prog": "spot"})
+        self._save_state(conn, st)
+        return True, title
+
+    def fire_due_spots(self, conn) -> None:
+        """Called every tick: fire any spot rule that is due (all trigger
+        types except manual). Spots play everywhere, shows included."""
+        status = self.engine.status()
+        if status is None or not status.get("now_playing") \
+                or status.get("emergency_mode"):
+            return  # nothing airing / in failover — don't inject
+        now = time.time()
+        for rule in spotmod.list_enabled(conn):
+            if rule["trigger"] == "manual" or not spotmod.due(rule, now):
+                continue
+            ok, why = self.insert_spot(conn, rule["folder_key"], rule["label"])
+            spotmod.mark_fired(conn, rule, now)  # advance schedule either way
+            if ok:
+                log.info("spot fired (%s): %s", rule["folder_key"], why)
+            else:
+                log.warning("spot rule %d skipped: %s", rule["id"], why)
 
     def tick(self, conn, op: str = "append") -> tuple[bool, str]:
         status = self.engine.status()
@@ -661,6 +722,85 @@ def register(app: FastAPI) -> None:
             raise HTTPException(409, why)
         return {"ok": True, "detail": why}
 
+    # ------------------------------------------ spots (IDs / ads / jingles)
+
+    @app.get("/api/spots/folders")
+    def api_spot_folders(conn=Depends(get_conn), _=Depends(api_user)):
+        """The configured station folders available for spot rules."""
+        out = []
+        for key, label, _hint in spotmod.FOLDER_CATEGORIES:
+            path = coredb.get_setting(conn, key) or ""
+            out.append({"key": key, "label": label, "path": path,
+                        "ready": bool(path) and os.path.isdir(path)})
+        return out
+
+    @app.get("/api/spots")
+    def api_spots(conn=Depends(get_conn), _=Depends(api_user)):
+        now = time.time()
+        rules = []
+        for r in spotmod.list_all(conn):
+            rules.append({
+                "id": r["id"], "folder_key": r["folder_key"],
+                "label": r["label"], "trigger": r["trigger"],
+                "enabled": bool(r["enabled"]),
+                "summary": spotmod.describe(r),
+                "next_epoch": spotmod.next_fire_epoch(r, now)})
+        # soonest first; manual/disabled (next_epoch None) sink to the bottom
+        rules.sort(key=lambda x: (x["next_epoch"] is None, x["next_epoch"] or 0))
+        return {"now_epoch": now, "rules": rules}
+
+    @app.post("/api/spots", status_code=201)
+    def api_spots_add(body: dict, conn=Depends(get_conn), _=Depends(api_user)):
+        key = body.get("folder_key")
+        if key not in {k for k, _, _ in spotmod.FOLDER_CATEGORIES}:
+            raise HTTPException(400, "unknown folder")
+        trig = body.get("trigger")
+        if trig not in spotmod.TRIGGERS:
+            raise HTTPException(400, "trigger must be interval/clock/once/manual")
+        interval_min = clock_minutes = start_at = None
+        if trig == "interval":
+            try:
+                interval_min = int(body.get("interval_min"))
+            except (TypeError, ValueError):
+                interval_min = 0
+            if interval_min < 1:
+                raise HTTPException(400, "minutes must be 1 or more")
+        elif trig == "clock":
+            clock_minutes = (body.get("clock_minutes") or "").strip()
+            if not spotmod._parse_minutes(clock_minutes):
+                raise HTTPException(400, "give minutes past the hour, e.g. 0 "
+                                         "or 20,40")
+        elif trig == "once":
+            start_at = (body.get("start_at") or "").strip()
+            if spotmod._parse_dt(start_at) is None:
+                raise HTTPException(400, "start time must be YYYY-MM-DDTHH:MM")
+        rid = spotmod.add(conn, key, trig, interval_min, clock_minutes, start_at)
+        return {"id": rid}
+
+    @app.delete("/api/spots/{rid}")
+    def api_spots_remove(rid: int, conn=Depends(get_conn), _=Depends(api_user)):
+        spotmod.remove(conn, rid)
+        return {"ok": True}
+
+    @app.post("/api/spots/{rid}/toggle")
+    def api_spots_toggle(rid: int, conn=Depends(get_conn), _=Depends(api_user)):
+        rule = spotmod.get(conn, rid)
+        if rule is None:
+            raise HTTPException(404, "spot rule not found")
+        spotmod.set_enabled(conn, rid, not rule["enabled"])
+        return {"ok": True, "enabled": not rule["enabled"]}
+
+    @app.post("/api/spots/{rid}/play_now")
+    def api_spots_play_now(rid: int, conn=Depends(get_conn), _=Depends(api_user)):
+        """Drop this rule's spot in after the current song, right now."""
+        rule = spotmod.get(conn, rid)
+        if rule is None:
+            raise HTTPException(404, "spot rule not found")
+        ok, why = feeder.insert_spot(conn, rule["folder_key"], rule["label"])
+        if not ok:
+            raise HTTPException(409, why)
+        return {"ok": True, "detail": why}
+
     @app.post("/api/engine/play_next")
     def api_play_next(body: PlayNextIn, conn=Depends(get_conn),
                       _=Depends(api_user)):
@@ -701,6 +841,7 @@ def register(app: FastAPI) -> None:
             conn = coredb.connect(cfg["db_path"])
             try:
                 feeder.tick(conn)
+                feeder.fire_due_spots(conn)
                 ingest_journal(conn, cfg["journal_path"])
             except Exception:
                 log.exception("feeder tick failed")  # next tick tries again

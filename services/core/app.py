@@ -15,7 +15,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import auth, db
+from . import auth, db, spots
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 WEB = os.path.join(ROOT, "web")
@@ -152,19 +152,9 @@ def create_app(cfg: dict) -> FastAPI:
         return render(request, "playlist_edit.html", role=sess["role"],
                       playlist=dict(row), items=pl.get_items(conn, pid))
 
-    # ---- settings: station folders (used by scheduling + playlist builder)
-    DIR_SETTINGS = [
-        ("dir_shows", "Shows (syndicated)",
-         "Downloaded/syndicated shows — 'newest from folder' items"),
-        ("dir_ads", "Advertisements / spots",
-         "Ad spots rotate evenly from here"),
-        ("dir_station_ids", "Station IDs",
-         "Legal IDs for the top of the hour"),
-        ("dir_jingles", "Jingles / sweepers",
-         "Short branding elements between songs"),
-        ("dir_psas", "PSAs / liners",
-         "Public service announcements and DJ liners"),
-    ]
+    # ---- settings: station folders (used by scheduling + spots + builder).
+    # Shared with the spot picker so the two never drift apart.
+    DIR_SETTINGS = spots.FOLDER_CATEGORIES
 
     @app.get("/settings", response_class=HTMLResponse)
     def settings_page(request: Request, sess: dict = Depends(page_user)):

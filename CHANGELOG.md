@@ -16,6 +16,13 @@ plain English a non-technical operator can understand.
   still kicks in on its own if the playlist ever can't continue.
 
 ### Added
+- Spots — Station IDs, ads, jingles, PSAs — now schedule themselves between
+  songs. A new "Upcoming spots" column on the left of the On Air page shows
+  what's coming with a live countdown. Add a rule pointing at one of your
+  Settings folders and choose when it fires: every N minutes, at set minutes
+  past the hour (e.g. a legal Station ID at :00), a one-off date/time, or a
+  manual "Play now" button. Files rotate evenly through the folder, and every
+  spot slots in at the end of the current song so music is never cut off.
 - Schedule and cue whole playlists from the On Air page. The right-hand
   "Playlists on air" panel shows what rotation is on now and an "Up next"
   list of shows coming up. Add a playlist with a start time and it takes over

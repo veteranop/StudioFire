@@ -101,6 +101,26 @@ CREATE TABLE playlist_schedule (
 );
 CREATE INDEX idx_sched_state ON playlist_schedule(state, start_at);
 """),
+    (3, """
+-- Spot rules: Station IDs / ads / jingles / PSAs pulled from a settings
+-- folder (folder_key) and inserted at the next song boundary. One folder +
+-- one trigger per rule; the file is chosen round-robin (rotation_state).
+--   trigger: 'interval' (interval_min), 'clock' (clock_minutes CSV of
+--            minute-of-hour), 'once' (start_at local), or 'manual' (button).
+CREATE TABLE spot_rules (
+    id            INTEGER PRIMARY KEY,
+    folder_key    TEXT NOT NULL,
+    label         TEXT,
+    trigger       TEXT NOT NULL
+        CHECK (trigger IN ('interval', 'clock', 'once', 'manual')),
+    interval_min  INTEGER,
+    clock_minutes TEXT,
+    start_at      TEXT,
+    enabled       INTEGER NOT NULL DEFAULT 1,
+    last_fired    REAL,
+    created_at    REAL NOT NULL
+);
+"""),
 ]
 
 SCHEMA_VERSION = MIGRATIONS[-1][0]

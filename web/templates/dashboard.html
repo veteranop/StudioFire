@@ -51,7 +51,39 @@
   </div>
 </div>
 
-<div class="grid2">
+<div class="grid3">
+  <div class="card">
+    <h2>Upcoming spots</h2>
+    <ol id="spot-list" class="schedlist"><li class="muted">loading…</li></ol>
+    <details class="advanced">
+      <summary>➕ Add a spot rule</summary>
+      <label>Folder
+        <select id="spot-folder" style="width:100%"></select>
+      </label>
+      <label>When
+        <select id="spot-trigger" style="width:100%"
+                onchange="spotTriggerChange()">
+          <option value="interval">Every N minutes</option>
+          <option value="clock">At minutes past the hour</option>
+          <option value="once">Once at a date/time</option>
+          <option value="manual">Manual (Play now button)</option>
+        </select>
+      </label>
+      <div id="spot-p-interval">
+        <label>Every
+          <input type="number" id="spot-interval" min="1" value="15"
+                 style="max-width:6rem"> minutes</label>
+      </div>
+      <div id="spot-p-clock" hidden>
+        <label>Minutes past the hour
+          <input type="text" id="spot-clock" placeholder="0   or   20,40"></label>
+      </div>
+      <div id="spot-p-once" hidden>
+        <label>Date &amp; time <input type="datetime-local" id="spot-once"></label>
+      </div>
+      <button class="btn btn-green" onclick="addSpot()">Add spot rule</button>
+    </details>
+  </div>
   <div class="card">
     <h2>Coming up</h2>
     <ol id="queue-list" class="queue"><li class="muted">loading…</li></ol>
@@ -171,6 +203,117 @@ async function startShow(id) {
 async function removeSchedule(id) {
   await fetch("/api/schedule/" + id, {method: "DELETE"});
   refreshSchedule();
+}
+
+// ---- spots: station IDs / ads / jingles / PSAs between songs
+let spotRules = [];
+let spotSkew = 0;   // server_epoch - client_epoch, to align countdowns
+async function loadSpotFolders() {
+  try {
+    const fs = await (await fetch("/api/spots/folders")).json();
+    const sel = document.getElementById("spot-folder");
+    sel.innerHTML = "";
+    for (const f of fs) {
+      const o = document.createElement("option");
+      o.value = f.key; o.disabled = !f.ready;
+      o.textContent = f.label + (f.ready ? "" : "  (set folder in Settings)");
+      sel.appendChild(o);
+    }
+  } catch (e) { /* retry on next page load */ }
+}
+function spotTriggerChange() {
+  const t = document.getElementById("spot-trigger").value;
+  document.getElementById("spot-p-interval").hidden = t !== "interval";
+  document.getElementById("spot-p-clock").hidden = t !== "clock";
+  document.getElementById("spot-p-once").hidden = t !== "once";
+}
+function fmtCountdown(next) {
+  if (next == null) return "manual";
+  const rem = Math.round(next - (Date.now() / 1000 + spotSkew));
+  if (rem <= 0) return "now";
+  if (rem < 3600) return "in " + fmt(rem);
+  return "in " + Math.floor(rem / 3600) + "h " +
+         Math.floor((rem % 3600) / 60) + "m";
+}
+async function refreshSpots() {
+  try {
+    const d = await (await fetch("/api/spots")).json();
+    spotSkew = d.now_epoch - (Date.now() / 1000);
+    spotRules = d.rules;
+    renderSpots();
+  } catch (e) { /* next poll */ }
+}
+function renderSpots() {
+  const ol = document.getElementById("spot-list");
+  ol.innerHTML = "";
+  if (!spotRules.length) {
+    ol.innerHTML = "<li class='muted'>No spots yet</li>";
+    return;
+  }
+  for (const r of spotRules) {
+    const li = document.createElement("li");
+    const info = document.createElement("div");
+    const when = (r.trigger === "manual")
+      ? "<span class='muted'>" + esc(r.summary) + "</span>"
+      : "<span class='spot-when' data-next='" + (r.next_epoch ?? "") + "'>" +
+        fmtCountdown(r.next_epoch) + "</span> <span class='muted'>· " +
+        esc(r.summary) + "</span>";
+    info.innerHTML = "<strong>" + esc(r.label) + "</strong>" +
+      (r.enabled ? "" : " <span class='muted'>(paused)</span>") +
+      "<br><small>" + when + "</small>";
+    const btns = document.createElement("div");
+    btns.className = "item-btns";
+    const play = document.createElement("button");
+    play.className = "btn btn-sm btn-green"; play.textContent = "Play now";
+    play.onclick = () => playSpot(r.id);
+    const en = document.createElement("button");
+    en.className = "btn btn-sm"; en.textContent = r.enabled ? "Pause" : "Resume";
+    en.onclick = () => toggleSpot(r.id);
+    const del = document.createElement("button");
+    del.className = "btn btn-sm"; del.textContent = "✕";
+    del.onclick = () => removeSpot(r.id);
+    btns.appendChild(play); btns.appendChild(en); btns.appendChild(del);
+    li.appendChild(info); li.appendChild(btns);
+    ol.appendChild(li);
+  }
+}
+function tickSpotCountdowns() {
+  for (const el of document.querySelectorAll(".spot-when")) {
+    const n = el.dataset.next;
+    el.textContent = fmtCountdown(n === "" ? null : Number(n));
+  }
+}
+async function addSpot() {
+  const key = document.getElementById("spot-folder").value;
+  if (!key) { alert("Pick a folder first (set it up on the Settings page)."); return; }
+  const trigger = document.getElementById("spot-trigger").value;
+  const body = {folder_key: key, trigger};
+  if (trigger === "interval")
+    body.interval_min = Number(document.getElementById("spot-interval").value);
+  if (trigger === "clock")
+    body.clock_minutes = document.getElementById("spot-clock").value;
+  if (trigger === "once")
+    body.start_at = document.getElementById("spot-once").value;
+  const r = await fetch("/api/spots", {method: "POST",
+    headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+  if (!r.ok) {
+    alert((await r.json().catch(() => ({}))).detail || "Could not add");
+    return;
+  }
+  refreshSpots();
+}
+async function playSpot(id) {
+  const r = await fetch("/api/spots/" + id + "/play_now", {method: "POST"});
+  if (!r.ok) alert((await r.json().catch(() => ({}))).detail || "Could not play");
+  refresh();
+}
+async function toggleSpot(id) {
+  await fetch("/api/spots/" + id + "/toggle", {method: "POST"});
+  refreshSpots();
+}
+async function removeSpot(id) {
+  await fetch("/api/spots/" + id, {method: "DELETE"});
+  refreshSpots();
 }
 
 // ---- interactive "Coming up" queue: click for actions, drag to reorder
@@ -373,8 +516,11 @@ document.getElementById("queue-list").addEventListener("dragover", (ev) => {
 });
 
 refresh(); refreshTiles(); loadPlaylistOptions(); refreshSchedule();
+loadSpotFolders(); refreshSpots();
 setInterval(refresh, 2000);
 setInterval(refreshTiles, 10000);
 setInterval(refreshSchedule, 5000);
+setInterval(refreshSpots, 5000);
+setInterval(tickSpotCountdowns, 1000);
 </script>
 {% endblock %}

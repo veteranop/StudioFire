@@ -344,6 +344,62 @@ def main():
         check("bad op still rejected",
               client.post("/api/engine/op",
                           json={"op": "nope"}).status_code == 400)
+
+        # ---- spots: a rule drops a station ID in after the current song
+        conn3 = db.connect(db_path)
+        spot_dir = os.path.join(td, "station_ids")
+        os.makedirs(spot_dir)
+        make_wav(os.path.join(spot_dir, "id1.wav"), 1.5, 700)
+        make_wav(os.path.join(spot_dir, "id2.wav"), 1.5, 950)
+        client.post(f"/api/playlists/{pid}/activate")  # healthy queue to resume
+        wait_for(lambda: engine.status().get("now_source") == "playlist", 10, "base")
+        check("spot folder not ready before it is set",
+              not any(f["ready"] for f in client.get("/api/spots/folders").json()
+                      if f["key"] == "dir_station_ids"))
+        client.post("/api/settings/dirs",
+                    json={"key": "dir_station_ids", "path": spot_dir})
+        check("spot folder shows ready once set",
+              any(f["key"] == "dir_station_ids" and f["ready"]
+                  for f in client.get("/api/spots/folders").json()))
+        rid = client.post("/api/spots",
+                          json={"folder_key": "dir_station_ids",
+                                "trigger": "manual"}).json()["id"]
+        check("spot rule listed",
+              any(r["id"] == rid
+                  for r in client.get("/api/spots").json()["rules"]))
+        check("spot play_now accepted",
+              client.post(f"/api/spots/{rid}/play_now").status_code == 200)
+        # spots are short (1.5s), so assert against the play journal (the
+        # reliable as-aired record) rather than catching a transient status
+        from services.engine.journal import read_events as _re
+
+        def spot_aired():
+            return any(e.get("event") == "track_start"
+                       and e.get("source") == "spot" for e in _re(journal_path))
+        check("station ID airs at the next boundary",
+              wait_for(spot_aired, 15, "spot air"))
+        check("rotation resumes after the spot", wait_for(
+              lambda: engine.status().get("now_source") == "playlist", 15,
+              "resume after spot"))
+        # the feeder auto-fires a due rule (a 'once' with a past time) and
+        # disables it afterward
+        oid = client.post("/api/spots",
+                          json={"folder_key": "dir_station_ids",
+                                "trigger": "once",
+                                "start_at": "2020-01-01T00:00"}).json()["id"]
+        feeder_app.fire_due_spots(conn3)
+        rules = {r["id"]: r for r in client.get("/api/spots").json()["rules"]}
+        check("feeder fired the due spot (now disabled)",
+              rules[oid]["enabled"] is False)
+        check("spot add rejects unknown folder key",
+              client.post("/api/spots",
+                          json={"folder_key": "dir_evil",
+                                "trigger": "manual"}).status_code == 400)
+        check("spot add rejects bad clock minutes",
+              client.post("/api/spots",
+                          json={"folder_key": "dir_ads", "trigger": "clock",
+                                "clock_minutes": "nope"}).status_code == 400)
+        conn3.close()
     finally:
         ctl.stop()
         sup.stop()
