@@ -4,10 +4,23 @@
 <nav class="nav-links">
   <a href="/" class="active">On Air</a>
   <a href="/playlists">Playlists</a>
+  {% if role == "admin" %}<a href="/settings">Settings</a>{% endif %}
 </nav>
-<form method="post" action="/logout" class="nav-right">
-  <button type="submit" class="btn">Sign out</button>
-</form>
+<div class="nav-right topbar-right">
+  <div class="onair" id="onair">OFF AIR</div>
+  <div class="health-wrap">
+    <button id="health-summary" class="health-pill h-green"
+            onclick="toggleHealth()" aria-expanded="false">
+      <span class="health-dot"></span>
+      <span>Studio health</span>
+      <span id="health-word" class="health-word">…</span>
+    </button>
+    <div id="tiles" class="tiles health-dropdown" hidden></div>
+  </div>
+  <form method="post" action="/logout">
+    <button type="submit" class="btn">Sign out</button>
+  </form>
+</div>
 {% endblock %}
 {% block content %}
 
@@ -41,15 +54,9 @@
   </div>
 </div>
 
-<div class="grid2">
-  <div class="card">
-    <h2>Coming up</h2>
-    <ol id="queue-list" class="queue"><li class="muted">loading…</li></ol>
-  </div>
-  <div class="card">
-    <h2>Studio health</h2>
-    <div id="tiles" class="tiles"></div>
-  </div>
+<div class="card">
+  <h2>Coming up</h2>
+  <ol id="queue-list" class="queue"><li class="muted">loading…</li></ol>
 </div>
 
 <script>
@@ -64,6 +71,10 @@ async function refresh() {
   try {
     const q = await (await fetch("/api/queue")).json();
     document.getElementById("offline-banner").hidden = q.engine_online;
+    const onAir = q.engine_online && !q.paused && !!q.now_playing;
+    const oa = document.getElementById("onair");
+    oa.classList.toggle("live", onAir);
+    oa.textContent = onAir ? "ON AIR" : "OFF AIR";
     document.getElementById("emergency-banner").hidden =
       !q.emergency_mode || q.forced_emergency;
     document.getElementById("forced-banner").hidden = !q.forced_emergency;
@@ -77,11 +88,22 @@ async function refresh() {
       eb.classList.remove("btn-green"); eb.classList.add("btn-red");
       eb.dataset.forced = "";
     }
+    let title = q.now_title;
+    if (!title && q.now_playing) {
+      title = (q.now_source === "emergency" || q.now_source === "baked_in")
+        ? "Emergency filler" : basename(q.now_playing);
+    }
     document.getElementById("np-title").textContent =
-      q.now_playing ? basename(q.now_playing) : "Nothing playing";
+      title || "Nothing playing";
+    let pos = "";
+    if (q.position != null) {
+      pos = fmt(q.position);
+      if (q.duration != null && q.duration >= q.position)
+        pos += " / " + fmt(q.duration) +
+               "   (" + fmt(q.duration - q.position) + " left)";
+    }
     document.getElementById("np-pos").textContent =
-      (q.position != null ? fmt(q.position) : "") +
-      (q.paused ? "  — PAUSED" : "");
+      pos + (q.paused ? "  — PAUSED" : "");
     const b = document.getElementById("btn-pause");
     if (q.paused) {
       b.textContent = "▶ RESUME"; b.dataset.op = "resume";
@@ -101,11 +123,33 @@ async function refresh() {
     }
   } catch (e) {
     document.getElementById("offline-banner").hidden = false;
+    const oa = document.getElementById("onair");
+    oa.classList.remove("live"); oa.textContent = "OFF AIR";
   }
 }
+let healthOpen = false;
+function toggleHealth() {
+  healthOpen = !healthOpen;
+  document.getElementById("tiles").hidden = !healthOpen;
+  document.getElementById("health-summary")
+    .setAttribute("aria-expanded", healthOpen);
+}
+document.addEventListener("click", (e) => {
+  if (healthOpen && !e.target.closest(".health-wrap")) toggleHealth();
+});
 async function refreshTiles() {
   try {
     const tiles = await (await fetch("/api/health/tiles")).json();
+    const rank = { green: 1, yellow: 2, red: 3 };
+    let worst = "green";
+    for (const t of tiles)
+      if ((rank[t.state] || 1) > rank[worst]) worst = t.state;
+    const sum = document.getElementById("health-summary");
+    sum.className = "health-pill h-" + worst;
+    document.getElementById("health-word").textContent =
+      worst === "red" ? "Problem"
+      : worst === "yellow" ? "Needs a look"
+      : "All good";
     const div = document.getElementById("tiles");
     div.innerHTML = "";
     for (const t of tiles) {

@@ -196,8 +196,11 @@ class Feeder:
             st["cursor"] = (st["cursor"] + 1) % len(items)
             src = pl.resolve_item(conn, item)
             if src is not None:
-                return src, item.get("title") or os.path.splitext(
-                    os.path.basename(src))[0]
+                # Folder items pick a different file each time, so title by
+                # the resolved file, not the item (which is the folder name).
+                if item["item_type"] == "file" and item.get("title"):
+                    return src, item["title"]
+                return src, os.path.splitext(os.path.basename(src))[0]
             log.warning("feeder: item unresolvable (skip+alert, §10.5): %r",
                         item["path"])
         return None
@@ -407,6 +410,9 @@ def register(app: FastAPI) -> None:
                 pending = pending[len(pending) - n:]
         return {"engine_online": st is not None,
                 "now_playing": (st or {}).get("now_playing"),
+                "now_title": (st or {}).get("now_title"),
+                "now_source": (st or {}).get("now_source"),
+                "duration": (st or {}).get("duration"),
                 "position": (st or {}).get("position"),
                 "paused": (st or {}).get("paused", False),
                 "emergency_mode": (st or {}).get("emergency_mode", False),

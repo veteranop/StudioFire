@@ -104,6 +104,38 @@ def main():
     check("index tile counts tracks", "2 tracks"
           in tiles["Library index"]["detail"])
 
+    # ---- settings: station folders + folder browser
+    check("settings page renders",
+          b"Station folders" in client.get("/settings").content)
+    dirs = client.get("/api/settings/dirs").json()
+    check("dir settings listed", len(dirs) >= 4
+          and all(d["path"] == "" for d in dirs))
+    ads = os.path.join(td, "ads")
+    os.makedirs(ads)
+    r = client.post("/api/settings/dirs",
+                    json={"key": "dir_ads", "path": ads})
+    check("set folder ok", r.status_code == 200)
+    got = {d["key"]: d for d in client.get("/api/settings/dirs").json()}
+    check("folder saved + exists flag",
+          got["dir_ads"]["path"] == ads and got["dir_ads"]["exists"])
+    check("bad folder -> 400", client.post(
+        "/api/settings/dirs",
+        json={"key": "dir_ads", "path": ads + "-nope"}).status_code == 400)
+    check("unknown key -> 400", client.post(
+        "/api/settings/dirs",
+        json={"key": "dir_evil", "path": ads}).status_code == 400)
+    r = client.post("/api/settings/dirs", json={"key": "dir_ads", "path": ""})
+    check("clear folder ok", r.status_code == 200)
+    roots = client.get("/api/fs/list").json()
+    check("fs list drives", any(d.upper().startswith("C:")
+                                for d in roots["dirs"]))
+    listing = client.get("/api/fs/list",
+                         params={"path": td}).json()
+    check("fs lists subfolders", "ads" in listing["dirs"]
+          and "nas" in listing["dirs"])
+    check("fs bad path -> 400", client.get(
+        "/api/fs/list", params={"path": td + "-nope"}).status_code == 400)
+
     # NAS yanked -> red tile
     os.rename(nas, nas + "-gone")
     tiles = {t["name"]: t for t in client.get("/api/health/tiles").json()}

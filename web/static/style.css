@@ -73,6 +73,7 @@ input {
 .queue { font-size: 1.1rem; padding-left: 1.5rem; }
 .queue li { margin: .4rem 0; }
 .tiles { display: flex; flex-direction: column; gap: .7rem; }
+.tiles[hidden] { display: none; }
 .tile {
   display: flex; justify-content: space-between; align-items: center;
   padding: .8rem 1rem; border-radius: 10px; border: 1px solid var(--border);
@@ -80,6 +81,51 @@ input {
 .tile-green  { border-left: 8px solid var(--green); }
 .tile-yellow { border-left: 8px solid var(--yellow); }
 .tile-red    { border-left: 8px solid var(--red); background: #2d1a1a; }
+
+/* ON AIR light in the top bar */
+.onair {
+  padding: .5rem 1.1rem; border-radius: 8px; font-weight: 800;
+  letter-spacing: 2px; font-size: 1.05rem; white-space: nowrap;
+  background: #2a1414; color: #6b4141; border: 2px solid #4a2222;
+}
+.onair.live {
+  background: var(--red); color: #fff; border-color: #ff8080;
+  animation: onair-blink 1.1s ease-in-out infinite;
+}
+@keyframes onair-blink {
+  0%, 100% { opacity: 1;  box-shadow: 0 0 18px rgba(229,85,85,.95); }
+  50%      { opacity: .5; box-shadow: 0 0 4px  rgba(229,85,85,.35); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .onair.live { animation: none; box-shadow: 0 0 16px rgba(229,85,85,.9); }
+}
+
+/* studio-health pill in the top bar */
+.topbar-right { display: flex; align-items: center; gap: 1rem; }
+.health-wrap { position: relative; }
+.health-pill {
+  display: flex; align-items: center; gap: .5rem;
+  padding: .45rem .85rem; border-radius: 999px; cursor: pointer;
+  background: #26303d; color: var(--text);
+  border: 1px solid var(--border); border-left: 6px solid var(--muted);
+  font-size: .95rem; font-weight: 700; white-space: nowrap;
+}
+.health-pill:hover { filter: brightness(1.12); }
+.health-pill .health-word { font-size: .85rem; font-weight: 600; color: var(--muted); }
+.health-dot { width: 12px; height: 12px; border-radius: 50%; background: var(--muted); }
+.h-green  { border-left-color: var(--green); }
+.h-green  .health-dot { background: var(--green); }
+.h-yellow { border-left-color: var(--yellow); }
+.h-yellow .health-dot { background: var(--yellow); }
+.h-red { border-left-color: var(--red); background: #4a1414; }
+.h-red .health-dot { background: var(--red); }
+.h-red .health-word { color: #ffb4b4; }
+.health-dropdown {
+  position: absolute; right: 0; top: calc(100% + 8px); z-index: 20;
+  width: 320px; padding: .8rem; border-radius: 12px;
+  background: var(--panel); border: 1px solid var(--border);
+  box-shadow: 0 8px 24px rgba(0,0,0,.45);
+}
 
 /* tables + lists */
 .row { display: flex; gap: .6rem; margin: 1rem 0; align-items: center; }
@@ -106,3 +152,17 @@ select {
 }
 .advanced { margin-top: 1.5rem; color: var(--muted); }
 .advanced summary { cursor: pointer; }
+
+/* settings page */
+.dirrow { display: flex; align-items: center; gap: 16px;
+          padding: 10px 0; border-bottom: 1px solid var(--border, #333); }
+.dirrow > div:first-child { flex: 0 0 220px; }
+.dirval { flex: 1; word-break: break-all; }
+.tile-red-text { color: #e05555; }
+.picker { max-height: 320px; overflow-y: auto; margin: 10px 0;
+          border: 1px solid var(--border, #333); border-radius: 6px;
+          padding: 6px; }
+.pickdir { display: block; width: 100%; text-align: left; padding: 8px 10px;
+           background: none; border: none; color: inherit; cursor: pointer;
+           font-size: 1rem; border-radius: 4px; }
+.pickdir:hover { background: rgba(255,255,255,0.08); }

@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+{% block title %}Settings — {{ station }}{% endblock %}
+{% block nav %}
+<nav class="nav-links">
+  <a href="/">On Air</a>
+  <a href="/playlists">Playlists</a>
+  <a href="/settings" class="active">Settings</a>
+</nav>
+<form method="post" action="/logout" class="nav-right">
+  <button type="submit" class="btn">Sign out</button>
+</form>
+{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>Station folders</h1>
+  <p class="muted">Point StudioFire at the folders where your station keeps
+    things. These are used by playlists and (soon) automatic scheduling.</p>
+  <div id="dir-rows"></div>
+</div>
+
+<div class="card" id="picker-card" hidden>
+  <h2 id="picker-title">Choose a folder</h2>
+  <div class="row">
+    <button class="btn btn-sm" onclick="pickerGo('')">&#128187; Drives</button>
+    <button class="btn btn-sm" id="picker-up" onclick="pickerUp()">&#11014; Up</button>
+    <span id="picker-path" class="muted"></span>
+  </div>
+  <div id="picker-list" class="picker"></div>
+  <div class="row">
+    <button class="btn btn-green" onclick="pickerUse()">&#10004; Use this folder</button>
+    <button class="btn" onclick="pickerClose()">Cancel</button>
+  </div>
+</div>
+
+<script>
+let dirs = [];
+let pickKey = null;
+let pickPath = "";
+let pickParent = null;
+
+async function loadDirs() {
+  dirs = await (await fetch("/api/settings/dirs")).json();
+  const box = document.getElementById("dir-rows");
+  box.innerHTML = "";
+  for (const d of dirs) {
+    const row = document.createElement("div");
+    row.className = "dirrow";
+    const warn = d.path && !d.exists
+      ? " <span class='tile-red-text'>&#9888; folder not found</span>" : "";
+    row.innerHTML =
+      "<div><strong>" + d.label + "</strong><br>" +
+      "<small class='muted'>" + d.hint + "</small></div>" +
+      "<div class='dirval'><code>" +
+      (d.path || "<span class='muted'>Not set</span>") + "</code>" + warn +
+      "</div>";
+    const btns = document.createElement("div");
+    const browse = document.createElement("button");
+    browse.className = "btn btn-sm";
+    browse.textContent = "Browse\u2026";
+    browse.onclick = () => pickerOpen(d.key, d.label, d.path);
+    btns.appendChild(browse);
+    if (d.path) {
+      const clear = document.createElement("button");
+      clear.className = "btn btn-sm";
+      clear.textContent = "Clear";
+      clear.onclick = async () => { await saveDir(d.key, ""); };
+      btns.appendChild(clear);
+    }
+    row.appendChild(btns);
+    box.appendChild(row);
+  }
+}
+
+async function saveDir(key, path) {
+  const r = await fetch("/api/settings/dirs", {method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({key, path})});
+  if (!r.ok) alert((await r.json()).detail || "Could not save");
+  loadDirs();
+}
+
+function pickerOpen(key, label, startPath) {
+  pickKey = key;
+  document.getElementById("picker-title").textContent =
+    "Choose a folder for: " + label;
+  document.getElementById("picker-card").hidden = false;
+  pickerGo(startPath || "");
+  document.getElementById("picker-card").scrollIntoView({behavior: "smooth"});
+}
+
+async function pickerGo(path) {
+  const r = await fetch("/api/fs/list?path=" + encodeURIComponent(path));
+  if (!r.ok) { alert("Cannot open that folder"); return; }
+  const d = await r.json();
+  pickPath = d.path;
+  pickParent = d.parent;
+  document.getElementById("picker-path").textContent =
+    d.path || "Choose a drive";
+  document.getElementById("picker-up").disabled = d.parent === null;
+  const list = document.getElementById("picker-list");
+  list.innerHTML = "";
+  if (!d.dirs.length)
+    list.innerHTML = "<div class='muted'>No folders inside</div>";
+  for (const name of d.dirs) {
+    const b = document.createElement("button");
+    b.className = "pickdir";
+    b.textContent = "\uD83D\uDCC1 " + name;
+    b.onclick = () => pickerGo(d.path ? d.path.replace(/[\\\/]$/, "") +
+                               "\\" + name : name);
+    list.appendChild(b);
+  }
+}
+
+function pickerUp() {
+  if (pickParent !== null) pickerGo(pickParent);
+}
+
+async function pickerUse() {
+  if (!pickPath) { alert("Open a drive or folder first."); return; }
+  await saveDir(pickKey, pickPath);
+  pickerClose();
+}
+
+function pickerClose() {
+  document.getElementById("picker-card").hidden = true;
+  pickKey = null;
+}
+
+loadDirs();
+</script>
+{% endblock %}

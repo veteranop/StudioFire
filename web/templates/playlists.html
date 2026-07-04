@@ -4,6 +4,7 @@
 <nav class="nav-links">
   <a href="/">On Air</a>
   <a href="/playlists" class="active">Playlists</a>
+  {% if role == "admin" %}<a href="/settings">Settings</a>{% endif %}
 </nav>
 <form method="post" action="/logout" class="nav-right">
   <button type="submit" class="btn">Sign out</button>

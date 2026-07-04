@@ -152,6 +152,67 @@ def create_app(cfg: dict) -> FastAPI:
         return render(request, "playlist_edit.html", role=sess["role"],
                       playlist=dict(row), items=pl.get_items(conn, pid))
 
+    # ---- settings: station folders (used by scheduling + playlist builder)
+    DIR_SETTINGS = [
+        ("dir_shows", "Shows (syndicated)",
+         "Downloaded/syndicated shows — 'newest from folder' items"),
+        ("dir_ads", "Advertisements / spots",
+         "Ad spots rotate evenly from here"),
+        ("dir_station_ids", "Station IDs",
+         "Legal IDs for the top of the hour"),
+        ("dir_jingles", "Jingles / sweepers",
+         "Short branding elements between songs"),
+        ("dir_psas", "PSAs / liners",
+         "Public service announcements and DJ liners"),
+    ]
+
+    @app.get("/settings", response_class=HTMLResponse)
+    def settings_page(request: Request, sess: dict = Depends(page_user)):
+        if sess["role"] != "admin":
+            return RedirectResponse("/", status_code=303)
+        return render(request, "settings.html", role=sess["role"])
+
+    @app.get("/api/settings/dirs")
+    def get_dirs(conn=Depends(get_conn), _=Depends(api_admin)):
+        return [{"key": k, "label": lbl, "hint": hint,
+                 "path": db.get_setting(conn, k) or "",
+                 "exists": os.path.isdir(db.get_setting(conn, k) or "")}
+                for k, lbl, hint in DIR_SETTINGS]
+
+    @app.post("/api/settings/dirs")
+    def set_dir(body: dict, conn=Depends(get_conn), _=Depends(api_admin)):
+        key, path = body.get("key"), (body.get("path") or "").strip()
+        if key not in {k for k, _, _ in DIR_SETTINGS}:
+            raise HTTPException(400, "unknown setting")
+        if path and not os.path.isdir(path):
+            raise HTTPException(400, "that folder does not exist")
+        db.set_setting(conn, key, path)
+        return {"ok": True}
+
+    @app.get("/api/fs/list")
+    def fs_list(path: str = "", _=Depends(api_admin)):
+        """Folder browser for the settings page (directories only)."""
+        if not path:
+            drives = [f"{c}:\\" for c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                      if os.path.exists(f"{c}:\\")]
+            return {"path": "", "parent": None, "dirs": drives}
+        norm = os.path.abspath(path)
+        if not os.path.isdir(norm):
+            raise HTTPException(400, "not a folder")
+        dirs = []
+        try:
+            for name in sorted(os.listdir(norm), key=str.lower):
+                if name.startswith(("$", ".")):
+                    continue
+                if os.path.isdir(os.path.join(norm, name)):
+                    dirs.append(name)
+        except OSError:
+            raise HTTPException(400, "cannot read that folder")
+        parent = os.path.dirname(norm.rstrip("\\/"))
+        return {"path": norm,
+                "parent": parent if parent != norm else "",
+                "dirs": dirs}
+
     @app.get("/api/backup")
     def backup(conn=Depends(get_conn), _=Depends(api_admin)):
         """One-click export: every playlist + its items, as a JSON file."""

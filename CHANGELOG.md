@@ -8,6 +8,16 @@ plain English a non-technical operator can understand.
 ## [Unreleased]
 
 ### Added
+- Big blinking ON AIR light at the top of the screen: glows red while audio is
+  actually going out, goes dim to OFF AIR when paused or nothing is playing.
+- Studio health moved to a small colored badge at the top (next to Sign out).
+  It's green when all is well, turns yellow or red if anything needs attention;
+  click it to drop down the details (music library, disk space, index).
+- Now Playing shows the real song name (not a cryptic cache filename) and the
+  time: how far in, how long the song is, and how much is left.
+- Settings page (admin only): point StudioFire at your station folders —
+  Shows, Advertisements, Station IDs, Jingles, PSAs — with a built-in folder
+  browser, no typing paths. These will drive automatic scheduling next.
 - Import your old ZaraRadio playlists: upload a .lst file on the Playlists
   page and it becomes a normal StudioFire playlist. Paths written on another
   computer (like \\KDPI-Media\music) are automatically translated to where
