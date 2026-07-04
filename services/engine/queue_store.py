@@ -141,6 +141,25 @@ def apply_mutation(state: QueueState, mutation: dict) -> tuple[bool, str]:
     elif op == "clear_pending":
         # drop everything after the currently playing item
         state.entries = state.entries[: state.current_index + 1]
+    elif op == "reorder":
+        # reorder ONLY the pending tail (never the played/current entries).
+        # order = desired id sequence; any pending id not named keeps its
+        # place at the end (defensive against a stale client view).
+        order = mutation.get("order", [])
+        cut = state.current_index + 1
+        head, tail = state.entries[:cut], state.entries[cut:]
+        by_id = {e.get("id"): e for e in tail}
+        named = [by_id[i] for i in order if i in by_id]
+        mentioned = set(order)
+        rest = [e for e in tail if e.get("id") not in mentioned]
+        state.entries = head + named + rest
+    elif op == "remove":
+        # remove pending entries by id; current/played entries are immune
+        ids = set(mutation.get("ids", []))
+        cut = state.current_index + 1
+        state.entries = (state.entries[:cut]
+                         + [e for e in state.entries[cut:]
+                            if e.get("id") not in ids])
     else:
         return False, f"unknown op {op!r}"
 

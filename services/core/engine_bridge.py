@@ -417,9 +417,65 @@ def register(app: FastAPI) -> None:
                 "paused": (st or {}).get("paused", False),
                 "emergency_mode": (st or {}).get("emergency_mode", False),
                 "forced_emergency": (st or {}).get("forced_emergency", False),
-                "pending": [{"title": e.get("title") or "(untitled)",
+                "pending": [{"id": e["id"],
+                             "title": e.get("title") or "(untitled)",
                              "duration": e.get("duration")}
                             for e in pending]}
+
+    def _queue_mutate(mutation_body: dict) -> dict:
+        """Submit a queue mutation with the version protocol + 409 re-sync.
+        `mutation_body` is everything but queue_version. Raises HTTPException."""
+        status = engine.status()
+        if status is None:
+            raise HTTPException(502, "engine unreachable")
+        mutation = {**mutation_body,
+                    "queue_version": status["queue_version"] + 1}
+        code, resp = engine.queue(mutation)
+        if code == 409:  # feeder bumped the version underneath us — retry
+            fresh = resp.get("status") or engine.status() or {}
+            mutation["queue_version"] = fresh.get("queue_version", 0) + 1
+            code, resp = engine.queue(mutation)
+        if code != 202:
+            raise HTTPException(502, f"engine said {code}: {resp}")
+        return resp
+
+    @app.post("/api/queue/reorder")
+    def api_queue_reorder(body: dict, _=Depends(api_user)):
+        """Drag-to-reorder: `order` is the desired pending id sequence."""
+        order = body.get("order")
+        if not isinstance(order, list):
+            raise HTTPException(400, "order must be a list of ids")
+        _queue_mutate({"op": "reorder", "order": order})
+        return {"ok": True}
+
+    @app.post("/api/queue/remove")
+    def api_queue_remove(body: dict, _=Depends(api_user)):
+        qid = body.get("id")
+        if not qid:
+            raise HTTPException(400, "id required")
+        _queue_mutate({"op": "remove", "ids": [qid]})
+        return {"ok": True}
+
+    @app.post("/api/queue/cue_next")
+    def api_queue_cue_next(body: dict, _=Depends(api_user)):
+        """Jump a pending track to the front of the queue (plays next)."""
+        qid = body.get("id")
+        if not qid:
+            raise HTTPException(400, "id required")
+        _queue_mutate({"op": "reorder", "order": [qid]})
+        return {"ok": True}
+
+    @app.post("/api/queue/play_now")
+    def api_queue_play_now(body: dict, _=Depends(api_user)):
+        """Cut to a pending track immediately: move it next, then skip."""
+        qid = body.get("id")
+        if not qid:
+            raise HTTPException(400, "id required")
+        _queue_mutate({"op": "reorder", "order": [qid]})
+        code, resp = engine.op("skip")
+        if code != 200:
+            raise HTTPException(502, f"engine said {code}: {resp}")
+        return {"ok": True}
 
     @app.post("/api/playlists/{pid}/activate")
     def api_activate(pid: int, conn=Depends(get_conn), _=Depends(api_user)):

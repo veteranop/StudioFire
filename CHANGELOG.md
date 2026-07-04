@@ -8,6 +8,9 @@ plain English a non-technical operator can understand.
 ## [Unreleased]
 
 ### Added
+- The "Coming up" list on the On Air page is now hands-on: click any song for
+  Play now / Cue next / Remove, or drag songs up and down to reorder the queue
+  on the fly. The song playing right now is never disturbed by these edits.
 - Big blinking ON AIR light at the top of the screen: glows red while audio is
   actually going out, goes dim to OFF AIR when paused or nothing is playing.
 - Studio health moved to a small colored badge at the top (next to Sign out).

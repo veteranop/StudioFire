@@ -214,6 +214,46 @@ def main():
               client.post("/api/engine/play_next",
                           json={"path": tracks[3] + ".nope"})
               .status_code == 400)
+
+        # ---- interactive queue edits: reorder / remove / cue / play-now.
+        # Pause first so a real 3s track boundary can't shuffle the queue
+        # out from under the deterministic assertions.
+        client.post("/api/engine/op", json={"op": "pause"})
+        wait_for(lambda: engine.status()["paused"], 5, "paused for edits")
+        pend = client.get("/api/queue").json()["pending"]
+        check("queue view exposes ids",
+              len(pend) >= 3 and all(e.get("id") for e in pend))
+        ids = [e["id"] for e in pend]
+
+        client.post("/api/queue/reorder", json={"order": list(reversed(ids))})
+        check("reorder rewrites pending order",
+              [e["id"] for e in client.get("/api/queue").json()["pending"]]
+              == list(reversed(ids)))
+
+        victim = list(reversed(ids))[-1]
+        client.post("/api/queue/remove", json={"id": victim})
+        after = [e["id"] for e in client.get("/api/queue").json()["pending"]]
+        check("remove drops just that item",
+              victim not in after and len(after) == len(ids) - 1)
+
+        client.post("/api/queue/cue_next", json={"id": after[-1]})
+        check("cue_next jumps item to the front",
+              client.get("/api/queue").json()["pending"][0]["id"] == after[-1])
+
+        check("reorder rejects non-list order",
+              client.post("/api/queue/reorder",
+                          json={"order": "nope"}).status_code == 400)
+        check("remove requires an id",
+              client.post("/api/queue/remove", json={}).status_code == 400)
+
+        target = client.get("/api/queue").json()["pending"][-1]
+        client.post("/api/engine/op", json={"op": "resume"})
+        r = client.post("/api/queue/play_now", json={"id": target["id"]})
+        check("play_now accepted", r.status_code == 200)
+        check("play_now cuts straight to the chosen track", wait_for(
+              lambda: engine.status().get("now_title") == target["title"],
+              10, "play_now cut"))
+
         check("activate 404 for unknown playlist",
               client.post("/api/playlists/9999/activate").status_code == 404)
     finally:

@@ -70,8 +70,24 @@ input {
 .controls .btn-big { width: auto; min-width: 220px; margin-top: 0; }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
 @media (max-width: 900px) { .grid2 { grid-template-columns: 1fr; } }
-.queue { font-size: 1.1rem; padding-left: 1.5rem; }
-.queue li { margin: .4rem 0; }
+.queue { font-size: 1.1rem; list-style: none; padding: 0; margin: 0; }
+.qitem {
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: 8px; margin: .4rem 0;
+}
+.qitem.dragging { opacity: .45; }
+.qrow {
+  display: flex; align-items: center; gap: .6rem;
+  padding: .55rem .7rem; cursor: pointer; user-select: none;
+}
+.qrow:hover { background: #202a36; border-radius: 8px; }
+.qgrip { color: var(--muted); cursor: grab; font-size: 1rem; }
+.qtitle { flex: 1; }
+.qacts {
+  display: flex; gap: .5rem; flex-wrap: wrap;
+  padding: 0 .7rem .6rem 2.1rem;
+}
+.qacts[hidden] { display: none; }
 .tiles { display: flex; flex-direction: column; gap: .7rem; }
 .tiles[hidden] { display: none; }
 .tile {

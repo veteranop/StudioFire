@@ -67,6 +67,99 @@ function fmt(sec) {
 }
 function basename(p) { return p ? p.split(/[\\/]/).pop() : "—"; }
 
+// ---- interactive "Coming up" queue: click for actions, drag to reorder
+let lastPending = [];
+let qSig = "";
+let qBusy = false;     // true while a menu is open or a drag is in progress
+let openId = null;     // which item's action row is showing
+let dragId = null;
+
+function renderQueue(pending) {
+  const ol = document.getElementById("queue-list");
+  ol.innerHTML = "";
+  if (!pending.length) {
+    ol.innerHTML = "<li class='muted'>Queue is empty</li>";
+    return;
+  }
+  for (const e of pending) {
+    const li = document.createElement("li");
+    li.className = "qitem" + (e.id === dragId ? " dragging" : "");
+    li.draggable = true;
+    li.dataset.id = e.id;
+
+    const row = document.createElement("div");
+    row.className = "qrow";
+    const grip = document.createElement("span");
+    grip.className = "qgrip"; grip.textContent = "☰";  // ☰
+    const title = document.createElement("span");
+    title.className = "qtitle";
+    title.textContent = e.title + (e.duration ? "  (" + fmt(e.duration) + ")" : "");
+    row.appendChild(grip); row.appendChild(title);
+    row.onclick = () => {
+      openId = (openId === e.id) ? null : e.id;
+      qBusy = openId !== null;
+      renderQueue(lastPending);
+    };
+    li.appendChild(row);
+
+    const acts = document.createElement("div");
+    acts.className = "qacts";
+    acts.hidden = e.id !== openId;
+    for (const [act, label, cls] of [
+        ["play", "▶ Play now", "btn-green"],
+        ["cue", "⏭ Cue next", ""],
+        ["remove", "✖ Remove", "btn-red"]]) {
+      const b = document.createElement("button");
+      b.className = "btn btn-sm " + cls;
+      b.textContent = label;
+      b.onclick = (ev) => { ev.stopPropagation(); queueAction(e.id, act); };
+      acts.appendChild(b);
+    }
+    li.appendChild(acts);
+
+    li.addEventListener("dragstart", () => {
+      dragId = e.id; qBusy = true; openId = null;
+      li.classList.add("dragging");
+    });
+    li.addEventListener("dragend", async () => {
+      li.classList.remove("dragging");
+      const order = [...ol.querySelectorAll(".qitem")].map(x => x.dataset.id);
+      dragId = null; qBusy = false; qSig = "";
+      await reorderQueue(order);
+    });
+    ol.appendChild(li);
+  }
+}
+
+function dragAfter(container, y) {
+  const items = [...container.querySelectorAll(".qitem:not(.dragging)")];
+  let best = { offset: -Infinity, el: null };
+  for (const child of items) {
+    const box = child.getBoundingClientRect();
+    const offset = y - box.top - box.height / 2;
+    if (offset < 0 && offset > best.offset) best = { offset, el: child };
+  }
+  return best.el;
+}
+
+async function queueAction(id, act) {
+  openId = null; qBusy = false; qSig = "";
+  const url = act === "play" ? "/api/queue/play_now"
+            : act === "cue"  ? "/api/queue/cue_next"
+            : "/api/queue/remove";
+  const r = await fetch(url, {method: "POST",
+    headers: {"Content-Type": "application/json"}, body: JSON.stringify({id})});
+  if (!r.ok) alert((await r.json().catch(() => ({}))).detail || "Could not do that");
+  refresh();
+}
+
+async function reorderQueue(order) {
+  await fetch("/api/queue/reorder", {method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({order})});
+  refresh();
+}
+
 async function refresh() {
   try {
     const q = await (await fetch("/api/queue")).json();
@@ -112,15 +205,10 @@ async function refresh() {
       b.textContent = "⏸ PAUSE AUTOMATION"; b.dataset.op = "pause";
       b.classList.remove("btn-green"); b.classList.add("btn-yellow");
     }
-    const ol = document.getElementById("queue-list");
-    ol.innerHTML = "";
-    if (!q.pending.length)
-      ol.innerHTML = "<li class='muted'>Queue is empty</li>";
-    for (const e of q.pending) {
-      const li = document.createElement("li");
-      li.textContent = e.title + (e.duration ? "  (" + fmt(e.duration) + ")" : "");
-      ol.appendChild(li);
-    }
+    lastPending = q.pending;
+    // don't redraw mid-drag or with a menu open (it'd cancel the interaction)
+    const sig = q.pending.map(e => e.id).join(",");
+    if (!qBusy && sig !== qSig) { renderQueue(q.pending); qSig = sig; }
   } catch (e) {
     document.getElementById("offline-banner").hidden = false;
     const oa = document.getElementById("onair");
@@ -174,6 +262,17 @@ async function engineOp(op) {
     body: JSON.stringify({op})});
   refresh();
 }
+// live drag-reorder: slot the dragged item where the cursor is
+document.getElementById("queue-list").addEventListener("dragover", (ev) => {
+  ev.preventDefault();
+  const ol = ev.currentTarget;
+  const dragging = ol.querySelector(".dragging");
+  if (!dragging) return;
+  const after = dragAfter(ol, ev.clientY);
+  if (after == null) ol.appendChild(dragging);
+  else ol.insertBefore(dragging, after);
+});
+
 refresh(); refreshTiles();
 setInterval(refresh, 2000);
 setInterval(refreshTiles, 10000);

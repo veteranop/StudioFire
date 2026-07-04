@@ -87,6 +87,34 @@ def main():
         check("unknown op rejected, version unchanged",
               not ok and s.queue_version == 13)
 
+        # ---- reorder / remove operate only on the pending tail ----
+        s = QueueState(queue_version=1, current_index=1, entries=[
+            {"id": "p0", "path": "0"}, {"id": "cur", "path": "1"},
+            {"id": "a", "path": "a"}, {"id": "b", "path": "b"},
+            {"id": "c", "path": "c"}])
+        ok, _ = apply_mutation(s, {"op": "reorder", "queue_version": 2,
+                                   "order": ["c", "a", "b"]})
+        check("reorder rewrites pending order",
+              ok and [e["id"] for e in s.entries]
+              == ["p0", "cur", "c", "a", "b"])
+        # played + current are immune even if named in order
+        ok, _ = apply_mutation(s, {"op": "reorder", "queue_version": 3,
+                                   "order": ["cur", "p0", "b"]})
+        check("reorder cannot touch played/current",
+              ok and s.entries[0]["id"] == "p0"
+              and s.entries[1]["id"] == "cur"
+              and [e["id"] for e in s.entries[2:]] == ["b", "c", "a"])
+        # unnamed pending ids keep their place at the end
+        ok, _ = apply_mutation(s, {"op": "reorder", "queue_version": 4,
+                                   "order": ["a"]})
+        check("reorder keeps unnamed pending",
+              ok and [e["id"] for e in s.entries[2:]] == ["a", "b", "c"])
+        ok, _ = apply_mutation(s, {"op": "remove", "queue_version": 5,
+                                   "ids": ["b", "cur", "p0"]})
+        check("remove drops pending only (current/played immune)",
+              ok and [e["id"] for e in s.entries]
+              == ["p0", "cur", "a", "c"])
+
     print(f"QUEUE STORE OK ({passed} checks)")
     return 0
 
