@@ -33,6 +33,7 @@ from pydantic import BaseModel
 
 from . import db as coredb
 from . import playlists as pl
+from . import schedule as sched
 
 log = logging.getLogger("core.bridge")
 
@@ -172,9 +173,12 @@ class Feeder:
             st = json.loads(raw) if raw else {}
         except ValueError:
             st = {}
-        st.setdefault("fed", [])            # [{id, path, duration}] pending
+        st.setdefault("fed", [])            # [{id, path, duration, prog}] pending
         st.setdefault("queue_version", 0)   # last version we know of
-        st.setdefault("cursor", 0)          # position in active playlist
+        st.setdefault("cursor", 0)          # position in the base rotation
+        # active "show" overlaying the base rotation, plays once then None:
+        #   {"sched_id": int, "playlist_id": int, "cursor": int}
+        st.setdefault("show", None)
         return st
 
     def _save_state(self, conn, st: dict) -> None:
@@ -187,13 +191,24 @@ class Feeder:
             return float(row["duration_sec"])
         return DEFAULT_TRACK_SEC
 
-    def _next_resolved(self, conn, items: list[dict], st: dict):
-        """Resolve the next playable playlist item; advances the cursor.
-        Wraps forever. Returns (src, title) or None if a full lap resolved
+    def _next_resolved(self, conn, items: list[dict], cur: dict,
+                       key: str = "cursor", wrap: bool = True):
+        """Resolve the next playable item; advances cur[key].
+        wrap=True: base rotation, loops forever. wrap=False: a show, returns
+        None once its items are exhausted. Also None if a full lap resolves
         nothing (all sources empty/missing)."""
-        for _ in range(len(items)):
-            item = items[st["cursor"] % len(items)]
-            st["cursor"] = (st["cursor"] + 1) % len(items)
+        n = len(items)
+        if n == 0:
+            return None
+        for _ in range(n):
+            c = cur[key]
+            if c >= n:
+                if not wrap:
+                    return None
+                c %= n
+                cur[key] = c
+            item = items[c]
+            cur[key] = c + 1
             src = pl.resolve_item(conn, item)
             if src is not None:
                 # Folder items pick a different file each time, so title by
@@ -210,20 +225,94 @@ class Feeder:
         coredb.set_setting(conn, "active_playlist_id", str(playlist_id))
         st = self._load_state(conn)
         st["fed"], st["cursor"] = [], 0
+        if st.get("show"):
+            self._finish_show(conn, st)  # picking a rotation cancels any show
         self._save_state(conn, st)
         ok, why = self.tick(conn, op="replace")
         return ok, why
+
+    # ---- scheduled/cued "shows" that interrupt the rotation (§6 Phase 3)
+
+    def _show_items(self, conn, st: dict) -> list[dict]:
+        show = st.get("show")
+        return pl.get_items(conn, show["playlist_id"]) if show else []
+
+    def _clear_pending(self, conn, st: dict, status: dict) -> dict:
+        """Drop P1's pending queue so a show starts at the next song boundary.
+        The currently-playing song is untouched. Returns fresh engine status."""
+        mutation = {"op": "clear_pending",
+                    "queue_version": status["queue_version"] + 1}
+        code, body = self.engine.queue(mutation)
+        if code == 409:
+            fresh = body.get("status") or self.engine.status() or {}
+            mutation["queue_version"] = fresh.get("queue_version", 0) + 1
+            code, body = self.engine.queue(mutation)
+        if code == 202:
+            st["queue_version"] = mutation["queue_version"]
+            st["fed"] = []  # everything pending was just dropped
+            return self.engine.status() or status
+        log.error("feeder: clear_pending failed (%s): %s", code, body)
+        return status
+
+    def _start_show(self, conn, st: dict, entry: dict, status: dict) -> dict:
+        sched.set_state(conn, entry["id"], "playing")
+        st["show"] = {"sched_id": entry["id"],
+                      "playlist_id": entry["playlist_id"], "cursor": 0}
+        log.warning("feeder: show '%s' on air (schedule %d) — interrupting "
+                    "rotation at next boundary",
+                    entry.get("playlist_name"), entry["id"])
+        return self._clear_pending(conn, st, status)
+
+    def _finish_show(self, conn, st: dict) -> None:
+        show = st.get("show")
+        if show:
+            sched.set_state(conn, show["sched_id"], "done")
+            log.warning("feeder: show %d finished — back to the rotation",
+                        show["sched_id"])
+        st["show"] = None
+
+    def _finalize_show_if_aired(self, conn, st: dict, status: dict) -> None:
+        """A show stays 'playing' (banner up) until its tracks are fully fed
+        AND have aired — only then hand back to the rotation. Keeps a short,
+        already-queued show from being marked done while still on air."""
+        show = st.get("show")
+        if not show or not show.get("done_feeding"):
+            return
+        pending_show = any(e.get("prog") == "show" for e in st["fed"])
+        if not pending_show and status.get("now_source") != "show":
+            self._finish_show(conn, st)
+
+    def _maybe_fire_scheduled(self, conn, st: dict, status: dict) -> dict:
+        if st.get("show"):
+            return status  # one show at a time (MVP)
+        entry = sched.due(conn)
+        if entry is None:
+            return status
+        return self._start_show(conn, st, entry, status)
+
+    def start_show_now(self, conn, sched_id: int) -> tuple[bool, str]:
+        """Manual cue: put a waiting show on air right now (next boundary)."""
+        status = self.engine.status()
+        if status is None:
+            return False, "engine unreachable"
+        entry = sched.get(conn, sched_id)
+        if entry is None or entry["state"] != "waiting":
+            return False, "that show is not waiting to start"
+        st = self._load_state(conn)
+        if st.get("show"):
+            return False, "a show is already on air"
+        if "pending_ids" in status:  # keep bookkeeping sane before we clear
+            live = set(status["pending_ids"])
+            st["fed"] = [e for e in st["fed"] if e["id"] in live]
+        self._start_show(conn, st, entry, status)
+        self._save_state(conn, st)
+        ok, why = self.tick(conn)
+        return ok, f"show started ({why})"
 
     def tick(self, conn, op: str = "append") -> tuple[bool, str]:
         status = self.engine.status()
         if status is None:
             return False, "engine unreachable"
-        pid_raw = coredb.get_setting(conn, "active_playlist_id")
-        if not pid_raw:
-            return True, "no active playlist"
-        items = pl.get_items(conn, int(pid_raw))
-        if not items:
-            return True, "active playlist is empty"
 
         st = self._load_state(conn)
         # reconcile: drop bookkeeping for entries P1 has already played,
@@ -238,31 +327,60 @@ class Feeder:
                                 - status["current_index"] - 1)
             if len(st["fed"]) > pending_count:
                 st["fed"] = st["fed"][len(st["fed"]) - pending_count:]
+
+        # a show that has fully aired hands back to the rotation
+        self._finalize_show_if_aired(conn, st, status)
+        # a scheduled show whose time has come interrupts the rotation
+        if op != "replace":
+            status = self._maybe_fire_scheduled(conn, st, status)
+
+        base_pid = coredb.get_setting(conn, "active_playlist_id")
+        base_items = pl.get_items(conn, int(base_pid)) if base_pid else []
+        if not base_items and not st.get("show"):
+            self._save_state(conn, st)
+            return True, "no active playlist"
+
         pending_sec = sum(e["duration"] for e in st["fed"])
         if st["fed"] and pending_sec >= self.target_sec:
             self._save_state(conn, st)
             self._evict(conn, st, status)
             return True, "topped up"
 
-        # build a batch up to the duration target
+        # build a batch up to the duration target: the active show plays once
+        # through first, then the base rotation carries on forever
+        show_items = self._show_items(conn, st)
         batch = []
         cache_fails = 0
         while pending_sec < self.target_sec and len(batch) < MAX_FEED_BATCH:
-            resolved = self._next_resolved(conn, items, st)
-            if resolved is None:
-                break
+            show = st.get("show")
+            if show and not show.get("done_feeding"):
+                resolved = self._next_resolved(conn, show_items, show,
+                                               wrap=False)
+                if resolved is None:      # fully fed -> fill the rest with base
+                    show["done_feeding"] = True
+                    show_items = []
+                    continue
+                prog, source = "show", "show"
+            else:
+                if not base_items:
+                    break
+                resolved = self._next_resolved(conn, base_items, st, wrap=True)
+                if resolved is None:
+                    break
+                prog, source = "base", "playlist"
             src, title = resolved
             cached = self.precache.ensure(src)
             if cached is None:
                 cache_fails += 1
-                if cache_fails >= len(items):
+                if cache_fails >= max(1, len(base_items) + len(show_items)):
                     break  # NAS is gone — stop burning the tick, retry later
                 continue  # source vanished mid-feed; try the next item
             duration = self._duration_of(conn, src)
-            batch.append({"id": uuid.uuid4().hex, "path": cached,
-                          "title": title, "source": "playlist", "src": src})
-            st["fed"].append({"id": batch[-1]["id"], "path": cached,
-                              "duration": duration, "title": title})
+            eid = uuid.uuid4().hex
+            batch.append({"id": eid, "path": cached, "title": title,
+                          "source": source, "src": src})
+            st["fed"].append({"id": eid, "path": cached, "duration": duration,
+                              "title": title, "prog": prog})
             pending_sec += duration
         if not batch and op != "replace":
             self._save_state(conn, st)
@@ -486,6 +604,58 @@ def register(app: FastAPI) -> None:
         ok, why = feeder.activate(conn, pid)
         if not ok:
             raise HTTPException(502, why)
+        return {"ok": True, "detail": why}
+
+    # ---------------------------------------- playlist schedule (shows)
+
+    @app.get("/api/schedule")
+    def api_schedule(conn=Depends(get_conn), _=Depends(api_user)):
+        """What's the base rotation, is a show on air, and what's queued."""
+        base = None
+        base_pid = coredb.get_setting(conn, "active_playlist_id")
+        if base_pid:
+            row = conn.execute("SELECT id, name FROM playlists WHERE id = ?",
+                               (int(base_pid),)).fetchone()
+            if row:
+                base = {"id": row["id"], "name": row["name"]}
+        cur = sched.playing(conn)
+        return {
+            "base": base,
+            "current_show": ({"sched_id": cur["id"],
+                              "name": cur["playlist_name"]} if cur else None),
+            "now": sched.now_local(),
+            "upcoming": [{"id": e["id"], "playlist_id": e["playlist_id"],
+                          "name": e["playlist_name"], "start_at": e["start_at"]}
+                         for e in sched.list_waiting(conn)],
+        }
+
+    @app.post("/api/schedule", status_code=201)
+    def api_schedule_add(body: dict, conn=Depends(get_conn),
+                         _=Depends(api_user)):
+        try:
+            pid = int(body.get("playlist_id"))
+        except (TypeError, ValueError):
+            raise HTTPException(400, "playlist_id required")
+        if conn.execute("SELECT 1 FROM playlists WHERE id = ?",
+                        (pid,)).fetchone() is None:
+            raise HTTPException(404, "playlist not found")
+        start_at = (body.get("start_at") or "").strip() or None
+        if start_at and len(start_at) < 16:  # 'YYYY-MM-DDTHH:MM'
+            raise HTTPException(400, "start time must be YYYY-MM-DDTHH:MM")
+        return {"id": sched.add(conn, pid, start_at)}
+
+    @app.delete("/api/schedule/{sid}")
+    def api_schedule_remove(sid: int, conn=Depends(get_conn),
+                            _=Depends(api_user)):
+        sched.remove(conn, sid)
+        return {"ok": True}
+
+    @app.post("/api/schedule/{sid}/start_now")
+    def api_schedule_start_now(sid: int, conn=Depends(get_conn),
+                               _=Depends(api_user)):
+        ok, why = feeder.start_show_now(conn, sid)
+        if not ok:
+            raise HTTPException(409, why)
         return {"ok": True, "detail": why}
 
     @app.post("/api/engine/play_next")

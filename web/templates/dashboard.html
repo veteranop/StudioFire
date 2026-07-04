@@ -54,9 +54,27 @@
   </div>
 </div>
 
-<div class="card">
-  <h2>Coming up</h2>
-  <ol id="queue-list" class="queue"><li class="muted">loading…</li></ol>
+<div class="grid2">
+  <div class="card">
+    <h2>Coming up</h2>
+    <ol id="queue-list" class="queue"><li class="muted">loading…</li></ol>
+  </div>
+  <div class="card">
+    <h2>Playlists on air</h2>
+    <div id="sched-now" class="muted">loading…</div>
+    <h3 class="sched-h">Up next</h3>
+    <ol id="sched-list" class="schedlist"><li class="muted">—</li></ol>
+    <details class="advanced">
+      <summary>➕ Schedule or cue a playlist</summary>
+      <div class="row">
+        <select id="sched-playlist" style="flex:1"></select>
+      </div>
+      <label>Start time <span class="muted">(leave blank to cue for manual start)</span>
+        <input type="datetime-local" id="sched-time">
+      </label>
+      <button class="btn btn-green" onclick="addSchedule()">Add to schedule</button>
+    </details>
+  </div>
 </div>
 
 <script>
@@ -66,6 +84,97 @@ function fmt(sec) {
   return Math.floor(sec / 60) + ":" + String(sec % 60).padStart(2, "0");
 }
 function basename(p) { return p ? p.split(/[\\/]/).pop() : "—"; }
+function esc(s) {
+  return (s || "").replace(/[&<>"]/g, c =>
+    ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+}
+function fmtWhen(s) {
+  if (!s) return "Manual — press Start now";
+  const [d, t] = s.split("T");
+  return d + " at " + t;
+}
+
+// ---- playlist schedule: base rotation + upcoming shows
+async function loadPlaylistOptions() {
+  try {
+    const pls = await (await fetch("/api/playlists")).json();
+    const sel = document.getElementById("sched-playlist");
+    sel.innerHTML = "";
+    for (const p of pls) {
+      const o = document.createElement("option");
+      o.value = p.id; o.textContent = p.name;
+      sel.appendChild(o);
+    }
+  } catch (e) { /* retry next time the page loads */ }
+}
+async function refreshSchedule() {
+  try {
+    const sc = await (await fetch("/api/schedule")).json();
+    const now = document.getElementById("sched-now");
+    if (sc.current_show)
+      now.innerHTML = "<span class='onair-txt'>SHOW ON AIR:</span> " +
+        esc(sc.current_show.name) + (sc.base
+          ? " <span class='muted'>→ then back to " + esc(sc.base.name) +
+            "</span>" : "");
+    else if (sc.base)
+      now.innerHTML = "<strong>On now:</strong> " + esc(sc.base.name) +
+        " <span class='muted'>(regular rotation)</span>";
+    else
+      now.innerHTML = "<span class='muted'>No rotation on air — put a " +
+        "playlist on air from the Playlists page.</span>";
+    const ol = document.getElementById("sched-list");
+    ol.innerHTML = "";
+    if (!sc.upcoming.length) {
+      ol.innerHTML = "<li class='muted'>Nothing scheduled</li>";
+      return;
+    }
+    for (const e of sc.upcoming) {
+      const li = document.createElement("li");
+      const info = document.createElement("div");
+      info.innerHTML = "<strong>" + esc(e.name) + "</strong><br>" +
+        "<small class='muted'>" + esc(fmtWhen(e.start_at)) + "</small>";
+      const btns = document.createElement("div");
+      btns.className = "item-btns";
+      const start = document.createElement("button");
+      start.className = "btn btn-sm btn-green";
+      start.textContent = "Start now";
+      start.onclick = () => startShow(e.id);
+      const del = document.createElement("button");
+      del.className = "btn btn-sm";
+      del.textContent = "Remove";
+      del.onclick = () => removeSchedule(e.id);
+      btns.appendChild(start); btns.appendChild(del);
+      li.appendChild(info); li.appendChild(btns);
+      ol.appendChild(li);
+    }
+  } catch (e) { /* next poll */ }
+}
+async function addSchedule() {
+  const pid = document.getElementById("sched-playlist").value;
+  if (!pid) { alert("Pick a playlist first."); return; }
+  const t = document.getElementById("sched-time").value;  // '' or ISO local
+  const r = await fetch("/api/schedule", {method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({playlist_id: Number(pid), start_at: t})});
+  if (!r.ok) {
+    alert((await r.json().catch(() => ({}))).detail || "Could not add");
+    return;
+  }
+  document.getElementById("sched-time").value = "";
+  refreshSchedule();
+}
+async function startShow(id) {
+  if (!confirm("Put this playlist on air now?\n\nIt starts at the end of the " +
+               "current song, plays once through, then returns to the " +
+               "regular rotation.")) return;
+  const r = await fetch("/api/schedule/" + id + "/start_now", {method: "POST"});
+  if (!r.ok) alert((await r.json().catch(() => ({}))).detail || "Could not start");
+  refreshSchedule();
+}
+async function removeSchedule(id) {
+  await fetch("/api/schedule/" + id, {method: "DELETE"});
+  refreshSchedule();
+}
 
 // ---- interactive "Coming up" queue: click for actions, drag to reorder
 let lastPending = [];
@@ -273,8 +382,9 @@ document.getElementById("queue-list").addEventListener("dragover", (ev) => {
   else ol.insertBefore(dragging, after);
 });
 
-refresh(); refreshTiles();
+refresh(); refreshTiles(); loadPlaylistOptions(); refreshSchedule();
 setInterval(refresh, 2000);
 setInterval(refreshTiles, 10000);
+setInterval(refreshSchedule, 5000);
 </script>
 {% endblock %}

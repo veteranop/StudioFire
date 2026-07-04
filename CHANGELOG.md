@@ -8,6 +8,12 @@ plain English a non-technical operator can understand.
 ## [Unreleased]
 
 ### Added
+- Schedule and cue whole playlists from the On Air page. The right-hand
+  "Playlists on air" panel shows what rotation is on now and an "Up next"
+  list of shows coming up. Add a playlist with a start time and it takes over
+  automatically at that time (at the next song boundary); leave the time blank
+  and press "Start now" when you want it. A show plays once through, then hands
+  back to your regular rotation — with a red "SHOW ON AIR" banner while it runs.
 - The "Coming up" list on the On Air page is now hands-on: click any song for
   Play now / Cue next / Remove, or drag songs up and down to reorder the queue
   on the fly. The song playing right now is never disturbed by these edits.

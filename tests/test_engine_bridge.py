@@ -20,7 +20,7 @@ sys.path.insert(0, ROOT)
 
 from fastapi.testclient import TestClient                     # noqa: E402
 
-from services.core import db, playlists as pl                 # noqa: E402
+from services.core import db, playlists as pl, schedule as sched  # noqa: E402
 from services.core.app import create_app                      # noqa: E402
 from services.core.engine_bridge import (                     # noqa: E402
     EngineClient, Feeder, Precache, ingest_journal)
@@ -181,7 +181,8 @@ def main():
                   "journal_path": journal_path,
                   "precache_target_minutes": 0.15,
                   "feeder_enabled": False}
-        client = TestClient(create_app(webcfg), follow_redirects=False)
+        app = create_app(webcfg)
+        client = TestClient(app, follow_redirects=False)
         client.post("/login", data={"username": "nobody", "password": "x"})
         check("engine API needs auth",
               client.get("/api/engine/status").status_code == 401)
@@ -256,6 +257,71 @@ def main():
 
         check("activate 404 for unknown playlist",
               client.post("/api/playlists/9999/activate").status_code == 404)
+
+        # ---- scheduled/cued shows interrupt the rotation, then hand back
+        feeder_app = app.state.feeder
+        conn2 = db.connect(db_path)
+        show_pid = pl.create_playlist(conn, "Syndicated Show")
+        pl.add_item(conn, show_pid, "file", tracks[2], "SHOW SEGMENT")
+        client.post(f"/api/playlists/{pid}/activate")  # known base rotation
+        check("base rotation on air", wait_for(
+              lambda: engine.status().get("now_source") == "playlist", 10,
+              "base on air"))
+
+        # schedule API: add a manual cue, list it, reject junk, remove
+        sid = client.post("/api/schedule",
+                          json={"playlist_id": show_pid}).json()["id"]
+        sc = client.get("/api/schedule").json()
+        check("schedule lists base + the cued show",
+              sc["base"]["id"] == pid
+              and any(u["id"] == sid for u in sc["upcoming"]))
+        check("schedule rejects unknown playlist",
+              client.post("/api/schedule",
+                          json={"playlist_id": 99999}).status_code == 404)
+        gone = client.post("/api/schedule",
+                           json={"playlist_id": show_pid}).json()["id"]
+        client.delete(f"/api/schedule/{gone}")
+        check("schedule remove drops the entry",
+              not any(u["id"] == gone
+                      for u in client.get("/api/schedule").json()["upcoming"]))
+
+        # manual "Start now": the show takes over at the boundary
+        check("start_now accepted",
+              client.post(f"/api/schedule/{sid}/start_now").status_code == 200)
+        check("cued show goes on air", wait_for(
+              lambda: engine.status().get("now_title") == "SHOW SEGMENT", 15,
+              "show on air"))
+        check("panel shows the current show",
+              (client.get("/api/schedule").json()["current_show"] or {})
+              .get("name") == "Syndicated Show")
+        check("a show is not double-started",
+              client.post(f"/api/schedule/{sid}/start_now").status_code == 409)
+
+        # after the one segment airs, hand back to the rotation (drive ticks
+        # since the background feeder loop is disabled in this test)
+        back = False
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline:
+            feeder_app.tick(conn2)
+            s = engine.status()
+            if (s.get("now_source") == "playlist"
+                    and s.get("now_title") != "SHOW SEGMENT"):
+                back = True
+                break
+            time.sleep(0.3)
+        check("returns to the rotation after the show", back)
+        check("current show clears once it has aired",
+              client.get("/api/schedule").json()["current_show"] is None)
+
+        # scheduled (by clock): a past start time fires on the next tick
+        sid2 = client.post("/api/schedule",
+                           json={"playlist_id": show_pid,
+                                 "start_at": sched.now_local()}).json()["id"]
+        feeder_app.tick(conn2)
+        check("a due scheduled show fires by time",
+              (client.get("/api/schedule").json()["current_show"] or {})
+              .get("name") == "Syndicated Show")
+        conn2.close()
     finally:
         ctl.stop()
         sup.stop()

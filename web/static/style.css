@@ -88,6 +88,17 @@ input {
   padding: 0 .7rem .6rem 2.1rem;
 }
 .qacts[hidden] { display: none; }
+
+/* playlist schedule (On Air right panel) */
+.sched-h { margin: 1rem 0 .3rem; font-size: 1.1rem; }
+.schedlist { list-style: none; padding: 0; margin: 0; }
+.schedlist li {
+  display: flex; justify-content: space-between; align-items: center;
+  gap: .6rem; padding: .55rem .7rem; margin: .35rem 0;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+}
+.onair-txt { color: #ff7676; font-weight: 800; letter-spacing: .5px; }
+#sched-time { max-width: 16rem; }
 .tiles { display: flex; flex-direction: column; gap: .7rem; }
 .tiles[hidden] { display: none; }
 .tile {

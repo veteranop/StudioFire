@@ -86,6 +86,21 @@ CREATE TABLE settings (
     value TEXT
 );
 """),
+    (2, """
+-- Scheduled/cued playlists ("shows") that interrupt the base rotation once,
+-- then hand back to it (PLAN.md §6 Phase 3 scheduling, MVP). start_at is a
+-- local 'YYYY-MM-DDTHH:MM' timestamp, or NULL for a manual (button) cue.
+CREATE TABLE playlist_schedule (
+    id          INTEGER PRIMARY KEY,
+    playlist_id INTEGER NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
+    start_at    TEXT,
+    sort        INTEGER NOT NULL DEFAULT 0,
+    state       TEXT NOT NULL DEFAULT 'waiting'
+        CHECK (state IN ('waiting', 'playing', 'done')),
+    created_at  REAL NOT NULL
+);
+CREATE INDEX idx_sched_state ON playlist_schedule(state, start_at);
+"""),
 ]
 
 SCHEMA_VERSION = MIGRATIONS[-1][0]
