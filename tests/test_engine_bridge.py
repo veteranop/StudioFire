@@ -323,6 +323,24 @@ def main():
         check("a due scheduled show fires by time",
               (client.get("/api/schedule").json()["current_show"] or {})
               .get("name") == "Syndicated Show")
+
+        # a LATER scheduled show takes over even while another show is on air
+        show_b = pl.create_playlist(conn, "Show B")
+        pl.add_item(conn, show_b, "file", show_track, "SHOW B SEG")
+        client.post("/api/schedule", json={"playlist_id": show_b,
+                                           "start_at": sched.now_local()})
+        feeder_app.tick(conn2)
+        check("scheduled show takes over a running show",
+              (client.get("/api/schedule").json()["current_show"] or {})
+              .get("name") == "Show B")
+
+        # operator can stop the show and return to the rotation
+        check("stop_show accepted",
+              client.post("/api/schedule/stop_show").status_code == 200)
+        check("stop_show returns to the rotation",
+              client.get("/api/schedule").json()["current_show"] is None)
+        check("stop_show with no show -> 409",
+              client.post("/api/schedule/stop_show").status_code == 409)
         conn2.close()
 
         # ---- "Stop after current song": hold at the next boundary, then go.

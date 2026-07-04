@@ -298,12 +298,34 @@ class Feeder:
             self._finish_show(conn, st)
 
     def _maybe_fire_scheduled(self, conn, st: dict, status: dict) -> dict:
-        if st.get("show"):
-            return status  # one show at a time (MVP)
         entry = sched.due(conn)
         if entry is None:
             return status
+        cur = st.get("show")
+        if cur and cur.get("sched_id") == entry["id"]:
+            return status  # already airing this scheduled show
+        if cur:
+            # a SCHEDULED show is fixed programming — it airs at its time even
+            # if another show is on air (that one ends early). Without this a
+            # long show blocks every later scheduled show indefinitely.
+            log.warning("feeder: scheduled show %d takes over running show %d",
+                        entry["id"], cur.get("sched_id"))
+            self._finish_show(conn, st)
         return self._start_show(conn, st, entry, status)
+
+    def stop_show(self, conn) -> tuple[bool, str]:
+        """Operator: end the show that's on air now and return to the rotation."""
+        status = self.engine.status()
+        if status is None:
+            return False, "engine unreachable"
+        st = self._load_state(conn)
+        if not st.get("show"):
+            return False, "no show is on air"
+        self._finish_show(conn, st)          # mark done, clear the overlay
+        self._clear_pending(conn, st, status)  # drop the show's tail
+        self._save_state(conn, st)
+        ok, why = self.tick(conn)            # refill from the base rotation
+        return ok, f"back to the rotation ({why})"
 
     def start_show_now(self, conn, sched_id: int) -> tuple[bool, str]:
         """Manual cue: put a waiting show on air right now (next boundary)."""
@@ -846,6 +868,13 @@ def register(app: FastAPI) -> None:
     def api_schedule_start_now(sid: int, conn=Depends(get_conn),
                                _=Depends(api_user)):
         ok, why = feeder.start_show_now(conn, sid)
+        if not ok:
+            raise HTTPException(409, why)
+        return {"ok": True, "detail": why}
+
+    @app.post("/api/schedule/stop_show")
+    def api_schedule_stop_show(conn=Depends(get_conn), _=Depends(api_user)):
+        ok, why = feeder.stop_show(conn)
         if not ok:
             raise HTTPException(409, why)
         return {"ok": True, "detail": why}

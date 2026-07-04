@@ -164,7 +164,9 @@ async function refreshSchedule() {
       now.innerHTML = "<span class='onair-txt'>SHOW ON AIR:</span> " +
         esc(sc.current_show.name) + (sc.base
           ? " <span class='muted'>→ then back to " + esc(sc.base.name) +
-            "</span>" : "");
+            "</span>" : "") +
+        " <button class='btn btn-sm btn-red' onclick='stopShow()'>" +
+        "⏹ Stop show</button>";
     else if (sc.base)
       now.innerHTML = "<strong>On now:</strong> " + esc(sc.base.name) +
         " <span class='muted'>(regular rotation)</span>";
@@ -223,6 +225,13 @@ async function startShow(id) {
 async function removeSchedule(id) {
   await fetch("/api/schedule/" + id, {method: "DELETE"});
   refreshSchedule();
+}
+async function stopShow() {
+  if (!confirm("Stop the show that's on air and go back to the regular " +
+               "rotation?")) return;
+  const r = await fetch("/api/schedule/stop_show", {method: "POST"});
+  if (!r.ok) alert((await r.json().catch(() => ({}))).detail || "Could not stop");
+  refreshSchedule(); refresh();
 }
 
 // ---- Global library search: find any song and drop it in live (one-off)
