@@ -10,6 +10,7 @@ body {
   font: 18px/1.5 "Segoe UI", system-ui, sans-serif;
 }
 .topbar {
+  position: relative;
   display: flex; align-items: center; gap: 1.25rem;
   padding: .6rem 1.5rem; background: var(--panel);
   border-bottom: 1px solid var(--border);
@@ -20,7 +21,13 @@ body {
   background: #f4f5f7; box-shadow: 0 1px 3px rgba(0, 0, 0, .35);
 }
 .nav-right { margin-left: auto; }
-.page { max-width: 1440px; margin: 2rem auto; padding: 0 1.5rem; }
+.clock {
+  position: absolute; left: 50%; transform: translateX(-50%);
+  font-size: 1.9rem; font-weight: 700; letter-spacing: 1px;
+  font-variant-numeric: tabular-nums; color: var(--text);
+}
+@media (max-width: 900px) { .clock { display: none; } }
+.page { max-width: 1600px; margin: 2rem auto; padding: 0 1.5rem; }
 .card {
   background: var(--panel); border: 1px solid var(--border);
   border-radius: 14px; padding: 1.4rem 1.6rem; margin-bottom: 1.5rem;
@@ -79,10 +86,34 @@ input {
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
 @media (max-width: 900px) { .grid2 { grid-template-columns: 1fr; } }
 .grid3 {
-  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 1.5rem; align-items: start;
+  display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.3fr) minmax(0, 1fr);
+  gap: 1.25rem; align-items: start;
 }
 @media (max-width: 1080px) { .grid3 { grid-template-columns: 1fr; } }
+
+/* On Air two-zone layout: work area on the left, History/Log rail on right */
+.onair-wrap { display: flex; gap: 1.25rem; align-items: flex-start; }
+.onair-left { flex: 1 1 auto; min-width: 0; }
+.onair-right { flex: 0 0 320px; }
+@media (max-width: 1200px) {
+  .onair-wrap { flex-direction: column; }
+  .onair-right { flex: 1 1 auto; width: 100%; }
+}
+.log-card { position: sticky; top: 1rem; }
+.loglist { list-style: none; padding: 0; margin: 0; max-height: 72vh;
+           overflow-y: auto; font-size: .95rem; }
+.loglist li { padding: .35rem .1rem; border-bottom: 1px solid var(--border);
+              line-height: 1.35; }
+.log-time { color: var(--muted); font-variant-numeric: tabular-nums;
+            margin-right: .35rem; }
+.log-tag { font-weight: 700; font-size: .8rem; padding: .05rem .4rem;
+           border-radius: 5px; }
+.log-title { display: block; margin-top: .1rem; }
+.log-start  { color: #7ee2a8; background: #17271d; }
+.log-end    { color: var(--muted); background: #232b34; }
+.log-spot   { color: #7fb2ff; background: #16233a; }
+.log-show   { color: #ffcf7a; background: #33280f; }
+.log-filler { color: #ff9b9b; background: #2d1a1a; }
 .queue {
   font-size: 1.05rem; list-style: none; padding: 0; margin: 0;
   max-height: 640px; overflow-y: auto;

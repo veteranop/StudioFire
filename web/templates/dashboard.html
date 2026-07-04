@@ -32,6 +32,8 @@
   EMERGENCY FILLER IS ON AIR — the normal playlist could not continue.
 </div>
 
+<div class="onair-wrap">
+<div class="onair-left">
 <div class="card">
   <h1>Now Playing</h1>
   <div class="nowplaying">
@@ -106,6 +108,14 @@
       <button class="btn btn-green" onclick="addSchedule()">Add to schedule</button>
     </details>
   </div>
+</div>
+</div>
+<aside class="onair-right">
+  <div class="card log-card">
+    <h2>History / Log</h2>
+    <ol id="log-list" class="loglist"><li class="muted">loading…</li></ol>
+  </div>
+</aside>
 </div>
 
 <script>
@@ -205,6 +215,40 @@ async function startShow(id) {
 async function removeSchedule(id) {
   await fetch("/api/schedule/" + id, {method: "DELETE"});
   refreshSchedule();
+}
+
+// ---- History / Log: the as-aired record (what actually went out)
+function logKind(e) {
+  if (e.event === "track_end") return ["Ended", "log-end"];
+  if (e.source === "spot") return ["Played", "log-spot"];
+  if (e.source === "show") return ["Show", "log-show"];
+  if (e.source === "emergency" || e.source === "baked_in")
+    return ["Filler", "log-filler"];
+  return ["Started", "log-start"];
+}
+function logTime(ts) {
+  const d = new Date(ts);
+  return isNaN(d) ? "" : d.toLocaleTimeString([], {hour12: false});
+}
+async function refreshHistory() {
+  try {
+    const rows = await (await fetch("/api/history?limit=40")).json();
+    const ol = document.getElementById("log-list");
+    ol.innerHTML = "";
+    if (!rows.length) {
+      ol.innerHTML = "<li class='muted'>Nothing logged yet</li>";
+      return;
+    }
+    for (const e of rows) {
+      const [label, cls] = logKind(e);
+      const li = document.createElement("li");
+      li.innerHTML = "<span class='log-time'>" + logTime(e.ts) + "</span> " +
+        "<span class='log-tag " + cls + "'>" + label + "</span> " +
+        "<span class='log-title'></span>";
+      li.querySelector(".log-title").textContent = e.title;
+      ol.appendChild(li);
+    }
+  } catch (e) { /* next poll */ }
 }
 
 // ---- spots: station IDs / ads / jingles / PSAs between songs
@@ -530,12 +574,13 @@ rotListEl.addEventListener("dragover", (ev) => {
 rotListEl.addEventListener("scroll", () => { rotScrolledAt = Date.now(); });
 
 refresh(); refreshTiles(); loadPlaylistOptions(); refreshSchedule();
-loadSpotFolders(); refreshSpots(); refreshRotation();
+loadSpotFolders(); refreshSpots(); refreshRotation(); refreshHistory();
 setInterval(refresh, 2000);
 setInterval(refreshTiles, 10000);
 setInterval(refreshSchedule, 5000);
 setInterval(refreshSpots, 5000);
 setInterval(refreshRotation, 4000);
+setInterval(refreshHistory, 5000);
 setInterval(tickSpotCountdowns, 1000);
 </script>
 {% endblock %}

@@ -104,6 +104,11 @@ def main():
     check("index tile counts tracks", "2 tracks"
           in tiles["Library index"]["detail"])
 
+    # ---- history / log API (as-aired; empty on a fresh DB but must be a list)
+    hist = client.get("/api/history")
+    check("history API returns a list",
+          hist.status_code == 200 and isinstance(hist.json(), list))
+
     # ---- settings: station folders + folder browser
     check("settings page renders",
           b"Station folders" in client.get("/settings").content)

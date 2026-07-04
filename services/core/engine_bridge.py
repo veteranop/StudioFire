@@ -750,6 +750,22 @@ def register(app: FastAPI) -> None:
                       for it in items],
         }
 
+    @app.get("/api/history")
+    def api_history(limit: int = 40, conn=Depends(get_conn),
+                    _=Depends(api_user)):
+        """As-aired log: the most recent track starts/ends from play_history."""
+        rows = conn.execute(
+            "SELECT ts, event, title, source, path FROM play_history "
+            "WHERE event IN ('track_start', 'track_end') "
+            "ORDER BY id DESC LIMIT ?", (max(1, min(limit, 200)),)).fetchall()
+        out = []
+        for r in rows:
+            title = r["title"] or (os.path.splitext(
+                os.path.basename(r["path"]))[0] if r["path"] else "—")
+            out.append({"ts": r["ts"], "event": r["event"],
+                        "title": title, "source": r["source"]})
+        return out
+
     def _active_pid(conn) -> int:
         base_pid = coredb.get_setting(conn, "active_playlist_id")
         if not base_pid:

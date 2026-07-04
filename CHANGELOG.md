@@ -28,6 +28,11 @@ plain English a non-technical operator can understand.
   and the long "Coming up" list scrolls within its panel so the page stays tidy.
 
 ### Added
+- A big live clock in the top bar (every page) — radio runs on the wall clock.
+- History / Log panel on the On Air page: a live as-aired record of what
+  actually went out (song started/ended, spot played, filler), colour-coded
+  and timestamped, straight from the play journal. The On Air screen is now a
+  two-zone cockpit — work area on the left, the log rail down the right.
 - Spots — Station IDs, ads, jingles, PSAs — now schedule themselves between
   songs. A new "Upcoming spots" column on the left of the On Air page shows
   what's coming with a live countdown. Add a rule pointing at one of your

@@ -12,9 +12,20 @@
       <img src="/static/sf_logo.png" alt="{{ station }}" class="brand-logo">
     </a>
     {% block nav %}{% endblock %}
+    <div class="clock" id="topclock">--:--:--</div>
   </header>
   <main class="page">
     {% block content %}{% endblock %}
   </main>
+  <script>
+    (function () {
+      const el = document.getElementById("topclock");
+      function tick() {
+        const d = new Date();
+        el.textContent = d.toLocaleTimeString([], {hour12: false});
+      }
+      tick(); setInterval(tick, 1000);
+    })();
+  </script>
 </body>
 </html>
