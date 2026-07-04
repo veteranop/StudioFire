@@ -244,9 +244,12 @@ input {
   background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
 }
 .item-btns { white-space: nowrap; }
-.results { list-style: none; padding: 0; max-height: 30rem; overflow-y: auto; }
+.results { list-style: none; padding: 0; margin: .3rem 0 0;
+           max-height: 22rem; overflow-y: auto; }
 .results li { display: flex; gap: .7rem; align-items: center;
-              padding: .35rem 0; }
+              justify-content: space-between; padding: .4rem .2rem;
+              border-bottom: 1px solid var(--border); }
+.lib-info { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 select {
   padding: .6rem; font-size: 1rem; background: var(--bg);
   color: var(--text); border: 1px solid var(--border); border-radius: 8px;

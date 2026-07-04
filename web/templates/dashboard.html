@@ -109,6 +109,13 @@
     </details>
   </div>
 </div>
+<div class="card">
+  <h2>Library search</h2>
+  <input type="text" id="lib-search" class="rot-search" autocomplete="off"
+         placeholder="🔎 Search the whole music library…"
+         oninput="libSearchInput()">
+  <ol id="lib-results" class="results"></ol>
+</div>
 </div>
 <aside class="onair-right">
   <div class="card log-card">
@@ -215,6 +222,48 @@ async function startShow(id) {
 async function removeSchedule(id) {
   await fetch("/api/schedule/" + id, {method: "DELETE"});
   refreshSchedule();
+}
+
+// ---- Global library search: find any song and drop it in live (one-off)
+let libTimer = null;
+function libSearchInput() { clearTimeout(libTimer); libTimer = setTimeout(doLibSearch, 250); }
+async function doLibSearch() {
+  const q = document.getElementById("lib-search").value.trim();
+  const ol = document.getElementById("lib-results");
+  if (!q) { ol.innerHTML = ""; return; }
+  let rows;
+  try {
+    rows = await (await fetch("/api/library/search?q=" +
+      encodeURIComponent(q))).json();
+  } catch (e) { return; }
+  ol.innerHTML = "";
+  if (!rows.length) { ol.innerHTML = "<li class='muted'>No matches</li>"; return; }
+  for (const t of rows) {
+    const li = document.createElement("li");
+    const info = document.createElement("span");
+    info.className = "lib-info";
+    info.textContent = (t.title || t.path.split(/[\\/]/).pop()) +
+      (t.artist ? " — " + t.artist : "") +
+      (t.duration_sec ? "  (" + fmt(t.duration_sec) + ")" : "");
+    const btn = document.createElement("button");
+    btn.className = "btn btn-sm btn-green"; btn.textContent = "⏭ Insert Next";
+    btn.onclick = () => insertLibTrack(t, btn);
+    li.appendChild(info); li.appendChild(btn);
+    ol.appendChild(li);
+  }
+}
+async function insertLibTrack(t, btn) {
+  btn.disabled = true; btn.textContent = "…";
+  const r = await fetch("/api/engine/play_next", {method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({path: t.path, title: t.title || null})});
+  if (r.ok) {
+    btn.textContent = "✓ Cued"; btn.classList.remove("btn-green");
+    refresh(); refreshRotation();
+  } else {
+    btn.disabled = false; btn.textContent = "⏭ Insert Next";
+    alert((await r.json().catch(() => ({}))).detail || "Could not insert");
+  }
 }
 
 // ---- History / Log: the as-aired record (what actually went out)

@@ -28,6 +28,9 @@ plain English a non-technical operator can understand.
   and the long "Coming up" list scrolls within its panel so the page stays tidy.
 
 ### Added
+- Global library search on the On Air page: search your whole music library and
+  drop any song in live with "Insert Next" — a one-off cue that plays right
+  after the current song, without touching the saved rotation playlist.
 - A big live clock in the top bar (every page) — radio runs on the wall clock.
 - History / Log panel on the On Air page: a live as-aired record of what
   actually went out (song started/ended, spot played, filler), colour-coded
