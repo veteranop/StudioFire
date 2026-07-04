@@ -40,6 +40,20 @@ def main():
     mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
     check("WAL mode active", mode == "wal")
 
+    # ---- a connection must be usable from a different thread (FastAPI runs
+    # sync endpoints in a threadpool and moves setup/teardown across threads)
+    import threading
+    errs = []
+
+    def cross_thread():
+        try:
+            conn.execute("SELECT 1").fetchone()
+        except Exception as exc:  # noqa: BLE001
+            errs.append(exc)
+    t = threading.Thread(target=cross_thread)
+    t.start(); t.join()
+    check("connection is thread-portable (no same-thread 500s)", not errs)
+
     # ---- password hashing
     h = auth.hash_password("hunter22!")
     check("scrypt verify ok", auth.verify_password("hunter22!", h))

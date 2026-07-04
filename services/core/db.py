@@ -127,7 +127,12 @@ SCHEMA_VERSION = MIGRATIONS[-1][0]
 
 
 def connect(db_path: str) -> sqlite3.Connection:
-    conn = sqlite3.connect(db_path, timeout=10)
+    # check_same_thread=False: FastAPI runs sync endpoints in a threadpool and
+    # may set up / tear down a request's connection on different threads. Each
+    # request/job gets its OWN short-lived connection (never shared across
+    # threads concurrently), so this is safe — and required to avoid spurious
+    # "SQLite objects ... can only be used in that same thread" 500s under load.
+    conn = sqlite3.connect(db_path, timeout=10, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
