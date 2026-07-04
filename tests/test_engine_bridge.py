@@ -261,8 +261,10 @@ def main():
         # ---- scheduled/cued shows interrupt the rotation, then hand back
         feeder_app = app.state.feeder
         conn2 = db.connect(db_path)
+        show_track = os.path.join(nas, "show_only.wav")  # distinct from base
+        make_wav(show_track, 3.0, 210)
         show_pid = pl.create_playlist(conn, "Syndicated Show")
-        pl.add_item(conn, show_pid, "file", tracks[2], "SHOW SEGMENT")
+        pl.add_item(conn, show_pid, "file", show_track, "SHOW SEGMENT")
         client.post(f"/api/playlists/{pid}/activate")  # known base rotation
         check("base rotation on air", wait_for(
               lambda: engine.status().get("now_source") == "playlist", 10,
@@ -322,6 +324,26 @@ def main():
               (client.get("/api/schedule").json()["current_show"] or {})
               .get("name") == "Syndicated Show")
         conn2.close()
+
+        # ---- "Stop after current song": hold at the next boundary, then go.
+        # Fresh rotation first so there's a full queue to advance through.
+        client.post(f"/api/playlists/{pid}/activate")
+        check("on air for stop-after", wait_for(
+              lambda: engine.status().get("now_source") == "playlist"
+              and not engine.status().get("paused"), 10, "on air"))
+        check("stop_after accepted", client.post(
+              "/api/engine/op", json={"op": "stop_after"}).status_code == 200)
+        check("stop_after arms", wait_for(
+              lambda: engine.status().get("stop_after_current"), 4, "armed"))
+        check("goes off air after the current song", wait_for(
+              lambda: engine.status().get("paused")
+              and not engine.status().get("stop_after_current"), 12, "stopped"))
+        client.post("/api/engine/op", json={"op": "resume"})
+        check("go on air resumes playback", wait_for(
+              lambda: not engine.status().get("paused"), 5, "resumed"))
+        check("bad op still rejected",
+              client.post("/api/engine/op",
+                          json={"op": "nope"}).status_code == 400)
     finally:
         ctl.stop()
         sup.stop()

@@ -7,6 +7,14 @@ plain English a non-technical operator can understand.
 
 ## [Unreleased]
 
+### Changed
+- On Air controls are simpler and clearer. The 🚨 EMERGENCY button is gone;
+  the three buttons are now GO / STOP — On Air (one master switch: STOP takes
+  you off air immediately, GO puts you back), Skip Song, and Stop after
+  current Song (finishes the song that's playing, then goes off air with the
+  next song cued and ready — press GO to continue). Automatic emergency filler
+  still kicks in on its own if the playlist ever can't continue.
+
 ### Added
 - Schedule and cue whole playlists from the On Air page. The right-hand
   "Playlists on air" panel shows what rotation is on now and an "Up next"

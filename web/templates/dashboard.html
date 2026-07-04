@@ -31,10 +31,6 @@
 <div id="emergency-banner" class="banner banner-yellow" hidden>
   EMERGENCY FILLER IS ON AIR — the normal playlist could not continue.
 </div>
-<div id="forced-banner" class="banner banner-red" hidden>
-  EMERGENCY BUTTON IS ACTIVE — filler stays on air until you press
-  RESUME NORMAL.
-</div>
 
 <div class="card">
   <h1>Now Playing</h1>
@@ -44,12 +40,13 @@
       <div id="np-pos" class="np-pos muted"></div>
     </div>
     <div class="controls">
-      <button id="btn-pause" class="btn btn-big btn-yellow"
+      <button id="btn-onair" class="btn btn-big btn-red"
               onclick="engineOp(this.dataset.op)" data-op="pause">
-        ⏸ PAUSE AUTOMATION</button>
-      <button class="btn btn-big" onclick="engineOp('skip')">⏭ Skip song</button>
-      <button id="btn-emergency" class="btn btn-big btn-red"
-              onclick="emergencyBtn()">🚨 EMERGENCY</button>
+        ⏹ STOP — On Air</button>
+      <button class="btn btn-big" onclick="engineOp('skip')">⏭ Skip Song</button>
+      <button id="btn-stopafter" class="btn btn-big btn-yellow"
+              onclick="engineOp('stop_after')" data-armed="">
+        ⏏ Stop after current Song</button>
     </div>
   </div>
 </div>
@@ -279,19 +276,7 @@ async function refresh() {
     const oa = document.getElementById("onair");
     oa.classList.toggle("live", onAir);
     oa.textContent = onAir ? "ON AIR" : "OFF AIR";
-    document.getElementById("emergency-banner").hidden =
-      !q.emergency_mode || q.forced_emergency;
-    document.getElementById("forced-banner").hidden = !q.forced_emergency;
-    const eb = document.getElementById("btn-emergency");
-    if (q.forced_emergency) {
-      eb.textContent = "✅ RESUME NORMAL";
-      eb.classList.remove("btn-red"); eb.classList.add("btn-green");
-      eb.dataset.forced = "1";
-    } else {
-      eb.textContent = "🚨 EMERGENCY";
-      eb.classList.remove("btn-green"); eb.classList.add("btn-red");
-      eb.dataset.forced = "";
-    }
+    document.getElementById("emergency-banner").hidden = !q.emergency_mode;
     let title = q.now_title;
     if (!title && q.now_playing) {
       title = (q.now_source === "emergency" || q.now_source === "baked_in")
@@ -307,14 +292,24 @@ async function refresh() {
                "   (" + fmt(q.duration - q.position) + " left)";
     }
     document.getElementById("np-pos").textContent =
-      pos + (q.paused ? "  — PAUSED" : "");
-    const b = document.getElementById("btn-pause");
+      pos + (q.paused ? "  — OFF AIR (stopped)" : "");
+    // master On Air switch: off air -> green "GO ON AIR"; on air -> red "STOP"
+    const b = document.getElementById("btn-onair");
     if (q.paused) {
-      b.textContent = "▶ RESUME"; b.dataset.op = "resume";
-      b.classList.remove("btn-yellow"); b.classList.add("btn-green");
+      b.textContent = "▶ GO — On Air"; b.dataset.op = "resume";
+      b.classList.remove("btn-red"); b.classList.add("btn-green");
     } else {
-      b.textContent = "⏸ PAUSE AUTOMATION"; b.dataset.op = "pause";
-      b.classList.remove("btn-green"); b.classList.add("btn-yellow");
+      b.textContent = "⏹ STOP — On Air"; b.dataset.op = "pause";
+      b.classList.remove("btn-green"); b.classList.add("btn-red");
+    }
+    // "Stop after current song": highlight while armed, click again to cancel
+    const sa = document.getElementById("btn-stopafter");
+    if (q.stop_after_current) {
+      sa.textContent = "✖ Cancel stop-after";
+      sa.classList.add("btn-green"); sa.classList.remove("btn-yellow");
+    } else {
+      sa.textContent = "⏏ Stop after current Song";
+      sa.classList.add("btn-yellow"); sa.classList.remove("btn-green");
     }
     lastPending = q.pending;
     // don't redraw mid-drag or with a menu open (it'd cancel the interaction)
@@ -359,13 +354,6 @@ async function refreshTiles() {
       div.appendChild(el);
     }
   } catch (e) { /* next poll */ }
-}
-async function emergencyBtn() {
-  const forced = document.getElementById("btn-emergency").dataset.forced;
-  if (forced) { engineOp("resume_normal"); return; }
-  if (confirm("Put EMERGENCY FILLER on air right now?\n\n" +
-              "Music stays on filler until you press RESUME NORMAL."))
-    engineOp("emergency");
 }
 async function engineOp(op) {
   await fetch("/api/engine/op", {

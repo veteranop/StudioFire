@@ -92,12 +92,14 @@ class EngineSupervisor:
         self._emergency_files: list[str] = []
         self._emergency_idx = 0
         self._expected_next_path: str | None = None  # appended to mpv for prefetch
+        self._stop_after_current = False  # pause when the current song ends
         self._last_restart = 0.0
 
         self._status_lock = threading.Lock()
         self._status = {"now_playing": None, "now_title": None,
                         "now_source": None, "duration": None,
                         "position": None, "paused": False,
+                        "stop_after_current": False,
                         "emergency_mode": False, "forced_emergency": False,
                         "mpv_alive": False,
                         "queue_version": 0, "current_index": -1,
@@ -240,6 +242,17 @@ class EngineSupervisor:
             self._journal.append("track_start", path=path, source=source)
             self._set_status(now_title=None, now_source=source)
         self._set_status(now_playing=path, duration=None)
+        # "Stop after current song": the previous song has ended and this one
+        # just loaded — hold it at the start until the operator goes on air.
+        if self._stop_after_current:
+            self._stop_after_current = False
+            self._journal.append("stopped_after_song", path=path)
+            log.warning("stopped on air after operator's stop-after request")
+            try:
+                self._client.set_property("pause", True)
+            except (MpvDead, MpvError):
+                pass
+            self._set_status(stop_after_current=False, paused=True)
 
     def _on_end_file(self, reason: str, file_error) -> None:
         path = self._status_get("now_playing")
@@ -433,6 +446,14 @@ class EngineSupervisor:
             self._client.set_property("pause", False)
             self._set_status(paused=False)
             self._journal.append("resume")
+            return True, "ok"
+        if op == "stop_after":
+            # toggle: pause playback when the CURRENT song ends (the next
+            # song loads and holds at 0:00, ready for Go On Air)
+            self._stop_after_current = not self._stop_after_current
+            self._set_status(stop_after_current=self._stop_after_current)
+            self._journal.append("stop_after_armed" if self._stop_after_current
+                                 else "stop_after_cancelled")
             return True, "ok"
         if op == "emergency":
             # operator's big red button: hold on filler until resume_normal
