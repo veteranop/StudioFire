@@ -33,3 +33,7 @@ assets/emergency/*.mp3
 # Local artifacts
 .playwright-mcp/
 *.lst
+
+# local screenshots / playwright artifacts
+.playwright-mcp/
+/*.png

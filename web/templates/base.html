@@ -8,7 +8,9 @@
 </head>
 <body>
   <header class="topbar">
-    <span class="brand">{{ station }}</span>
+    <a href="/" class="brand" title="{{ station }}">
+      <img src="/static/sf_logo.png" alt="{{ station }}" class="brand-logo">
+    </a>
     {% block nav %}{% endblock %}
   </header>
   <main class="page">

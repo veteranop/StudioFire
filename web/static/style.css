@@ -10,18 +10,26 @@ body {
   font: 18px/1.5 "Segoe UI", system-ui, sans-serif;
 }
 .topbar {
-  display: flex; align-items: center; gap: 1rem;
-  padding: .75rem 1.25rem; background: var(--panel);
+  display: flex; align-items: center; gap: 1.25rem;
+  padding: .6rem 1.5rem; background: var(--panel);
   border-bottom: 1px solid var(--border);
 }
-.brand { font-size: 1.4rem; font-weight: 700; letter-spacing: .5px; }
+.brand { display: inline-flex; align-items: center; text-decoration: none; }
+.brand-logo {
+  height: 42px; display: block; padding: 6px 12px; border-radius: 8px;
+  background: #f4f5f7; box-shadow: 0 1px 3px rgba(0, 0, 0, .35);
+}
 .nav-right { margin-left: auto; }
-.page { max-width: 1100px; margin: 2rem auto; padding: 0 1rem; }
+.page { max-width: 1440px; margin: 2rem auto; padding: 0 1.5rem; }
 .card {
   background: var(--panel); border: 1px solid var(--border);
-  border-radius: 12px; padding: 1.5rem 2rem; margin-bottom: 1.5rem;
+  border-radius: 14px; padding: 1.4rem 1.6rem; margin-bottom: 1.5rem;
 }
 .card.narrow { max-width: 460px; margin: 4rem auto; }
+.card h2 {
+  margin: 0 0 1rem; font-size: 1.15rem; font-weight: 700; letter-spacing: .3px;
+  padding-bottom: .7rem; border-bottom: 1px solid var(--border);
+}
 h1 { margin-top: 0; font-size: 1.6rem; }
 label { display: block; margin: 1rem 0; font-weight: 600; }
 input {
@@ -70,9 +78,19 @@ input {
 .controls .btn-big { width: auto; min-width: 220px; margin-top: 0; }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
 @media (max-width: 900px) { .grid2 { grid-template-columns: 1fr; } }
-.grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1.25rem; }
-@media (max-width: 1000px) { .grid3 { grid-template-columns: 1fr; } }
-.queue { font-size: 1.1rem; list-style: none; padding: 0; margin: 0; }
+.grid3 {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1.5rem; align-items: start;
+}
+@media (max-width: 1080px) { .grid3 { grid-template-columns: 1fr; } }
+.queue {
+  font-size: 1.05rem; list-style: none; padding: 0; margin: 0;
+  max-height: 640px; overflow-y: auto;
+}
+.queue::-webkit-scrollbar { width: 8px; }
+.queue::-webkit-scrollbar-thumb {
+  background: var(--border); border-radius: 8px;
+}
 .qitem {
   background: var(--bg); border: 1px solid var(--border);
   border-radius: 8px; margin: .4rem 0;
@@ -91,16 +109,23 @@ input {
 }
 .qacts[hidden] { display: none; }
 
-/* playlist schedule (On Air right panel) */
-.sched-h { margin: 1rem 0 .3rem; font-size: 1.1rem; }
+/* playlist schedule + spots (On Air side panels) */
+.sched-h { margin: 1.2rem 0 .4rem; font-size: 1rem; color: var(--muted);
+           text-transform: uppercase; letter-spacing: .6px; }
 .schedlist { list-style: none; padding: 0; margin: 0; }
 .schedlist li {
   display: flex; justify-content: space-between; align-items: center;
-  gap: .6rem; padding: .55rem .7rem; margin: .35rem 0;
-  background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+  gap: .6rem; padding: .6rem .75rem; margin: .45rem 0;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
 }
+.schedlist li > div:first-child { flex: 1 1 auto; min-width: 0; }
+.schedlist li strong { font-weight: 700; }
+.schedlist small { display: inline-block; margin-top: .15rem; }
+.schedlist .item-btns { display: flex; gap: .3rem; flex: 0 0 auto; }
+.spot-when { color: #7fb2ff; font-weight: 700; }
+#sched-now { line-height: 1.5; }
 .onair-txt { color: #ff7676; font-weight: 800; letter-spacing: .5px; }
-#sched-time { max-width: 16rem; }
+#sched-time, #spot-clock { max-width: 100%; }
 .tiles { display: flex; flex-direction: column; gap: .7rem; }
 .tiles[hidden] { display: none; }
 .tile {

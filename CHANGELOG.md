@@ -15,6 +15,12 @@ plain English a non-technical operator can understand.
   next song cued and ready — press GO to continue). Automatic emergency filler
   still kicks in on its own if the playlist ever can't continue.
 
+### Changed
+- The On Air page got a professional facelift: the StudioFire logo now sits in
+  the top-left, the three columns (Upcoming spots, Coming up, Playlists on air)
+  have room to breathe instead of feeling cramped, section headers are cleaner,
+  and the long "Coming up" list scrolls within its panel so the page stays tidy.
+
 ### Added
 - Spots — Station IDs, ads, jingles, PSAs — now schedule themselves between
   songs. A new "Upcoming spots" column on the left of the On Air page shows
