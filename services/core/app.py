@@ -7,11 +7,14 @@ auth dependencies every later router builds on.
 
 from __future__ import annotations
 
+import csv
+import datetime
+import io
 import logging
 import os
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -280,6 +283,54 @@ def create_app(cfg: dict) -> FastAPI:
             "ORDER BY artist, title LIMIT 50",
             (like, like, like, like)).fetchall()
         return [dict(r) for r in rows]
+
+    # ---- reports: as-aired / spot playout / proof of performance
+    def _report_rows(conn, start: str, end: str, kind: str) -> list[dict]:
+        sql = ("SELECT ts, title, source, path FROM play_history "
+               "WHERE event = 'track_start' AND substr(ts, 1, 10) BETWEEN ? "
+               "AND ?")
+        args = [start, end]
+        if kind == "spots":
+            sql += " AND source = 'spot'"
+        elif kind == "music":
+            sql += " AND source IN ('playlist', 'show', 'manual')"
+        sql += " ORDER BY id ASC LIMIT 10000"
+        out = []
+        for r in conn.execute(sql, args).fetchall():
+            title = r["title"] or (os.path.splitext(
+                os.path.basename(r["path"]))[0] if r["path"] else "—")
+            out.append({"ts": r["ts"], "title": title,
+                        "source": r["source"] or ""})
+        return out
+
+    @app.get("/reports", response_class=HTMLResponse)
+    def reports_page(request: Request, sess: dict = Depends(page_user)):
+        return render(request, "reports.html", role=sess["role"])
+
+    @app.get("/api/reports")
+    def api_reports(start: str = "", end: str = "", kind: str = "all",
+                    conn=Depends(get_conn), _=Depends(api_user)):
+        start = start or datetime.date.today().isoformat()
+        end = end or start
+        rows = _report_rows(conn, start, end, kind)
+        return {"start": start, "end": end, "kind": kind,
+                "count": len(rows), "rows": rows}
+
+    @app.get("/api/reports.csv")
+    def api_reports_csv(start: str = "", end: str = "", kind: str = "all",
+                        conn=Depends(get_conn), _=Depends(api_user)):
+        start = start or datetime.date.today().isoformat()
+        end = end or start
+        rows = _report_rows(conn, start, end, kind)
+        buf = io.StringIO()
+        w = csv.writer(buf)
+        w.writerow(["Time", "What aired", "Type"])
+        for r in rows:
+            w.writerow([r["ts"], r["title"], r["source"]])
+        fname = f"studiofire-aslog-{start}_to_{end}-{kind}.csv"
+        return Response(content=buf.getvalue(), media_type="text/csv",
+                        headers={"Content-Disposition":
+                                 f'attachment; filename="{fname}"'})
 
     @app.get("/api/health/tiles")
     def health_tiles(conn=Depends(get_conn), _=Depends(api_user)):

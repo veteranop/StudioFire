@@ -28,6 +28,9 @@ plain English a non-technical operator can understand.
   and the long "Coming up" list scrolls within its panel so the page stays tidy.
 
 ### Added
+- Reports page: pick a date range and see exactly what aired — everything, music
+  only, or spots only (Station IDs / ads / PSAs, i.e. proof of performance) — with
+  a one-click CSV export for affidavits/logs. Built from the as-aired play journal.
 - Global library search on the On Air page: search your whole music library and
   drop any song in live with "Insert Next" — a one-off cue that plays right
   after the current song, without touching the saved rotation playlist.

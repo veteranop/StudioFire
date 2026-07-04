@@ -109,6 +109,16 @@ def main():
     check("history API returns a list",
           hist.status_code == 200 and isinstance(hist.json(), list))
 
+    # ---- reports page + API + CSV export
+    check("reports page renders", b"as-aired" in client.get("/reports").content)
+    rep = client.get("/api/reports?start=2026-07-01&end=2026-07-01&kind=all")
+    check("reports API shape", rep.status_code == 200
+          and rep.json()["count"] == 0 and rep.json()["rows"] == [])
+    csv = client.get("/api/reports.csv?start=2026-07-01&end=2026-07-01")
+    check("reports CSV export", csv.status_code == 200
+          and "text/csv" in csv.headers.get("content-type", "")
+          and csv.text.startswith("Time,What aired,Type"))
+
     # ---- settings: station folders + folder browser
     check("settings page renders",
           b"Station folders" in client.get("/settings").content)

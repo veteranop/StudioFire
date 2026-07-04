@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}Reports — {{ station }}{% endblock %}
+{% block nav %}
+<nav class="nav-links">
+  <a href="/">On Air</a>
+  <a href="/playlists">Playlists</a>
+  {% if role == "admin" %}<a href="/settings">Settings</a>{% endif %}
+  <a href="/reports" class="active">Reports</a>
+</nav>
+<form method="post" action="/logout" class="nav-right">
+  <button type="submit" class="btn">Sign out</button>
+</form>
+{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>Reports</h1>
+  <p class="muted">What actually aired — the as-aired log and spot playout
+    (proof of performance). Pick a date range and run it.</p>
+  <div class="row">
+    <label style="margin:0">From
+      <input type="date" id="rep-start" style="margin-top:.2rem"></label>
+    <label style="margin:0">To
+      <input type="date" id="rep-end" style="margin-top:.2rem"></label>
+    <label style="margin:0">Show
+      <select id="rep-kind" style="margin-top:.2rem; display:block">
+        <option value="all">Everything</option>
+        <option value="music">Music only</option>
+        <option value="spots">Spots only (IDs / ads / PSAs)</option>
+      </select></label>
+    <button class="btn btn-green" onclick="runReport()">Run</button>
+    <button class="btn" onclick="exportReport()">⬇ Export CSV</button>
+  </div>
+  <div id="rep-summary" class="muted" style="margin:.6rem 0"></div>
+  <table class="table">
+    <thead><tr><th style="width:12rem">Time</th><th>What aired</th>
+      <th style="width:8rem">Type</th></tr></thead>
+    <tbody id="rep-body">
+      <tr><td colspan="3" class="muted">Choose a date range and press Run.</td></tr>
+    </tbody>
+  </table>
+</div>
+<script>
+function today() { return new Date().toLocaleDateString("en-CA"); }
+document.getElementById("rep-start").value = today();
+document.getElementById("rep-end").value = today();
+function repParams() {
+  const s = document.getElementById("rep-start").value;
+  const e = document.getElementById("rep-end").value;
+  const k = document.getElementById("rep-kind").value;
+  return "start=" + s + "&end=" + e + "&kind=" + k;
+}
+async function runReport() {
+  const d = await (await fetch("/api/reports?" + repParams())).json();
+  document.getElementById("rep-summary").textContent =
+    d.count + " item(s) aired · " + d.start +
+    (d.end !== d.start ? " to " + d.end : "");
+  const b = document.getElementById("rep-body");
+  b.innerHTML = "";
+  if (!d.rows.length) {
+    b.innerHTML = "<tr><td colspan='3' class='muted'>Nothing aired in that " +
+      "range.</td></tr>";
+    return;
+  }
+  for (const r of d.rows) {
+    const tr = document.createElement("tr");
+    const t = new Date(r.ts);
+    tr.innerHTML = "<td></td><td></td><td></td>";
+    tr.children[0].textContent = isNaN(t) ? r.ts
+      : t.toLocaleString([], {hour12: false});
+    tr.children[1].textContent = r.title;
+    tr.children[2].textContent = r.source;
+    b.appendChild(tr);
+  }
+}
+function exportReport() { window.location = "/api/reports.csv?" + repParams(); }
+runReport();
+</script>
+{% endblock %}
