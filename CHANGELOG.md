@@ -16,6 +16,10 @@ plain English a non-technical operator can understand.
   still kicks in on its own if the playlist ever can't continue.
 
 ### Changed
+- The On Air cockpit now uses the full width of a wide monitor instead of a
+  cramped 1600px centre column: the rotation and History panels get real room,
+  the spot rows stop wrapping, and song titles fit on one line. (Other pages
+  keep their comfortable reading width.)
 - The middle On Air column now shows the WHOLE rotation playlist (not just the
   pre-cached next ~10), with the song that's on air marked and auto-scrolled
   into view, and a search box to jump around a long list. Drag to reorder or

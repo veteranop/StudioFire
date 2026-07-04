@@ -28,6 +28,8 @@ body {
 }
 @media (max-width: 900px) { .clock { display: none; } }
 .page { max-width: 1600px; margin: 2rem auto; padding: 0 1.5rem; }
+/* the On Air cockpit uses the whole (wide) monitor, not a narrow column */
+.page:has(.onair-wrap) { max-width: 2500px; }
 .card {
   background: var(--panel); border: 1px solid var(--border);
   border-radius: 14px; padding: 1.4rem 1.6rem; margin-bottom: 1.5rem;
@@ -86,15 +88,16 @@ input {
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
 @media (max-width: 900px) { .grid2 { grid-template-columns: 1fr; } }
 .grid3 {
-  display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.3fr) minmax(0, 1fr);
-  gap: 1.25rem; align-items: start;
+  display: grid;
+  grid-template-columns: minmax(0, .85fr) minmax(0, 1.5fr) minmax(0, 1fr);
+  gap: 1.5rem; align-items: start;
 }
 @media (max-width: 1080px) { .grid3 { grid-template-columns: 1fr; } }
 
 /* On Air two-zone layout: work area on the left, History/Log rail on right */
-.onair-wrap { display: flex; gap: 1.25rem; align-items: flex-start; }
+.onair-wrap { display: flex; gap: 1.5rem; align-items: flex-start; }
 .onair-left { flex: 1 1 auto; min-width: 0; }
-.onair-right { flex: 0 0 320px; }
+.onair-right { flex: 0 0 clamp(320px, 22vw, 420px); }
 @media (max-width: 1200px) {
   .onair-wrap { flex-direction: column; }
   .onair-right { flex: 1 1 auto; width: 100%; }
