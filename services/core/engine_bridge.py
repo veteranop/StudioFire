@@ -181,7 +181,19 @@ class Feeder:
         # active "show" overlaying the base rotation, plays once then None:
         #   {"sched_id": int, "playlist_id": int, "cursor": int}
         st.setdefault("show", None)
+        st.setdefault("now_item_id", None)  # rotation item the play-head is on
         return st
+
+    @staticmethod
+    def _now_item_id(st: dict, now_id) -> int | None:
+        """The base-rotation playlist_item id the play-head is currently on
+        (None while a show/spot/emergency source is playing)."""
+        if not now_id:
+            return None
+        for e in st["fed"]:
+            if e["id"] == now_id and e.get("prog") == "base":
+                return e.get("pl_item_id")
+        return None
 
     def _save_state(self, conn, st: dict) -> None:
         coredb.set_setting(conn, "feeder_state", json.dumps(st))
@@ -216,8 +228,9 @@ class Feeder:
                 # Folder items pick a different file each time, so title by
                 # the resolved file, not the item (which is the folder name).
                 if item["item_type"] == "file" and item.get("title"):
-                    return src, item["title"]
-                return src, os.path.splitext(os.path.basename(src))[0]
+                    return src, item["title"], item["id"]
+                return (src, os.path.splitext(os.path.basename(src))[0],
+                        item["id"])
             log.warning("feeder: item unresolvable (skip+alert, §10.5): %r",
                         item["path"])
         return None
@@ -311,6 +324,41 @@ class Feeder:
         ok, why = self.tick(conn)
         return ok, f"show started ({why})"
 
+    def resync_rotation(self, conn) -> tuple[bool, str]:
+        """After a permanent edit to the active rotation playlist, rebuild the
+        pre-cached buffer so the change takes effect right away. The current
+        song keeps playing; everything after it is re-fed from the edited list
+        starting just after wherever the play-head is."""
+        status = self.engine.status()
+        if status is None:
+            return False, "engine unreachable"
+        base_pid = coredb.get_setting(conn, "active_playlist_id")
+        if not base_pid:
+            return True, "no active rotation"
+        items = pl.get_items(conn, int(base_pid))
+        st = self._load_state(conn)
+        now_id = status.get("now_id")
+        cur = next((e for e in st["fed"] if e["id"] == now_id), None)
+        cur_item_id = (cur.get("pl_item_id") if cur and cur.get("prog") == "base"
+                       else st.get("now_item_id"))
+        idx_by_id = {it["id"]: i for i, it in enumerate(items)}
+        if cur_item_id in idx_by_id:            # resume right after the play-head
+            st["cursor"] = idx_by_id[cur_item_id] + 1
+        else:                                   # play-head item gone/unknown
+            st["cursor"] = min(st.get("cursor", 0), len(items))
+        # while a show is on air the base buffer isn't live — just fix the
+        # cursor so the edit takes effect when the rotation resumes
+        if st.get("show"):
+            self._save_state(conn, st)
+            return True, "rotation cursor updated (show on air)"
+        # drop the buffer (current song keeps playing) and re-feed the new order
+        status = self._clear_pending(conn, st, status)
+        if cur is not None:
+            st["fed"] = [cur]  # keep the play-head so the now-marker survives
+        self._save_state(conn, st)
+        ok, why = self.tick(conn)
+        return ok, f"re-synced ({why})"
+
     # ---- spots: station IDs / ads / jingles / PSAs between songs (§ spots)
 
     def insert_spot(self, conn, folder_key: str,
@@ -376,18 +424,23 @@ class Feeder:
             return False, "engine unreachable"
 
         st = self._load_state(conn)
-        # reconcile: drop bookkeeping for entries P1 has already played,
-        # by identity (P1 publishes pending ids) with a count fallback
+        # reconcile: keep entries P1 still has pending, PLUS the one currently
+        # playing (so we can map the play-head back to a playlist item for the
+        # rotation view's "now" marker). Count fallback if no pending_ids.
+        now_id = status.get("now_id")
         if op == "replace":
             st["fed"] = []
         elif "pending_ids" in status:
-            live = set(status["pending_ids"])
-            st["fed"] = [e for e in st["fed"] if e["id"] in live]
+            keep = set(status["pending_ids"])
+            if now_id:
+                keep.add(now_id)
+            st["fed"] = [e for e in st["fed"] if e["id"] in keep]
         else:
             pending_count = max(0, status["queue_len"]
                                 - status["current_index"] - 1)
             if len(st["fed"]) > pending_count:
                 st["fed"] = st["fed"][len(st["fed"]) - pending_count:]
+        st["now_item_id"] = self._now_item_id(st, now_id)
 
         # a show that has fully aired hands back to the rotation
         self._finalize_show_if_aired(conn, st, status)
@@ -401,8 +454,11 @@ class Feeder:
             self._save_state(conn, st)
             return True, "no active playlist"
 
-        pending_sec = sum(e["duration"] for e in st["fed"])
-        if st["fed"] and pending_sec >= self.target_sec:
+        # the currently-playing entry is kept in fed for the now-marker but is
+        # not "pending work" — don't count it toward the top-up target
+        pending = [e for e in st["fed"] if e["id"] != now_id]
+        pending_sec = sum(e["duration"] for e in pending)
+        if pending and pending_sec >= self.target_sec:
             self._save_state(conn, st)
             self._evict(conn, st, status)
             return True, "topped up"
@@ -429,7 +485,7 @@ class Feeder:
                 if resolved is None:
                     break
                 prog, source = "base", "playlist"
-            src, title = resolved
+            src, title, item_id = resolved
             cached = self.precache.ensure(src)
             if cached is None:
                 cache_fails += 1
@@ -441,7 +497,9 @@ class Feeder:
             batch.append({"id": eid, "path": cached, "title": title,
                           "source": source, "src": src})
             st["fed"].append({"id": eid, "path": cached, "duration": duration,
-                              "title": title, "prog": prog})
+                              "title": title, "prog": prog,
+                              # only base-rotation items mark the rotation view
+                              "pl_item_id": item_id if prog == "base" else None})
             pending_sec += duration
         if not batch and op != "replace":
             self._save_state(conn, st)
@@ -669,6 +727,60 @@ def register(app: FastAPI) -> None:
         if not ok:
             raise HTTPException(502, why)
         return {"ok": True, "detail": why}
+
+    # ---------------------------------- the live rotation playlist (editable)
+
+    @app.get("/api/rotation")
+    def api_rotation(conn=Depends(get_conn), _=Depends(api_user)):
+        """The active rotation playlist in full + which item is on air now."""
+        base_pid = coredb.get_setting(conn, "active_playlist_id")
+        row = conn.execute("SELECT id, name FROM playlists WHERE id = ?",
+                           (int(base_pid),)).fetchone() if base_pid else None
+        if row is None:
+            return {"playlist": None, "items": [], "now_item_id": None}
+        items = pl.get_items(conn, row["id"])
+        st = feeder._load_state(conn)
+        now_item_id = feeder._now_item_id(st, (engine.status() or {}).get("now_id"))
+        return {
+            "playlist": {"id": row["id"], "name": row["name"]},
+            "now_item_id": now_item_id,
+            "items": [{"id": it["id"], "item_type": it["item_type"],
+                       "title": it["title"] or os.path.splitext(
+                           os.path.basename(it["path"]))[0]}
+                      for it in items],
+        }
+
+    def _active_pid(conn) -> int:
+        base_pid = coredb.get_setting(conn, "active_playlist_id")
+        if not base_pid:
+            raise HTTPException(409, "no rotation is on air")
+        return int(base_pid)
+
+    @app.post("/api/rotation/reorder")
+    def api_rotation_reorder(body: dict, conn=Depends(get_conn),
+                             _=Depends(api_user)):
+        pid = _active_pid(conn)
+        item_ids = body.get("item_ids")
+        if not isinstance(item_ids, list):
+            raise HTTPException(400, "item_ids must be a list")
+        existing = {i["id"] for i in pl.get_items(conn, pid)}
+        if set(item_ids) != existing:
+            raise HTTPException(409, "list changed — reload the page")
+        pl.reorder_items(conn, pid, item_ids)     # permanent edit
+        feeder.resync_rotation(conn)              # take effect on air now
+        return {"ok": True}
+
+    @app.post("/api/rotation/remove")
+    def api_rotation_remove(body: dict, conn=Depends(get_conn),
+                            _=Depends(api_user)):
+        pid = _active_pid(conn)
+        try:
+            item_id = int(body.get("item_id"))
+        except (TypeError, ValueError):
+            raise HTTPException(400, "item_id required")
+        pl.remove_item(conn, pid, item_id)        # permanent edit
+        feeder.resync_rotation(conn)              # take effect on air now
+        return {"ok": True}
 
     # ---------------------------------------- playlist schedule (shows)
 

@@ -97,7 +97,7 @@ class EngineSupervisor:
 
         self._status_lock = threading.Lock()
         self._status = {"now_playing": None, "now_title": None,
-                        "now_source": None, "duration": None,
+                        "now_source": None, "now_id": None, "duration": None,
                         "position": None, "paused": False,
                         "stop_after_current": False,
                         "emergency_mode": False, "forced_emergency": False,
@@ -236,11 +236,11 @@ class EngineSupervisor:
                              pending_ids=self._pending_ids())
             self._ensure_next_appended()
             self._set_status(now_title=e.get("title"),
-                             now_source=e.get("source"))
+                             now_source=e.get("source"), now_id=e.get("id"))
         else:
             source = "emergency" if path != self._baked_in else "baked_in"
             self._journal.append("track_start", path=path, source=source)
-            self._set_status(now_title=None, now_source=source)
+            self._set_status(now_title=None, now_source=source, now_id=None)
         self._set_status(now_playing=path, duration=None)
         # "Stop after current song": the previous song has ended and this one
         # just loaded — hold it at the start until the operator goes on air.

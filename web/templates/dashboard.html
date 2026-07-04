@@ -85,8 +85,10 @@
     </details>
   </div>
   <div class="card">
-    <h2>Coming up</h2>
-    <ol id="queue-list" class="queue"><li class="muted">loading…</li></ol>
+    <h2 id="rot-title">Now playing list</h2>
+    <input type="text" id="rot-search" class="rot-search" autocomplete="off"
+           placeholder="🔎 Search this playlist…" oninput="renderRotation()">
+    <ol id="rot-list" class="queue"><li class="muted">loading…</li></ol>
   </div>
   <div class="card">
     <h2>Playlists on air</h2>
@@ -316,72 +318,84 @@ async function removeSpot(id) {
   refreshSpots();
 }
 
-// ---- interactive "Coming up" queue: click for actions, drag to reorder
-let lastPending = [];
-let qSig = "";
-let qBusy = false;     // true while a menu is open or a drag is in progress
-let openId = null;     // which item's action row is showing
-let dragId = null;
+// ---- the live rotation playlist: whole list, drag to reorder, remove.
+// Edits save to the playlist and re-sync what's on air immediately.
+let rotItems = [];
+let rotNowId = null;
+let rotPid = null;
+let rotSig = "";
+let rotBusy = false;       // true mid-drag (don't let a poll redraw)
+let rotDragId = null;
+let rotLastNow = null;     // for auto-scrolling when the play-head moves
+let rotScrolledAt = 0;     // when the user last scrolled (suppress auto-scroll)
 
-function renderQueue(pending) {
-  const ol = document.getElementById("queue-list");
+async function refreshRotation() {
+  try {
+    const d = await (await fetch("/api/rotation")).json();
+    document.getElementById("rot-title").textContent =
+      d.playlist ? d.playlist.name : "Now playing list";
+    rotItems = d.items; rotNowId = d.now_item_id;
+    rotPid = d.playlist ? d.playlist.id : null;
+    const sig = rotItems.map(i => i.id).join(",") + "|" + rotNowId;
+    if (!rotBusy && sig !== rotSig) { rotSig = sig; renderRotation(); }
+  } catch (e) { /* next poll */ }
+}
+function rotIcon(t) {
+  return t === "file" ? "" : "📁 ";  // folder-rotation / folder-newest
+}
+function renderRotation() {
+  const ol = document.getElementById("rot-list");
+  const q = document.getElementById("rot-search").value.trim().toLowerCase();
   ol.innerHTML = "";
-  if (!pending.length) {
-    ol.innerHTML = "<li class='muted'>Queue is empty</li>";
+  if (!rotItems.length) {
+    ol.innerHTML = "<li class='muted'>No rotation on air — put a playlist " +
+      "on air from the Playlists page.</li>";
     return;
   }
-  for (const e of pending) {
+  const filtering = q.length > 0;
+  let shown = 0, nowEl = null;
+  for (const it of rotItems) {
+    if (filtering && !it.title.toLowerCase().includes(q)) continue;
+    shown++;
     const li = document.createElement("li");
-    li.className = "qitem" + (e.id === dragId ? " dragging" : "");
-    li.draggable = true;
-    li.dataset.id = e.id;
-
+    li.className = "qitem" + (it.id === rotNowId ? " qnow" : "") +
+                   (it.id === rotDragId ? " dragging" : "");
+    li.dataset.id = it.id;
+    li.draggable = !filtering;               // reordering needs the full list
     const row = document.createElement("div");
     row.className = "qrow";
     const grip = document.createElement("span");
-    grip.className = "qgrip"; grip.textContent = "☰";  // ☰
+    grip.className = "qgrip"; grip.textContent = filtering ? "" : "☰";
     const title = document.createElement("span");
     title.className = "qtitle";
-    title.textContent = e.title + (e.duration ? "  (" + fmt(e.duration) + ")" : "");
-    row.appendChild(grip); row.appendChild(title);
-    row.onclick = () => {
-      openId = (openId === e.id) ? null : e.id;
-      qBusy = openId != null;
-      renderQueue(lastPending);
-    };
+    title.textContent = (it.id === rotNowId ? "▶ " : "") +
+                        rotIcon(it.item_type) + it.title;
+    const del = document.createElement("button");
+    del.className = "btn btn-sm rot-x"; del.textContent = "✕";
+    del.title = "Remove from playlist";
+    del.onclick = (ev) => { ev.stopPropagation(); removeRotItem(it.id, it.title); };
+    row.appendChild(grip); row.appendChild(title); row.appendChild(del);
     li.appendChild(row);
-
-    // build the action row ONLY for the one open item (never for the rest)
-    if (openId != null && e.id === openId) {
-      const acts = document.createElement("div");
-      acts.className = "qacts";
-      for (const [act, label, cls] of [
-          ["play", "▶ Play now", "btn-green"],
-          ["cue", "⏭ Cue next", ""],
-          ["remove", "✖ Remove", "btn-red"]]) {
-        const b = document.createElement("button");
-        b.className = "btn btn-sm " + cls;
-        b.textContent = label;
-        b.onclick = (ev) => { ev.stopPropagation(); queueAction(e.id, act); };
-        acts.appendChild(b);
-      }
-      li.appendChild(acts);
+    if (!filtering) {
+      li.addEventListener("dragstart", () => {
+        rotDragId = it.id; rotBusy = true; li.classList.add("dragging");
+      });
+      li.addEventListener("dragend", () => finishRotDrag(li));
     }
-
-    li.addEventListener("dragstart", () => {
-      dragId = e.id; qBusy = true; openId = null;
-      li.classList.add("dragging");
-    });
-    li.addEventListener("dragend", async () => {
-      li.classList.remove("dragging");
-      const order = [...ol.querySelectorAll(".qitem")].map(x => x.dataset.id);
-      dragId = null; qBusy = false; qSig = "";
-      await reorderQueue(order);
-    });
+    if (it.id === rotNowId) nowEl = li;
     ol.appendChild(li);
   }
+  if (filtering)
+    ol.insertAdjacentHTML("afterbegin",
+      "<li class='muted rot-hint'>" + shown + " match(es) — clear search to " +
+      "drag-reorder</li>");
+  // auto-scroll to the play-head when it moves (unless the user is browsing)
+  if (nowEl && rotNowId !== rotLastNow && !filtering &&
+      Date.now() - rotScrolledAt > 8000) {
+    nowEl.scrollIntoView({block: "center"});
+  }
+  rotLastNow = rotNowId;
 }
-
 function dragAfter(container, y) {
   const items = [...container.querySelectorAll(".qitem:not(.dragging)")];
   let best = { offset: -Infinity, el: null };
@@ -392,23 +406,25 @@ function dragAfter(container, y) {
   }
   return best.el;
 }
-
-async function queueAction(id, act) {
-  openId = null; qBusy = false; qSig = "";
-  const url = act === "play" ? "/api/queue/play_now"
-            : act === "cue"  ? "/api/queue/cue_next"
-            : "/api/queue/remove";
-  const r = await fetch(url, {method: "POST",
-    headers: {"Content-Type": "application/json"}, body: JSON.stringify({id})});
-  if (!r.ok) alert((await r.json().catch(() => ({}))).detail || "Could not do that");
-  refresh();
-}
-
-async function reorderQueue(order) {
-  await fetch("/api/queue/reorder", {method: "POST",
+async function finishRotDrag(li) {
+  li.classList.remove("dragging");
+  const ol = document.getElementById("rot-list");
+  const item_ids = [...ol.querySelectorAll(".qitem")].map(x => Number(x.dataset.id));
+  rotDragId = null; rotBusy = false; rotSig = "";
+  const r = await fetch("/api/rotation/reorder", {method: "POST",
     headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({order})});
-  refresh();
+    body: JSON.stringify({item_ids})});
+  if (!r.ok) alert((await r.json().catch(() => ({}))).detail || "Reorder failed");
+  refreshRotation();
+}
+async function removeRotItem(id, title) {
+  if (!confirm("Remove from the playlist for good?\n\n" + title)) return;
+  rotSig = "";
+  const r = await fetch("/api/rotation/remove", {method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({item_id: id})});
+  if (!r.ok) alert((await r.json().catch(() => ({}))).detail || "Remove failed");
+  refreshRotation();
 }
 
 async function refresh() {
@@ -454,10 +470,6 @@ async function refresh() {
       sa.textContent = "⏏ Stop after current Song";
       sa.classList.add("btn-yellow"); sa.classList.remove("btn-green");
     }
-    lastPending = q.pending;
-    // don't redraw mid-drag or with a menu open (it'd cancel the interaction)
-    const sig = q.pending.map(e => e.id).join(",");
-    if (!qBusy && sig !== qSig) { renderQueue(q.pending); qSig = sig; }
   } catch (e) {
     document.getElementById("offline-banner").hidden = false;
     const oa = document.getElementById("onair");
@@ -505,7 +517,8 @@ async function engineOp(op) {
   refresh();
 }
 // live drag-reorder: slot the dragged item where the cursor is
-document.getElementById("queue-list").addEventListener("dragover", (ev) => {
+const rotListEl = document.getElementById("rot-list");
+rotListEl.addEventListener("dragover", (ev) => {
   ev.preventDefault();
   const ol = ev.currentTarget;
   const dragging = ol.querySelector(".dragging");
@@ -514,13 +527,15 @@ document.getElementById("queue-list").addEventListener("dragover", (ev) => {
   if (after == null) ol.appendChild(dragging);
   else ol.insertBefore(dragging, after);
 });
+rotListEl.addEventListener("scroll", () => { rotScrolledAt = Date.now(); });
 
 refresh(); refreshTiles(); loadPlaylistOptions(); refreshSchedule();
-loadSpotFolders(); refreshSpots();
+loadSpotFolders(); refreshSpots(); refreshRotation();
 setInterval(refresh, 2000);
 setInterval(refreshTiles, 10000);
 setInterval(refreshSchedule, 5000);
 setInterval(refreshSpots, 5000);
+setInterval(refreshRotation, 4000);
 setInterval(tickSpotCountdowns, 1000);
 </script>
 {% endblock %}

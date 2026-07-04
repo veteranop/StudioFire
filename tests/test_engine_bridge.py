@@ -399,6 +399,41 @@ def main():
               client.post("/api/spots",
                           json={"folder_key": "dir_ads", "trigger": "clock",
                                 "clock_minutes": "nope"}).status_code == 400)
+
+        # ---- the rotation playlist shown in full, editable, with now-marker
+        client.post(f"/api/playlists/{pid}/activate")
+        check("rotation on air", wait_for(
+              lambda: engine.status().get("now_source") == "playlist", 10,
+              "rot on air"))
+        rot = client.get("/api/rotation").json()
+        item_ids = [it["id"] for it in rot["items"]]
+        check("rotation returns the whole playlist",
+              rot["playlist"]["id"] == pid and len(item_ids) == 4)
+        check("rotation marks the on-air item", wait_for(
+              lambda: client.get("/api/rotation").json()["now_item_id"]
+              in set(item_ids), 8, "now-marker"))
+
+        # reorder: reverse -> saved to the playlist AND re-synced on air
+        r = client.post("/api/rotation/reorder",
+                        json={"item_ids": list(reversed(item_ids))})
+        check("rotation reorder accepted", r.status_code == 200)
+        check("reorder is saved to the playlist permanently",
+              [i["id"] for i in pl.get_items(conn, pid)] == list(reversed(item_ids)))
+        check("still on air after reorder (re-synced, not dead)",
+              engine.status().get("now_playing")
+              and not engine.status().get("emergency_mode"))
+
+        # remove a song that isn't the one playing -> saved + re-synced
+        now_item = client.get("/api/rotation").json()["now_item_id"]
+        victim = next(i for i in item_ids if i != now_item)
+        check("rotation remove accepted",
+              client.post("/api/rotation/remove",
+                          json={"item_id": victim}).status_code == 200)
+        check("remove is saved to the playlist permanently",
+              victim not in {i["id"] for i in pl.get_items(conn, pid)})
+        check("rotation reorder rejects a stale id set",
+              client.post("/api/rotation/reorder",
+                          json={"item_ids": [999999]}).status_code == 409)
         conn3.close()
     finally:
         ctl.stop()

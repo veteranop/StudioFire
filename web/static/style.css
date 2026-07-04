@@ -101,13 +101,29 @@ input {
   padding: .55rem .7rem; cursor: pointer; user-select: none;
 }
 .qrow:hover { background: #202a36; border-radius: 8px; }
-.qgrip { color: var(--muted); cursor: grab; font-size: 1rem; }
-.qtitle { flex: 1; }
+.qgrip { color: var(--muted); cursor: grab; font-size: 1rem; width: 1rem; }
+.qtitle { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .qacts {
   display: flex; gap: .5rem; flex-wrap: wrap;
   padding: 0 .7rem .6rem 2.1rem;
 }
 .qacts[hidden] { display: none; }
+
+/* rotation list: now-marker, search, per-row remove */
+.rot-search {
+  width: 100%; margin: 0 0 .8rem; padding: .55rem .8rem; font-size: 1rem;
+  color: var(--text); background: var(--bg);
+  border: 1px solid var(--border); border-radius: 8px;
+}
+.qnow { border-color: var(--green); background: #17271d; }
+.qnow .qtitle { font-weight: 700; color: #7ee2a8; }
+.rot-x {
+  color: var(--muted); border-color: transparent; background: transparent;
+  padding: .1rem .45rem; font-size: 1rem; opacity: 0; flex: 0 0 auto;
+}
+.qitem:hover .rot-x { opacity: 1; }
+.rot-x:hover { color: #ff9b9b; background: #2d1a1a; }
+.rot-hint { padding: .3rem .2rem; font-size: .9rem; }
 
 /* playlist schedule + spots (On Air side panels) */
 .sched-h { margin: 1.2rem 0 .4rem; font-size: 1rem; color: var(--muted);

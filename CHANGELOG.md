@@ -16,6 +16,12 @@ plain English a non-technical operator can understand.
   still kicks in on its own if the playlist ever can't continue.
 
 ### Changed
+- The middle On Air column now shows the WHOLE rotation playlist (not just the
+  pre-cached next ~10), with the song that's on air marked and auto-scrolled
+  into view, and a search box to jump around a long list. Drag to reorder or
+  remove a song and it's saved to the playlist for good — and the change takes
+  effect on air immediately (the current song keeps playing; everything after
+  it re-syncs to your edit). No more editing a throwaway buffer.
 - The On Air page got a professional facelift: the StudioFire logo now sits in
   the top-left, the three columns (Upcoming spots, Coming up, Playlists on air)
   have room to breathe instead of feeling cramped, section headers are cleaner,
