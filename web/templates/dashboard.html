@@ -206,25 +206,27 @@ function renderQueue(pending) {
     row.appendChild(grip); row.appendChild(title);
     row.onclick = () => {
       openId = (openId === e.id) ? null : e.id;
-      qBusy = openId !== null;
+      qBusy = openId != null;
       renderQueue(lastPending);
     };
     li.appendChild(row);
 
-    const acts = document.createElement("div");
-    acts.className = "qacts";
-    acts.hidden = e.id !== openId;
-    for (const [act, label, cls] of [
-        ["play", "▶ Play now", "btn-green"],
-        ["cue", "⏭ Cue next", ""],
-        ["remove", "✖ Remove", "btn-red"]]) {
-      const b = document.createElement("button");
-      b.className = "btn btn-sm " + cls;
-      b.textContent = label;
-      b.onclick = (ev) => { ev.stopPropagation(); queueAction(e.id, act); };
-      acts.appendChild(b);
+    // build the action row ONLY for the one open item (never for the rest)
+    if (openId != null && e.id === openId) {
+      const acts = document.createElement("div");
+      acts.className = "qacts";
+      for (const [act, label, cls] of [
+          ["play", "▶ Play now", "btn-green"],
+          ["cue", "⏭ Cue next", ""],
+          ["remove", "✖ Remove", "btn-red"]]) {
+        const b = document.createElement("button");
+        b.className = "btn btn-sm " + cls;
+        b.textContent = label;
+        b.onclick = (ev) => { ev.stopPropagation(); queueAction(e.id, act); };
+        acts.appendChild(b);
+      }
+      li.appendChild(acts);
     }
-    li.appendChild(acts);
 
     li.addEventListener("dragstart", () => {
       dragId = e.id; qBusy = true; openId = null;
