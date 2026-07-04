@@ -100,6 +100,24 @@ def main():
                        ).fetchone()
     check("returned file un-flagged", row["missing"] == 0)
 
+    # ---- flaky-NAS protection: a whole folder going unreachable must NOT flag
+    # its tracks missing (that would wipe them from search). We can't reach into
+    # it this pass, so leave those rows exactly as they were.
+    import shutil
+    shutil.rmtree(os.path.join(nas, "jazz"))
+    stats = scan(conn, nas)
+    check("unreadable folder doesn't flag its tracks missing",
+          stats["missing"] == 0)
+    jazz = conn.execute("SELECT missing FROM tracks WHERE path LIKE '%jazz%'"
+                        ).fetchall()
+    check("that folder's tracks stay searchable (missing=0)",
+          bool(jazz) and all(r["missing"] == 0 for r in jazz))
+    # but a file removed from a folder that IS still readable is flagged
+    os.remove(os.path.join(nas, "rock", "song2.wav"))
+    stats = scan(conn, nas)
+    check("missing still flags a file in a readable folder",
+          stats["missing"] == 1)
+
     # ---- status row for the GUI tile
     import json
     status = json.loads(db.get_setting(conn, "indexer_status"))

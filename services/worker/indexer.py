@@ -70,8 +70,10 @@ def scan(conn: sqlite3.Connection, root: str,
     known = {row["path"]: (row["mtime"], row["size"])
              for row in conn.execute("SELECT path, mtime, size FROM tracks")}
     seen: set[str] = set()
+    walked_dirs: set[str] = set()  # folders os.walk could actually read
 
     for dirpath, dirnames, filenames in os.walk(root):
+        walked_dirs.add(os.path.normcase(os.path.normpath(dirpath)))
         dirnames.sort()
         if stop_check():
             break
@@ -114,9 +116,16 @@ def scan(conn: sqlite3.Connection, root: str,
                      st.st_size, st.st_mtime, time.time()))
             stats["added" if prev is None else "updated"] += 1
 
-    # flag rows whose files vanished (don't delete — playlists may reference)
-    gone = [p for p in known if p not in seen and p.startswith(
-        os.path.join(root, ""))]
+    # Flag rows whose files vanished (don't delete — playlists may reference).
+    # ONLY flag a file whose folder was actually readable this pass: a
+    # flaky/slow NAS that hides a whole subfolder must not mark its tracks
+    # missing (that would wipe them from search). Files in folders os.walk
+    # couldn't reach are left exactly as they were.
+    root_prefix = os.path.join(root, "")
+    gone = [p for p in known
+            if p not in seen and p.startswith(root_prefix)
+            and os.path.normcase(os.path.normpath(os.path.dirname(p)))
+            in walked_dirs]
     if gone and not stop_check():
         with conn:
             for p in gone:

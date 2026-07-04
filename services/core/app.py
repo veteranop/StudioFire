@@ -276,11 +276,14 @@ def create_app(cfg: dict) -> FastAPI:
         if not q:
             return []
         like = f"%{q}%"
+        # Include tracks currently flagged missing (marked offline) so the whole
+        # indexed library — including subfolders — is findable even when a flaky
+        # NAS scan wrongly flagged some. Present tracks are listed first.
         rows = conn.execute(
-            "SELECT id, path, title, artist, album, duration_sec "
-            "FROM tracks WHERE missing = 0 AND "
+            "SELECT id, path, title, artist, album, duration_sec, missing "
+            "FROM tracks WHERE "
             "  (title LIKE ? OR artist LIKE ? OR album LIKE ? OR path LIKE ?) "
-            "ORDER BY artist, title LIMIT 50",
+            "ORDER BY missing ASC, artist, title LIMIT 60",
             (like, like, like, like)).fetchall()
         return [dict(r) for r in rows]
 

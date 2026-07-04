@@ -246,6 +246,11 @@ async function doLibSearch() {
     info.textContent = (t.title || t.path.split(/[\\/]/).pop()) +
       (t.artist ? " — " + t.artist : "") +
       (t.duration_sec ? "  (" + fmt(t.duration_sec) + ")" : "");
+    if (t.missing) {
+      const m = document.createElement("span");
+      m.className = "lib-offline"; m.textContent = " · offline?";
+      info.appendChild(m);
+    }
     const btn = document.createElement("button");
     btn.className = "btn btn-sm btn-green"; btn.textContent = "⏭ Insert Next";
     btn.onclick = () => insertLibTrack(t, btn);
@@ -447,51 +452,58 @@ function renderRotation() {
     return;
   }
   const filtering = q.length > 0;
-  let shown = 0, nowEl = null;
-  for (const it of rotItems) {
-    if (filtering && !it.title.toLowerCase().includes(q)) continue;
-    shown++;
+  // songs before the on-air one already played THIS pass -> hide them (kept in
+  // the DOM, just display:none, so drag-reorder still has the full order). The
+  // on-air song is pinned to the top (sticky). Searching shows everything.
+  const nowIdx = filtering ? -1 : rotItems.findIndex(it => it.id === rotNowId);
+  let shown = 0;
+  rotItems.forEach((it, i) => {
+    if (filtering && !it.title.toLowerCase().includes(q)) return;
+    const isNow = it.id === rotNowId;
+    const played = nowIdx > 0 && i < nowIdx;    // already aired this pass
+    if (!played) shown++;
     const li = document.createElement("li");
-    li.className = "qitem" + (it.id === rotNowId ? " qnow" : "") +
+    li.className = "qitem" + (isNow ? " qnow" : "") + (played ? " qplayed" : "") +
                    (it.id === rotDragId ? " dragging" : "");
     li.dataset.id = it.id;
-    li.draggable = !filtering;               // reordering needs the full list
+    const movable = !filtering && !played && !isNow;  // reorder upcoming only
+    li.draggable = movable;
     const row = document.createElement("div");
     row.className = "qrow";
     const grip = document.createElement("span");
-    grip.className = "qgrip"; grip.textContent = filtering ? "" : "☰";
+    grip.className = "qgrip"; grip.textContent = movable ? "☰" : "";
     const title = document.createElement("span");
     title.className = "qtitle";
-    title.textContent = (it.id === rotNowId ? "▶ " : "") +
-                        rotIcon(it.item_type) + it.title;
+    title.textContent = (isNow ? "▶ " : "") + rotIcon(it.item_type) + it.title;
     const del = document.createElement("button");
     del.className = "btn btn-sm rot-x"; del.textContent = "✕";
     del.title = "Remove from playlist";
     del.onclick = (ev) => { ev.stopPropagation(); removeRotItem(it.id, it.title); };
     row.appendChild(grip); row.appendChild(title); row.appendChild(del);
     li.appendChild(row);
-    if (!filtering) {
+    if (movable) {
       li.addEventListener("dragstart", () => {
         rotDragId = it.id; rotBusy = true; li.classList.add("dragging");
       });
       li.addEventListener("dragend", () => finishRotDrag(li));
     }
-    if (it.id === rotNowId) nowEl = li;
     ol.appendChild(li);
-  }
+  });
   if (filtering)
     ol.insertAdjacentHTML("afterbegin",
       "<li class='muted rot-hint'>" + shown + " match(es) — clear search to " +
       "drag-reorder</li>");
-  // auto-scroll to the play-head when it moves (unless the user is browsing)
-  if (nowEl && rotNowId !== rotLastNow && !filtering &&
-      Date.now() - rotScrolledAt > 8000) {
-    nowEl.scrollIntoView({block: "center"});
+  // when the on-air song advances, return the panel to the top so the new
+  // current song shows first (unless the operator is scrolling right now)
+  if (rotNowId !== rotLastNow && !filtering &&
+      Date.now() - rotScrolledAt > 6000) {
+    ol.scrollTop = 0;
   }
   rotLastNow = rotNowId;
 }
 function dragAfter(container, y) {
-  const items = [...container.querySelectorAll(".qitem:not(.dragging)")];
+  const items = [...container.querySelectorAll(
+    ".qitem:not(.dragging):not(.qplayed):not(.qnow)")];
   let best = { offset: -Infinity, el: null };
   for (const child of items) {
     const box = child.getBoundingClientRect();

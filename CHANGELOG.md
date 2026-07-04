@@ -16,6 +16,15 @@ plain English a non-technical operator can understand.
   still kicks in on its own if the playlist ever can't continue.
 
 ### Changed
+- The rotation list now pins the on-air song to the top (it stays stuck there as
+  you scroll) and hides the songs already played this pass, so you can always see
+  where you are and what's coming. Reordering applies to the upcoming songs.
+- Library search now finds your whole indexed library, including deeply nested
+  Artist/Album/Song folders, and still lists tracks a scan flagged as unreachable
+  (marked "offline?") so a flaky NAS can't hide them from search.
+- Indexer no longer flags tracks missing when their folder simply couldn't be
+  read this pass (slow/hidden NAS subfolder) — only when the folder was readable
+  and the file was genuinely gone. Prevents a bad scan from wiping the library.
 - The On Air cockpit now uses the full width of a wide monitor instead of a
   cramped 1600px centre column: the rotation and History panels get real room,
   the spot rows stop wrapping, and song titles fit on one line. (Other pages
