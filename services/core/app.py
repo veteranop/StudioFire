@@ -140,25 +140,25 @@ def create_app(cfg: dict) -> FastAPI:
 
     @app.post("/api/system/restart")
     def api_system_restart(_=Depends(api_user)):
-        """Cycle all StudioFire services by launching restart-all.bat detached
-        (so it survives P2 being killed and relaunched). Guarded by
-        allow_gui_restart — turn it off on the on-air PC."""
+        """Cycle all StudioFire services via a console-independent Python helper
+        launched detached (so it survives P2 being killed and relaunched).
+        Guarded by allow_gui_restart — turn it off on the on-air PC."""
         if not cfg.get("allow_gui_restart", True):
             raise HTTPException(403, "GUI restart is disabled on this machine")
         import subprocess
-        bat = os.path.join(ROOT, "restart-all.bat")
-        if not os.path.exists(bat):
-            raise HTTPException(400, "restart-all.bat not found next to the app")
+        helper = os.path.join(ROOT, "scripts", "restart_all.py")
+        if not os.path.exists(helper):
+            raise HTTPException(400, "scripts/restart_all.py not found")
         flags = (getattr(subprocess, "DETACHED_PROCESS", 0)
                  | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
-        # Relaunch with the SAME interpreter P2 is running under (e.g. Anaconda),
-        # not whatever bare `python` resolves to on PATH — on this box that's the
-        # Windows Store stub, which lacks fastapi/mutagen, so the services would
-        # never come back. start-all.bat honours a preset %PYTHON%.
-        env = {**os.environ, "PYTHON": sys.executable}
-        subprocess.Popen(["cmd", "/c", bat], cwd=ROOT, close_fds=True,
-                         creationflags=flags, env=env)
-        log.warning("GUI-triggered full restart (python=%s)", sys.executable)
+        # Spawn with P2's OWN interpreter (Anaconda, with our deps — not the
+        # Windows Store `python` stub on PATH). The helper relaunches every
+        # service detached; a batch file's `start cmd /k` can't create windows
+        # from this no-console process, so the old approach stopped everything
+        # but never brought it back (box stuck on emergency filler, UI down).
+        subprocess.Popen([sys.executable, helper], cwd=ROOT, close_fds=True,
+                         stdin=subprocess.DEVNULL, creationflags=flags)
+        log.warning("GUI-triggered full restart via %s", helper)
         return {"ok": True}
 
     @app.get("/playlists", response_class=HTMLResponse)
