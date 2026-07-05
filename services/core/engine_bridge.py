@@ -245,8 +245,12 @@ class Feeder:
                 if e["id"] == now_id:
                     return e.get("pl_item_id")  # None for spots
         if now_playing:
+            # normalise: P1 reports all-backslash paths, the feeder stores the
+            # precache dir with forward slashes — same file, different string
+            target = os.path.normcase(os.path.normpath(now_playing))
             for e in st["fed"]:
-                if e.get("path") == now_playing:
+                p = e.get("path")
+                if p and os.path.normcase(os.path.normpath(p)) == target:
                     return e.get("pl_item_id")
         return None
 

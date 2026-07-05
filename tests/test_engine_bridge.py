@@ -439,6 +439,10 @@ def main():
               feeder._now_item_id(fake_st, "eng-B", None) == "l4")
         check("now-marker falls back to path when id is stale",
               feeder._now_item_id(fake_st, "GONE", "C:/cache/x.mp3") == "l3")
+        # P1 reports backslash paths; the feeder stores forward slashes — the
+        # match must survive that (this is what actually broke the highlight)
+        check("now-marker path match ignores slash direction",
+              feeder._now_item_id(fake_st, "GONE", "C:\\cache\\x.mp3") == "l3")
         check("now-marker is None when neither id nor path matches",
               feeder._now_item_id(fake_st, "GONE", "C:/cache/none.mp3") is None)
 
