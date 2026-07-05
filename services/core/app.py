@@ -26,6 +26,41 @@ WEB = os.path.join(ROOT, "web")
 log = logging.getLogger("core.app")
 
 
+def index_browse(conn, path: str, want: set, root: str) -> dict | None:
+    """List the immediate sub-folders/files of `path` FROM THE INDEX (local DB)
+    instead of a live os.listdir, when `path` is inside the music root. Browsing
+    /G live is thousands of SMB round-trips (~3 min over a VPN); the index has
+    every path already, so this is instant. Read-only — safe alongside the
+    indexer's writes (WAL). Returns None when `path` is outside the music root
+    (caller then lists it live). Only shows what's been indexed so far.
+    """
+    if not root:
+        return None
+    nroot = os.path.normcase(os.path.normpath(root))
+    ntarget = os.path.normcase(os.path.normpath(path))
+    if ntarget != nroot and not ntarget.startswith(nroot + os.sep):
+        return None  # not under the music root — list it live
+    rel = ntarget[len(nroot):].strip("\\/")
+    # rebuild the stored-path prefix: the root exactly as indexed + backslash rel
+    prefix = root if not rel else root.rstrip("\\/") + os.sep + rel.replace("/", os.sep)
+    rows = conn.execute(
+        "SELECT path FROM tracks WHERE missing = 0 AND path LIKE ?",
+        (prefix + os.sep + "%",)).fetchall()
+    cut = len(prefix) + 1  # strip "prefix\" (case differs but length matches)
+    dirs, files = set(), set()
+    for r in rows:
+        parts = r["path"][cut:].replace("/", os.sep).split(os.sep)
+        if len(parts) == 1:                       # a file directly in this dir
+            if want and os.path.splitext(parts[0])[1].lower() in want:
+                files.add(parts[0])
+        elif parts[0]:                            # a sub-folder
+            dirs.add(parts[0])
+    absn = os.path.abspath(path)
+    return {"path": absn, "parent": os.path.dirname(absn.rstrip("\\/")),
+            "dirs": sorted(dirs, key=str.lower),
+            "files": sorted(files, key=str.lower), "from_index": True}
+
+
 def create_app(cfg: dict) -> FastAPI:
     db.migrate(cfg["db_path"])
     sessions = auth.Sessions(auth.load_secret(cfg["secret_path"]))
@@ -210,10 +245,12 @@ def create_app(cfg: dict) -> FastAPI:
     _AUDIO_EXTS = {".mp3", ".m4a", ".mp4", ".aac", ".wav", ".flac", ".ogg"}
 
     @app.get("/api/fs/list")
-    def fs_list(path: str = "", files: str = "", _=Depends(api_user)):
+    def fs_list(path: str = "", files: str = "", conn=Depends(get_conn),
+                _=Depends(api_user)):
         """Browser for pickers. Always lists sub-folders; if `files` is given
         (comma list: 'audio', 'lst', or explicit exts) also lists matching
-        files so you can pick a single file / .lst."""
+        files so you can pick a single file / .lst. Paths inside the music root
+        are served from the index (fast over a VPN); everything else is live."""
         want = set()
         for tok in (files or "").split(","):
             tok = tok.strip().lower()
@@ -227,6 +264,13 @@ def create_app(cfg: dict) -> FastAPI:
             drives = [f"{c}:\\" for c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
                       if os.path.exists(f"{c}:\\")]
             return {"path": "", "parent": None, "dirs": drives, "files": []}
+        # music library: serve from the index so browsing works over a slow VPN
+        # (a live listdir of /G is thousands of SMB round-trips). .lst files
+        # aren't indexed, so fall through to live when the picker wants them.
+        if ".lst" not in want:
+            idx = index_browse(conn, path, want, cfg.get("nas_music_root") or "")
+            if idx is not None:
+                return idx
         norm = os.path.abspath(path)
         if not os.path.isdir(norm):
             raise HTTPException(400, "not a folder")

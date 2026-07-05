@@ -151,6 +151,22 @@ def main():
     check("fs bad path -> 400", client.get(
         "/api/fs/list", params={"path": td + "-nope"}).status_code == 400)
 
+    # paths inside the music root are served from the INDEX (fast over a VPN),
+    # not a live listdir. nas has the 2 indexed wavs at its root.
+    idxl = client.get("/api/fs/list",
+                      params={"path": nas, "files": "audio"}).json()
+    check("music-root browse served from the index",
+          idxl.get("from_index") is True)
+    check("index browse lists the indexed files",
+          "Highway Song.wav" in idxl["files"]
+          and "Blue Morning.wav" in idxl["files"])
+    check("index browse shows no phantom subfolders", idxl["dirs"] == [])
+    # .lst isn't indexed -> that picker still lists live (not from the index)
+    live = client.get("/api/fs/list",
+                      params={"path": nas, "files": "lst"}).json()
+    check("lst picker bypasses the index (lists live)",
+          not live.get("from_index"))
+
     # NAS yanked -> red tile
     os.rename(nas, nas + "-gone")
     tiles = {t["name"]: t for t in client.get("/api/health/tiles").json()}
