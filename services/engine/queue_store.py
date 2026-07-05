@@ -53,6 +53,19 @@ class QueueState:
             return self.entries[nxt]
         return None
 
+    def trim_history(self, keep: int) -> int:
+        """Drop already-played entries older than the last `keep`, so the queue
+        can't grow without bound over a long broadcast (the play journal is the
+        permanent as-aired record; this is just runtime memory). Everything from
+        the currently-playing entry onward (current + all pending) is untouched.
+        Returns how many were dropped (current_index shifts down by that)."""
+        if self.current_index <= keep:
+            return 0
+        drop = self.current_index - keep
+        del self.entries[:drop]
+        self.current_index -= drop
+        return drop
+
     def to_dict(self) -> dict:
         return {
             "queue_version": self.queue_version,

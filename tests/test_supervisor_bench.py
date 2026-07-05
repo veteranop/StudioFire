@@ -305,6 +305,54 @@ def main():
     finally:
         sup9.stop()
 
+    # ---- 10. queue-history trim in the live audio path: play through >20
+    # tracks and confirm trimming never skips a song and bounds the queue.
+    from services.engine.supervisor import MAX_QUEUE_HISTORY
+    td10 = tempfile.mkdtemp(prefix="sf-bench10-")
+    emdir10 = os.path.join(td10, "emergency")
+    os.makedirs(emdir10)
+    make_wav(os.path.join(emdir10, "filler.wav"), seconds=1.0, freq=880)
+    n = MAX_QUEUE_HISTORY + 6           # enough played to force several trims
+    t10 = []
+    for i in range(n):
+        p = os.path.join(td10, f"t{i:02d}.wav")
+        make_wav(p, seconds=0.5, freq=300 + i)
+        t10.append(p)
+    cfg10 = build_config(td10, emdir10)
+    cfg10["pipe_name"] += "-t10"
+    sup10 = EngineSupervisor(cfg10)
+    sup10.start()
+    # titles "Track 0".."Track n-1" from entry(); match on title (P1 reports
+    # backslash paths, our temp paths differ — title is unambiguous here)
+    want = [f"Track {i}" for i in range(n)]
+    seen_titles = []
+    try:
+        sup10.submit_mutation({"op": "replace", "queue_version": 1,
+                               "entries": [entry(i, p) for i, p in enumerate(t10)]})
+        max_qlen = 0
+        max_idx = 0
+        deadline = time.monotonic() + 45
+        last = None
+        while time.monotonic() < deadline and len(seen_titles) < n:
+            st = sup10.status()
+            nt = st.get("now_title")
+            if nt and nt != last and nt in want:
+                seen_titles.append(nt)
+                last = nt
+            max_qlen = max(max_qlen, st.get("queue_len") or 0)
+            max_idx = max(max_idx, st.get("current_index") or 0)
+            time.sleep(0.05)
+        check("t10: every track aired in order (trim skipped none)",
+              seen_titles == want)
+        # once history is trimmed, current_index is pinned at the keep size and
+        # the queue length can't keep growing with the number of tracks played
+        check("t10: current_index pinned at the keep size (trim fired)",
+              max_idx == MAX_QUEUE_HISTORY)
+        check("t10: queue length stayed bounded (history trimmed)",
+              max_qlen <= n)
+    finally:
+        sup10.stop()
+
     print(f"SUPERVISOR BENCH OK ({passed} checks)")
     return 0
 

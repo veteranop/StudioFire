@@ -37,6 +37,8 @@ log = logging.getLogger("engine.supervisor")
 BAKED_IN_DEFAULT = "av://lavfi:sine=frequency=600:sample_rate=48000"
 STALL_TICKS = 2          # position frozen for N watchdog ticks -> restart mpv
 RESTART_BACKOFF = 1.0    # seconds between consecutive mpv restarts
+MAX_QUEUE_HISTORY = 20   # played entries kept in the runtime queue (journal is
+                         # the permanent record); older ones are trimmed
 
 
 def playable(path: str) -> bool:
@@ -222,8 +224,15 @@ class EngineSupervisor:
         entry = self._match_queue_entry(path)
         if entry is not None:
             idx, e = entry
-            if idx != self._state.current_index:
+            changed = idx != self._state.current_index
+            if changed:
                 self._state.current_index = idx
+            # bound runtime memory: keep only the last N played entries. `e` is
+            # already captured, and current + pending are untouched, so the
+            # advance/prefetch below stay correct.
+            if self._state.trim_history(MAX_QUEUE_HISTORY):
+                changed = True
+            if changed:
                 self._store.save(self._state)
             if self._state.emergency_mode:
                 self._exit_emergency(reason="queue track started")

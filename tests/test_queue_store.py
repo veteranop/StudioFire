@@ -115,6 +115,23 @@ def main():
               ok and [e["id"] for e in s.entries]
               == ["p0", "cur", "a", "c"])
 
+        # ---- trim_history: bound the runtime queue, keep current + pending ----
+        def mk(n, cur):
+            st = QueueState(entries=[{"id": f"e{i}", "path": f"{i}"}
+                                     for i in range(n)], current_index=cur)
+            return st
+        st = mk(100, 90)          # 90 played, current at 90, 9 pending
+        dropped = st.trim_history(20)
+        check("trim drops old played beyond keep", dropped == 70
+              and len(st.entries) == 30 and st.current_index == 20)
+        check("trim keeps the currently-playing entry",
+              st.current_entry()["id"] == "e90")
+        check("trim keeps all pending after current",
+              st.entries[-1]["id"] == "e99" and st.next_entry()["id"] == "e91")
+        check("trim is a no-op when history is already short",
+              mk(25, 10).trim_history(20) == 0)
+        check("trim no-op keeps entries intact", len(mk(25, 10).entries) == 25)
+
     print(f"QUEUE STORE OK ({passed} checks)")
     return 0
 
