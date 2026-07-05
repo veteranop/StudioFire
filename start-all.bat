@@ -4,13 +4,20 @@ REM  StudioFire - start all services (dry-run / dev box).
 REM  For the real on-air PC, run these as auto-restarting
 REM  Windows services via NSSM instead (see DEPLOY.md).
 REM
-REM  Uses "python" from PATH. If Anaconda isn't on PATH, set it:
-REM     set PYTHON=C:\Users\<you>\anaconda3\python.exe
-REM  ...before running, or edit the line below.
+REM  Picks the interpreter in this order: an explicit %PYTHON% (the GUI restart
+REM  passes P2's own Anaconda interpreter), then a per-user Anaconda install,
+REM  then bare "python". The Windows Store `python` stub on PATH lacks our deps,
+REM  so we don't rely on PATH. Override any time:  set PYTHON=C:\path\python.exe
 REM ============================================================
 setlocal
 cd /d "%~dp0"
-if "%PYTHON%"=="" set "PYTHON=python"
+if "%PYTHON%"=="" (
+  if exist "%USERPROFILE%\anaconda3\python.exe" (
+    set "PYTHON=%USERPROFILE%\anaconda3\python.exe"
+  ) else (
+    set "PYTHON=python"
+  )
+)
 set "CFG=config\config.json"
 
 if not exist "%CFG%" (

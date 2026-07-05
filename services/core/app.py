@@ -12,6 +12,7 @@ import datetime
 import io
 import logging
 import os
+import sys
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
@@ -150,9 +151,14 @@ def create_app(cfg: dict) -> FastAPI:
             raise HTTPException(400, "restart-all.bat not found next to the app")
         flags = (getattr(subprocess, "DETACHED_PROCESS", 0)
                  | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
+        # Relaunch with the SAME interpreter P2 is running under (e.g. Anaconda),
+        # not whatever bare `python` resolves to on PATH — on this box that's the
+        # Windows Store stub, which lacks fastapi/mutagen, so the services would
+        # never come back. start-all.bat honours a preset %PYTHON%.
+        env = {**os.environ, "PYTHON": sys.executable}
         subprocess.Popen(["cmd", "/c", bat], cwd=ROOT, close_fds=True,
-                         creationflags=flags)
-        log.warning("GUI-triggered full restart")
+                         creationflags=flags, env=env)
+        log.warning("GUI-triggered full restart (python=%s)", sys.executable)
         return {"ok": True}
 
     @app.get("/playlists", response_class=HTMLResponse)
