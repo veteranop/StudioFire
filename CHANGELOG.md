@@ -7,6 +7,11 @@ plain English a non-technical operator can understand.
 
 ## [Unreleased]
 
+### Added
+- A ⟳ "restart everything" button next to the ON AIR light (and restart-all.bat)
+  to manually cycle all services during testing. Guarded by a config flag
+  (allow_gui_restart) so it can be turned off on the on-air PC.
+
 ### Changed
 - On Air controls are simpler and clearer. The 🚨 EMERGENCY button is gone;
   the three buttons are now GO / STOP — On Air (one master switch: STOP takes

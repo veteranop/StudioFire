@@ -9,6 +9,10 @@
 </nav>
 <div class="nav-right topbar-right">
   <div class="onair" id="onair">OFF AIR</div>
+  {% if allow_restart %}
+  <button id="btn-restart" class="restart-btn" onclick="restartSystem()"
+          title="Restart all StudioFire services (audio blips to filler)">⟳</button>
+  {% endif %}
   <div class="health-wrap">
     <button id="health-summary" class="health-pill h-green"
             onclick="toggleHealth()" aria-expanded="false">
@@ -663,6 +667,24 @@ async function engineOp(op) {
     method: "POST", headers: {"Content-Type": "application/json"},
     body: JSON.stringify({op})});
   refresh();
+}
+async function restartSystem() {
+  if (!confirm("Restart ALL StudioFire services now?\n\nAudio drops to " +
+               "emergency filler for a few seconds while it cycles. The page " +
+               "will reload when it's back.")) return;
+  try { await fetch("/api/system/restart", {method: "POST"}); } catch (e) {}
+  document.getElementById("offline-banner").hidden = false;
+  const oa = document.getElementById("onair");
+  oa.classList.remove("live"); oa.textContent = "RESTARTING…";
+  // wait for the web service to come back, then reload
+  const poll = setInterval(async () => {
+    try {
+      const r = await fetch("/api/queue", {cache: "no-store"});
+      if (r.status === 200 || r.status === 401) {
+        clearInterval(poll); location.reload();
+      }
+    } catch (e) { /* still down — keep waiting */ }
+  }, 2000);
 }
 // live drag-reorder: slot the dragged item where the cursor is
 const rotListEl = document.getElementById("rot-list");

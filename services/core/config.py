@@ -48,6 +48,9 @@ def load_config(path: str | None = None) -> dict:
         "secret_path": os.path.join(data_dir, "web_secret.key"),
         "bind_host": core.get("bind_host", "0.0.0.0"),
         "bind_port": int(core.get("bind_port", 8080)),
+        # dev/dry-run convenience: a GUI "restart everything" button. Set this
+        # to false on the ON-AIR PC so nobody can drop audio from the browser.
+        "allow_gui_restart": bool(core.get("allow_gui_restart", True)),
         "precache_target_minutes": int(core.get("precache_target_minutes", 45)),
         "engine_url": "http://%s:%d" % (engine.get("ipc_host", "127.0.0.1"),
                                         int(engine.get("ipc_port", 7701))),

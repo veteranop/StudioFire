@@ -134,7 +134,26 @@ def create_app(cfg: dict) -> FastAPI:
 
     @app.get("/", response_class=HTMLResponse)
     def dashboard(request: Request, sess: dict = Depends(page_user)):
-        return render(request, "dashboard.html", role=sess["role"])
+        return render(request, "dashboard.html", role=sess["role"],
+                      allow_restart=cfg.get("allow_gui_restart", True))
+
+    @app.post("/api/system/restart")
+    def api_system_restart(_=Depends(api_user)):
+        """Cycle all StudioFire services by launching restart-all.bat detached
+        (so it survives P2 being killed and relaunched). Guarded by
+        allow_gui_restart — turn it off on the on-air PC."""
+        if not cfg.get("allow_gui_restart", True):
+            raise HTTPException(403, "GUI restart is disabled on this machine")
+        import subprocess
+        bat = os.path.join(ROOT, "restart-all.bat")
+        if not os.path.exists(bat):
+            raise HTTPException(400, "restart-all.bat not found next to the app")
+        flags = (getattr(subprocess, "DETACHED_PROCESS", 0)
+                 | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
+        subprocess.Popen(["cmd", "/c", bat], cwd=ROOT, close_fds=True,
+                         creationflags=flags)
+        log.warning("GUI-triggered full restart")
+        return {"ok": True}
 
     @app.get("/playlists", response_class=HTMLResponse)
     def playlists_page(request: Request, sess: dict = Depends(page_user),

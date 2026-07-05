@@ -216,6 +216,15 @@ input {
   .onair.live { animation: none; box-shadow: 0 0 16px rgba(229,85,85,.9); }
 }
 
+/* manual "cycle / restart everything" button by the ON AIR light */
+.restart-btn {
+  cursor: pointer; width: 2.2rem; height: 2.2rem; border-radius: 50%;
+  border: 1px solid var(--border); background: #26303d; color: var(--text);
+  font-size: 1.25rem; line-height: 1; display: flex; align-items: center;
+  justify-content: center; flex: 0 0 auto;
+}
+.restart-btn:hover { filter: brightness(1.2); color: #ffd27a; }
+
 /* studio-health pill in the top bar */
 .topbar-right { display: flex; align-items: center; gap: 1rem; }
 .health-wrap { position: relative; }
