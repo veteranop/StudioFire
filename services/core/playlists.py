@@ -178,6 +178,56 @@ def _renumber(conn: sqlite3.Connection, pid: int) -> None:
                      (pos, row["id"]))
 
 
+def relink_broken(conn: sqlite3.Connection, music_root: str,
+                  pid: int | None = None) -> dict:
+    """Repoint stale playlist file paths to the real file in the library.
+
+    Many playlists (imported before the Synology install) point at old
+    locations OUTSIDE the current music root. The files just moved — same
+    name, now under music_root. For each file item whose path is not under
+    music_root, look up the same-named file in the index (present only) and,
+    on a UNIQUE match, rewrite the item's path. Pure DB work — no NAS access,
+    so it's fast even over a slow link. Items already under the root are left
+    alone (they're correct, or just not scanned yet).
+    """
+    import collections
+    root_norm = os.path.normcase(os.path.normpath(music_root)) + os.sep
+    by_base: dict[str, set] = collections.defaultdict(set)
+    for row in conn.execute("SELECT path FROM tracks WHERE missing = 0"):
+        by_base[os.path.normcase(os.path.basename(row["path"]))].add(row["path"])
+
+    pids = ([pid] if pid is not None
+            else [r["id"] for r in conn.execute("SELECT id FROM playlists")])
+    stats = {"checked": 0, "in_place": 0, "relinked": 0,
+             "ambiguous": 0, "unmatched": 0, "unmatched_examples": []}
+    with conn:
+        for p in pids:
+            items = conn.execute(
+                "SELECT id, path FROM playlist_items "
+                "WHERE playlist_id = ? AND item_type = 'file'", (p,)).fetchall()
+            for it in items:
+                stats["checked"] += 1
+                if os.path.normcase(os.path.normpath(it["path"])).startswith(
+                        root_norm):
+                    stats["in_place"] += 1            # already under the root
+                    continue
+                matches = by_base.get(os.path.normcase(
+                    os.path.basename(it["path"])))
+                if not matches:
+                    stats["unmatched"] += 1
+                    if len(stats["unmatched_examples"]) < 25:
+                        stats["unmatched_examples"].append(
+                            os.path.basename(it["path"]))
+                    continue
+                if len(matches) > 1:
+                    stats["ambiguous"] += 1           # same name in 2+ folders
+                    continue
+                conn.execute("UPDATE playlist_items SET path = ? WHERE id = ?",
+                             (next(iter(matches)), it["id"]))
+                stats["relinked"] += 1
+    return stats
+
+
 # -------------------------------------------------------------- resolver
 
 def _audio_files(folder: str) -> list[str]:
@@ -345,3 +395,19 @@ def register(app: FastAPI) -> None:
             raise HTTPException(409, "order list out of sync — reload")
         reorder_items(conn, pid, body.item_ids)
         return {"ok": True}
+
+    def _music_root() -> str:
+        root = (app.state.cfg.get("nas_music_root") or "").strip()
+        if not root:
+            raise HTTPException(400, "music folder (nas_music_root) not set")
+        return root
+
+    @app.post("/api/playlists/relink")
+    def api_relink_all(conn=Depends(get_conn), _=Depends(api_user)):
+        """Repoint stale paths in ALL playlists to the real file in the index."""
+        return relink_broken(conn, _music_root())
+
+    @app.post("/api/playlists/{pid}/relink")
+    def api_relink_one(pid: int, conn=Depends(get_conn), _=Depends(api_user)):
+        _playlist_or_404(conn, pid)
+        return relink_broken(conn, _music_root(), pid)

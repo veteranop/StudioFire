@@ -48,6 +48,16 @@
     </tbody>
   </table>
 </div>
+<div class="card">
+  <h2>Fix broken file paths</h2>
+  <p class="muted">Playlists imported before the NAS move point at old file
+    locations. This finds each stale track and re-points it to the real file in
+    your library (matched by file name) — no re-import needed. Best run after
+    the library has finished indexing.</p>
+  <button class="btn btn-green" onclick="relinkAll()">🔧 Fix broken paths in
+    all playlists</button>
+  <div id="relink-result" style="margin-top:.7rem"></div>
+</div>
 {% if role == "admin" %}
 <div class="card">
   <h2>Backup &amp; restore</h2>
@@ -117,6 +127,26 @@ async function restoreBackup() {
   const body = await r.json();
   if (r.ok) { alert("Restored " + body.imported + " playlist(s)."); location.reload(); }
   else alert(body.detail || "Restore failed");
+}
+function esc(s) {
+  return (s || "").replace(/[&<>]/g,
+    c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;"}[c]));
+}
+async function relinkAll() {
+  if (!confirm("Scan every playlist and re-point tracks whose old path is no " +
+               "longer valid to the matching file in your library?")) return;
+  const el = document.getElementById("relink-result");
+  el.textContent = "Working…";
+  const r = await fetch("/api/playlists/relink", {method: "POST"});
+  const b = await r.json();
+  if (!r.ok) { el.textContent = b.detail || "Failed"; return; }
+  el.innerHTML =
+    "<strong>" + b.relinked + " track(s) re-pointed.</strong> " +
+    b.in_place + " already OK · " + b.unmatched + " not found in library · " +
+    b.ambiguous + " skipped (same name in 2+ folders)." +
+    (b.unmatched_examples && b.unmatched_examples.length
+      ? "<br><small class='muted'>Not found (examples): " +
+        b.unmatched_examples.slice(0, 10).map(esc).join(", ") + "</small>" : "");
 }
 async function deletePl(id, name) {
   if (!confirm('Delete playlist "' + name + '"? This cannot be undone.'))

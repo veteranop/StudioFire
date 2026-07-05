@@ -222,6 +222,34 @@ def main():
         "file": ("y.json", b"{\"other\": true}", "application/json")})
     check("restore rejects non-backup JSON", r.status_code == 400)
 
+    # ---- relink_broken: repoint stale (out-of-root) paths to indexed files
+    rpath = os.path.join(td, "relink.db")
+    db.migrate(rpath)
+    rc = db.connect(rpath)
+    for p in [r"Z:/G\Artist\song1.mp3", r"Z:/G\Other\song2.mp3",
+              r"Z:/G\A\dup.mp3", r"Z:/G\B\dup.mp3"]:
+        rc.execute("INSERT INTO tracks (path, indexed_at, missing) "
+                   "VALUES (?, ?, 0)", (p, time.time()))
+    rc.commit()
+    rpid = pl.create_playlist(rc, "Legacy")
+    pl.add_item(rc, rpid, "file", r"Z:\Local Disk\KDPI\song1.mp3", "one")  # stale
+    pl.add_item(rc, rpid, "file", r"Z:\G\Other\song2.mp3", "two")   # in place
+    pl.add_item(rc, rpid, "file", r"Z:\Old\dup.mp3", "dup")         # ambiguous
+    pl.add_item(rc, rpid, "file", r"Z:\Old\missing.mp3", "gone")    # unmatched
+    stats = pl.relink_broken(rc, "Z:/G", rpid)
+    check("relink: correct counts",
+          stats["relinked"] == 1 and stats["in_place"] == 1
+          and stats["ambiguous"] == 1 and stats["unmatched"] == 1)
+    paths = {i["title"]: i["path"] for i in pl.get_items(rc, rpid)}
+    check("relink: stale item repointed into the music root",
+          os.path.normcase(os.path.normpath(paths["one"]))
+          == os.path.normcase(os.path.normpath(r"Z:/G\Artist\song1.mp3")))
+    check("relink: in-place item untouched", paths["two"] == r"Z:\G\Other\song2.mp3")
+    check("relink: ambiguous name left as-is", paths["dup"] == r"Z:\Old\dup.mp3")
+    check("relink: unmatched reported",
+          "missing.mp3" in stats["unmatched_examples"])
+    rc.close()
+
     print(f"PLAYLISTS OK ({passed} checks)")
     return 0
 
