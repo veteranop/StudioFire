@@ -78,17 +78,32 @@ def _walk_paths(conn: sqlite3.Connection, root: str, t0: float,
     known = {row["path"]: (row["mtime"], row["size"])
              for row in conn.execute("SELECT path, mtime, size FROM tracks")}
     seen: set[str] = set()
-    walked_dirs: set[str] = set()  # folders os.walk could actually read
+    walked_dirs: set[str] = set()  # folders we could actually read
 
-    for dirpath, dirnames, filenames in os.walk(root):
-        walked_dirs.add(os.path.normcase(os.path.normpath(dirpath)))
-        dirnames.sort()
-        if stop_check():
-            break
-        for name in filenames:
-            if os.path.splitext(name)[1].lower() not in AUDIO_EXTS:
+    # Iterative DFS with os.scandir instead of os.walk + per-file os.stat. On
+    # Windows the directory enumeration already carries each entry's size and
+    # mtime, so DirEntry.stat() is FREE (no extra SMB round-trip per file) —
+    # critical when the NAS takes ~30ms per metadata op. Sorted so search fills
+    # in alphabetically (A->Z), same as the old os.walk.
+    stack = [root]
+    while stack and not stop_check():
+        d = stack.pop()
+        try:
+            entries = list(os.scandir(d))
+        except OSError:
+            continue  # unreadable folder — leave its known rows untouched
+        walked_dirs.add(os.path.normcase(os.path.normpath(d)))
+        subdirs = []
+        for e in entries:
+            try:
+                if e.is_dir():
+                    subdirs.append(e.path)
+                    continue
+            except OSError:
                 continue
-            path = os.path.join(dirpath, name)
+            if os.path.splitext(e.name)[1].lower() not in AUDIO_EXTS:
+                continue
+            path = e.path
             stats["scanned"] += 1
             if stats["scanned"] % THROTTLE_EVERY == 0:
                 time.sleep(THROTTLE_NAP)
@@ -97,7 +112,7 @@ def _walk_paths(conn: sqlite3.Connection, root: str, t0: float,
                 if stop_check():
                     break
             try:
-                st = os.stat(path)
+                st = e.stat(follow_symlinks=False)  # cached from scandir
             except OSError:
                 stats["errors"] += 1
                 continue
@@ -106,7 +121,7 @@ def _walk_paths(conn: sqlite3.Connection, root: str, t0: float,
             if prev is not None and prev == (st.st_mtime, st.st_size):
                 continue  # unchanged — the incremental fast path
             # record the path now (searchable immediately); tags come in PHASE 2
-            title = os.path.splitext(name)[0]
+            title = os.path.splitext(e.name)[0]
             with conn:
                 conn.execute(
                     "INSERT INTO tracks (path, title, artist, album, "
@@ -121,6 +136,9 @@ def _walk_paths(conn: sqlite3.Connection, root: str, t0: float,
                     "  tags_read = 0",
                     (path, title, st.st_size, st.st_mtime, time.time()))
             stats["added" if prev is None else "updated"] += 1
+        # descend last, alphabetically: push reverse-sorted so we pop A->Z
+        for sd in sorted(subdirs, key=str.lower, reverse=True):
+            stack.append(sd)
 
     # Flag rows whose files vanished (don't delete — playlists may reference).
     # ONLY flag a file whose folder was actually readable this pass: a
