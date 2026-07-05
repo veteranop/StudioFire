@@ -18,6 +18,7 @@ Everything here may fail at any time; P1 keeps playing regardless.
 
 from __future__ import annotations
 
+import datetime as _dt
 import hashlib
 import json
 import logging
@@ -349,6 +350,9 @@ class Feeder:
 
     def _start_show(self, conn, st: dict, entry: dict, status: dict) -> dict:
         sched.set_state(conn, entry["id"], "playing")
+        if (entry.get("recurrence") or "once") != "once":
+            # a recurring slot has aired for today — don't fire it again today
+            sched.mark_fired(conn, entry["id"], _dt.date.today().isoformat())
         st["show"] = {"sched_id": entry["id"],
                       "kind": entry.get("source_kind", "playlist"),
                       "playlist_id": entry.get("playlist_id"),
@@ -362,7 +366,8 @@ class Feeder:
     def _finish_show(self, conn, st: dict) -> None:
         show = st.get("show")
         if show:
-            sched.set_state(conn, show["sched_id"], "done")
+            # retire a one-time show; re-arm a recurring one for its next slot
+            sched.finish(conn, show["sched_id"])
             log.warning("feeder: show %d finished — back to the rotation",
                         show["sched_id"])
         st["show"] = None
@@ -379,6 +384,7 @@ class Feeder:
             self._finish_show(conn, st)
 
     def _maybe_fire_scheduled(self, conn, st: dict, status: dict) -> dict:
+        sched.expire_past(conn)  # retire shows past their stop date
         entry = sched.due(conn)
         if entry is None:
             return status
@@ -982,19 +988,59 @@ def register(app: FastAPI) -> None:
             "now": sched.now_local(),
             "upcoming": [{"id": e["id"], "name": e["name"],
                           "source_kind": e["source_kind"],
-                          "start_at": e["start_at"]}
+                          "start_at": e["start_at"],
+                          "recurrence": e.get("recurrence") or "once",
+                          "end_date": e.get("end_date"),
+                          "when": e["when"]}
                          for e in sched.list_waiting(conn)],
         }
+
+    def _sched_timing(body: dict) -> dict:
+        """Validate the when-to-play half of a schedule request into kwargs for
+        sched.add: a one-time start_at, or a daily/weekly recurring slot with an
+        optional run window (start_date .. end_date, the 'stop date')."""
+        rec = (body.get("recurrence") or "once").strip()
+        if rec not in ("once", "daily", "weekly"):
+            raise HTTPException(400, "recurrence must be once, daily or weekly")
+        if rec == "once":
+            start_at = (body.get("start_at") or "").strip() or None
+            if start_at and len(start_at) < 16:  # 'YYYY-MM-DDTHH:MM'
+                raise HTTPException(400, "start time must be YYYY-MM-DDTHH:MM")
+            return {"recurrence": "once", "start_at": start_at}
+        tod = (body.get("time_of_day") or "").strip()
+        try:
+            _dt.datetime.strptime(tod, "%H:%M")
+        except ValueError:
+            raise HTTPException(400, "time of day must be HH:MM")
+        mask = None
+        if rec == "weekly":
+            try:
+                mask = int(body.get("days_mask") or 0)
+            except (TypeError, ValueError):
+                mask = 0
+            if not mask:
+                raise HTTPException(400, "pick at least one weekday")
+        sd = (body.get("start_date") or "").strip() or None
+        ed = (body.get("end_date") or "").strip() or None
+        for d in (sd, ed):
+            if d is not None:
+                try:
+                    _dt.date.fromisoformat(d)
+                except ValueError:
+                    raise HTTPException(400, "dates must be YYYY-MM-DD")
+        if sd and ed and ed < sd:
+            raise HTTPException(400, "stop date is before the start date")
+        return {"recurrence": rec, "time_of_day": tod, "days_mask": mask,
+                "start_date": sd, "end_date": ed}
 
     @app.post("/api/schedule", status_code=201)
     def api_schedule_add(body: dict, conn=Depends(get_conn),
                          _=Depends(api_user)):
-        """Schedule a show: a playlist, a single audio file, or a .lst file."""
+        """Schedule a show: a playlist, a single audio file, or a .lst file,
+        one-time or recurring (daily/weekly) with an optional stop date."""
         kind = body.get("source_kind") or (
             "playlist" if body.get("playlist_id") is not None else None)
-        start_at = (body.get("start_at") or "").strip() or None
-        if start_at and len(start_at) < 16:  # 'YYYY-MM-DDTHH:MM'
-            raise HTTPException(400, "start time must be YYYY-MM-DDTHH:MM")
+        timing = _sched_timing(body)
         if kind == "playlist":
             try:
                 pid = int(body.get("playlist_id"))
@@ -1003,16 +1049,14 @@ def register(app: FastAPI) -> None:
             if conn.execute("SELECT 1 FROM playlists WHERE id = ?",
                             (pid,)).fetchone() is None:
                 raise HTTPException(404, "playlist not found")
-            return {"id": sched.add(conn, "playlist", playlist_id=pid,
-                                    start_at=start_at)}
+            return {"id": sched.add(conn, "playlist", playlist_id=pid, **timing)}
         if kind in ("file", "lst"):
             path = (body.get("source_path") or "").strip()
             if not path or not os.path.isfile(path):
                 raise HTTPException(400, "that file does not exist")
             if kind == "lst" and not path.lower().endswith(".lst"):
                 raise HTTPException(400, "that isn't a .lst file")
-            return {"id": sched.add(conn, kind, source_path=path,
-                                    start_at=start_at)}
+            return {"id": sched.add(conn, kind, source_path=path, **timing)}
         raise HTTPException(400, "source_kind must be playlist, file or lst")
 
     @app.delete("/api/schedule/{sid}")

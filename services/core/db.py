@@ -149,6 +149,24 @@ DROP TABLE playlist_schedule;
 ALTER TABLE playlist_schedule_new RENAME TO playlist_schedule;
 CREATE INDEX idx_sched_state ON playlist_schedule(state, start_at);
 """),
+    (5, """
+-- Recurring shows + a run window. A scheduled show can repeat every day or on
+-- chosen weekdays at a time-of-day, and stop after an end date (e.g. an event
+-- promo that runs 'until August'). 'once' rows keep using start_at unchanged.
+--   recurrence : 'once' (start_at) | 'daily' | 'weekly'
+--   time_of_day: 'HH:MM' local, for daily/weekly
+--   days_mask  : weekly weekday bitmask, bit0=Mon .. bit6=Sun
+--   start_date : 'YYYY-MM-DD' inclusive earliest air date (NULL = right away)
+--   end_date   : 'YYYY-MM-DD' inclusive last air date   (NULL = forever)
+--   last_fired : 'YYYY-MM-DD' of the last auto-fire, so a slot fires once a day
+-- (validated in code; SQLite ADD COLUMN can't safely carry cross-checks).
+ALTER TABLE playlist_schedule ADD COLUMN recurrence  TEXT NOT NULL DEFAULT 'once';
+ALTER TABLE playlist_schedule ADD COLUMN time_of_day TEXT;
+ALTER TABLE playlist_schedule ADD COLUMN days_mask   INTEGER;
+ALTER TABLE playlist_schedule ADD COLUMN start_date  TEXT;
+ALTER TABLE playlist_schedule ADD COLUMN end_date    TEXT;
+ALTER TABLE playlist_schedule ADD COLUMN last_fired  TEXT;
+"""),
 ]
 
 SCHEMA_VERSION = MIGRATIONS[-1][0]

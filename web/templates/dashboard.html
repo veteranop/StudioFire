@@ -142,9 +142,39 @@
           </div>
         </label>
       </div>
-      <label>Start time <span class="muted">(leave blank to cue for manual start)</span>
-        <input type="datetime-local" id="sched-time">
+      <label>How often
+        <select id="sched-rec" style="width:100%" onchange="schedRecChange()">
+          <option value="once">Just once</option>
+          <option value="daily">Every day</option>
+          <option value="weekly">Certain weekdays</option>
+        </select>
       </label>
+      <div id="sched-once">
+        <label>Start time <span class="muted">(leave blank to cue for manual start)</span>
+          <input type="datetime-local" id="sched-time">
+        </label>
+      </div>
+      <div id="sched-repeat" hidden>
+        <label>Play at (time of day)
+          <input type="time" id="sched-tod">
+        </label>
+        <div id="sched-days" class="daypick" hidden>
+          <span class="muted">On these days:</span>
+          <label><input type="checkbox" class="dchk" data-bit="1">Mon</label>
+          <label><input type="checkbox" class="dchk" data-bit="2">Tue</label>
+          <label><input type="checkbox" class="dchk" data-bit="4">Wed</label>
+          <label><input type="checkbox" class="dchk" data-bit="8">Thu</label>
+          <label><input type="checkbox" class="dchk" data-bit="16">Fri</label>
+          <label><input type="checkbox" class="dchk" data-bit="32">Sat</label>
+          <label><input type="checkbox" class="dchk" data-bit="64">Sun</label>
+        </div>
+        <div class="row">
+          <label style="flex:1">Start date <span class="muted">(optional)</span>
+            <input type="date" id="sched-start-date"></label>
+          <label style="flex:1">Stop date <span class="muted">(optional)</span>
+            <input type="date" id="sched-end-date"></label>
+        </div>
+      </div>
       <button class="btn btn-green" onclick="addSchedule()">Add to schedule</button>
     </details>
   </div>
@@ -286,8 +316,13 @@ async function refreshSchedule() {
       const info = document.createElement("div");
       const kindTag = e.source_kind === "file" ? " <span class='src-tag'>file</span>"
         : e.source_kind === "lst" ? " <span class='src-tag'>.lst</span>" : "";
-      info.innerHTML = "<strong>" + esc(e.name) + "</strong>" + kindTag +
-        "<br><small class='muted'>" + esc(fmtWhen(e.start_at)) + "</small>";
+      const recTag = e.recurrence && e.recurrence !== "once"
+        ? " <span class='src-tag rep-tag'>🔁 " + esc(e.recurrence) + "</span>" : "";
+      const stopTag = e.end_date
+        ? " <span class='src-tag stop-tag'>⏳ until " + esc(e.end_date) + "</span>" : "";
+      info.innerHTML = "<strong>" + esc(e.name) + "</strong>" + kindTag + recTag +
+        stopTag + "<br><small class='muted'>" +
+        esc(e.when || fmtWhen(e.start_at)) + "</small>";
       const btns = document.createElement("div");
       btns.className = "item-btns";
       const start = document.createElement("button");
@@ -325,10 +360,16 @@ function pickSchedFile() {
         p.split(/[\\/]/).pop();
     });
 }
+function schedRecChange() {
+  const r = document.getElementById("sched-rec").value;
+  document.getElementById("sched-once").hidden = r !== "once";
+  document.getElementById("sched-repeat").hidden = r === "once";
+  document.getElementById("sched-days").hidden = r !== "weekly";
+}
 async function addSchedule() {
   const kind = document.getElementById("sched-kind").value;
-  const t = document.getElementById("sched-time").value;  // '' or ISO local
-  const body = {source_kind: kind, start_at: t};
+  const rec = document.getElementById("sched-rec").value;
+  const body = {source_kind: kind, recurrence: rec};
   if (kind === "playlist") {
     const pid = document.getElementById("sched-playlist").value;
     if (!pid) { alert("Pick a playlist first."); return; }
@@ -337,6 +378,22 @@ async function addSchedule() {
     if (!schedFilePath) { alert("Choose a file first."); return; }
     body.source_path = schedFilePath;
   }
+  if (rec === "once") {
+    body.start_at = document.getElementById("sched-time").value;  // '' or ISO
+  } else {
+    const tod = document.getElementById("sched-tod").value;       // 'HH:MM'
+    if (!tod) { alert("Set a time of day to play."); return; }
+    body.time_of_day = tod;
+    body.start_date = document.getElementById("sched-start-date").value;
+    body.end_date = document.getElementById("sched-end-date").value;
+    if (rec === "weekly") {
+      let mask = 0;
+      document.querySelectorAll("#sched-days .dchk:checked")
+        .forEach(c => mask |= Number(c.dataset.bit));
+      if (!mask) { alert("Pick at least one weekday."); return; }
+      body.days_mask = mask;
+    }
+  }
   const r = await fetch("/api/schedule", {method: "POST",
     headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
   if (!r.ok) {
@@ -344,6 +401,10 @@ async function addSchedule() {
     return;
   }
   document.getElementById("sched-time").value = "";
+  document.getElementById("sched-tod").value = "";
+  document.getElementById("sched-start-date").value = "";
+  document.getElementById("sched-end-date").value = "";
+  document.querySelectorAll("#sched-days .dchk").forEach(c => c.checked = false);
   schedFilePath = null;
   document.getElementById("sched-file-name").textContent = "none chosen";
   refreshSchedule();
