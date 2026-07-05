@@ -636,6 +636,24 @@ function renderRotation() {
   let shown = 0;
   rotItems.forEach((it, i) => {
     if (filtering && !it.title.toLowerCase().includes(q)) return;
+    if (it.item_type === "insert") {   // a cued one-off (library or spot)
+      shown++;
+      const li = document.createElement("li");
+      li.className = "qitem qcued"; li.dataset.id = it.id;
+      const row = document.createElement("div"); row.className = "qrow";
+      const badge = document.createElement("span");
+      badge.className = "cue-badge " + (it.kind === "spot" ? "cue-spot" : "cue-lib");
+      badge.textContent = it.kind === "spot" ? "SPOT" : "CUED";
+      const title = document.createElement("span");
+      title.className = "qtitle"; title.textContent = it.title;
+      const del = document.createElement("button");
+      del.className = "btn btn-sm rot-x"; del.textContent = "✕";
+      del.title = "Cancel this cue";
+      del.onclick = (ev) => { ev.stopPropagation(); cancelCue(it.id); };
+      row.appendChild(badge); row.appendChild(title); row.appendChild(del);
+      li.appendChild(row); ol.appendChild(li);
+      return;
+    }
     const isNow = it.id === rotNowId;
     const played = nowIdx > 0 && i < nowIdx;    // already aired this pass
     if (!played) shown++;
@@ -690,7 +708,7 @@ function renderRotation() {
 }
 function dragAfter(container, y) {
   const items = [...container.querySelectorAll(
-    ".qitem:not(.dragging):not(.qplayed):not(.qnow)")];
+    ".qitem:not(.dragging):not(.qplayed):not(.qnow):not(.qcued)")];
   let best = { offset: -Infinity, el: null };
   for (const child of items) {
     const box = child.getBoundingClientRect();
@@ -702,12 +720,20 @@ function dragAfter(container, y) {
 async function finishRotDrag(li) {
   li.classList.remove("dragging");
   const ol = document.getElementById("rot-list");
-  const item_ids = [...ol.querySelectorAll(".qitem")].map(x => Number(x.dataset.id));
+  const item_ids = [...ol.querySelectorAll(".qitem:not(.qcued)")]
+    .map(x => Number(x.dataset.id));
   rotDragId = null; rotBusy = false; rotSig = "";
   const r = await fetch("/api/rotation/reorder", {method: "POST",
     headers: {"Content-Type": "application/json"},
     body: JSON.stringify({item_ids})});
   if (!r.ok) alert((await r.json().catch(() => ({}))).detail || "Reorder failed");
+  refreshRotation();
+}
+async function cancelCue(id) {   // drop a queued one-off before it airs
+  rotSig = "";
+  await fetch("/api/queue/remove", {method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({id})});
   refreshRotation();
 }
 async function removeRotItem(id, title) {

@@ -211,6 +211,11 @@ def main():
         check("cued track heads the queue view",
               r.json()["pending"] and
               r.json()["pending"][0]["title"] == "Cued!")
+        rot_ins = client.get("/api/rotation").json()["items"]
+        cued = [it for it in rot_ins if it.get("item_type") == "insert"]
+        check("cued track shows in the on-air list as an insert",
+              any(it["title"] == "Cued!" and it["kind"] == "cued"
+                  for it in cued))
         check("play-next rejects unreadable file",
               client.post("/api/engine/play_next",
                           json={"path": tracks[3] + ".nope"})

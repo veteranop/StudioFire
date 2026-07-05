@@ -165,6 +165,15 @@ input {
 .qitem:hover .rot-x { opacity: 1; }
 .rot-x:hover { color: #ff9b9b; background: #2d1a1a; }
 .rot-hint { padding: .3rem .2rem; font-size: .9rem; }
+/* a cued one-off spliced in after the current song (library insert / spot) */
+.qcued { border-color: #3a6ea5; background: #16222f; }
+.qcued .rot-x { opacity: 1; }        /* cancel is always visible on a cue */
+.cue-badge {
+  font-size: .62rem; font-weight: 800; letter-spacing: .5px;
+  padding: .12rem .4rem; border-radius: 5px; flex: 0 0 auto; color: #0b0f14;
+}
+.cue-lib { background: #7ee2a8; }    /* library "Insert Next" */
+.cue-spot { background: #f3c969; }   /* station spot / ID */
 .rot-showbadge {
   font-size: .7rem; font-weight: 800; letter-spacing: .5px;
   color: #fff; background: var(--red); padding: .12rem .45rem;

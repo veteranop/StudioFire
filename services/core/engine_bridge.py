@@ -872,19 +872,38 @@ def register(app: FastAPI) -> None:
         whatever is airing so it always matches Now Playing. It's read-only
         while a show is on (you edit your rotation, not a one-time show)."""
         st = feeder._load_state(conn)
-        now_item_id = feeder._now_item_id(st, (engine.status() or {}).get("now_id"))
+        now_eid = (engine.status() or {}).get("now_id")
+        now_item_id = feeder._now_item_id(st, now_eid)
 
         def _fmt(items):
             return [{"id": it["id"], "item_type": it["item_type"],
                      "title": it["title"] or os.path.splitext(
                          os.path.basename(it["path"]))[0]} for it in items]
 
+        def _with_inserts(items):
+            """Splice cued one-offs (library 'Insert Next' + spots) into the
+            on-air list right after the current song, so a DJ sees what they
+            just queued instead of it being invisible in the engine queue."""
+            inserts = [
+                {"id": e["id"], "item_type": "insert",
+                 "kind": "spot" if e.get("prog") == "spot" else "cued",
+                 "title": e.get("title") or "…"}
+                for e in st.get("fed", [])
+                if e["id"] != now_eid and e.get("prog") in ("manual", "spot")]
+            if not inserts:
+                return items
+            at = next((i for i, it in enumerate(items)
+                       if it["id"] == now_item_id), -1)
+            for off, ins in enumerate(inserts):
+                items.insert(at + 1 + off, ins)
+            return items
+
         if st.get("show"):  # a show is on air — follow it (playlist/file/lst)
             cur = sched.playing(conn)
             name = (cur.get("name") if cur else None) or "Show on air"
             return {"playlist": {"id": None, "name": name}, "is_show": True,
                     "now_item_id": now_item_id,
-                    "items": _fmt(feeder._show_items(conn, st))}
+                    "items": _with_inserts(_fmt(feeder._show_items(conn, st)))}
         base = coredb.get_setting(conn, "active_playlist_id")
         row = conn.execute("SELECT id, name FROM playlists WHERE id = ?",
                            (int(base),)).fetchone() if base else None
@@ -893,7 +912,7 @@ def register(app: FastAPI) -> None:
                     "is_show": False}
         return {"playlist": {"id": row["id"], "name": row["name"]},
                 "is_show": False, "now_item_id": now_item_id,
-                "items": _fmt(pl.get_items(conn, row["id"]))}
+                "items": _with_inserts(_fmt(pl.get_items(conn, row["id"])))}
 
     @app.get("/api/history")
     def api_history(limit: int = 40, conn=Depends(get_conn),
@@ -1143,7 +1162,7 @@ def register(app: FastAPI) -> None:
         st = feeder._load_state(conn)
         st["fed"].insert(0, {"id": entry["id"], "path": cached,
                              "duration": feeder._duration_of(conn, body.path),
-                             "title": title})
+                             "title": title, "prog": "manual"})
         feeder._save_state(conn, st)
         return {"ok": True, "title": title}
 
