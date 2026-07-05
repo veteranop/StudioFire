@@ -109,6 +109,9 @@ class Precache:
         os.makedirs(precache_dir, exist_ok=True)
         self._manifest_path = os.path.join(precache_dir, "manifest.json")
         self._manifest = self._load_manifest()
+        # the feeder loop AND API request threads both touch the manifest;
+        # serialize writes so os.replace can't race (Windows WinError 32)
+        self._lock = threading.Lock()
 
     def _load_manifest(self) -> dict:
         try:
@@ -120,13 +123,28 @@ class Precache:
             pass
         return {"files": {}}
 
-    def _save_manifest(self) -> None:
+    def _write_manifest(self) -> None:
+        """Atomic manifest write. Caller MUST hold self._lock (so json.dump
+        never iterates a dict another thread is mutating, and two threads
+        never fight over the .tmp / os.replace)."""
         tmp = self._manifest_path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(self._manifest, f, indent=1)
             f.flush()
             os.fsync(f.fileno())
-        os.replace(tmp, self._manifest_path)
+        # os.replace can transiently fail on Windows if AV/indexer briefly
+        # holds the target; retry a few times before giving up.
+        for attempt in range(6):
+            try:
+                os.replace(tmp, self._manifest_path)
+                return
+            except PermissionError:
+                time.sleep(0.05 * (attempt + 1))
+        log.warning("precache: manifest replace kept failing; leaving tmp")
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
 
     def cache_path_for(self, src: str) -> str:
         digest = hashlib.sha1(
@@ -161,23 +179,25 @@ class Precache:
             except OSError:
                 pass
             return None
-        self._manifest["files"][dst] = {
-            "src": src, "src_size": src_stat.st_size,
-            "src_mtime": src_stat.st_mtime}
-        self._save_manifest()
+        with self._lock:
+            self._manifest["files"][dst] = {
+                "src": src, "src_size": src_stat.st_size,
+                "src_mtime": src_stat.st_mtime}
+            self._write_manifest()
         return dst
 
     def evict_except(self, keep: set[str]) -> int:
         """Drop cached files not in keep (played/abandoned). Returns count."""
-        victims = [p for p in self._manifest["files"] if p not in keep]
-        for p in victims:
-            try:
-                os.remove(p)
-            except OSError:
-                pass
-            del self._manifest["files"][p]
-        if victims:
-            self._save_manifest()
+        with self._lock:
+            victims = [p for p in self._manifest["files"] if p not in keep]
+            for p in victims:
+                try:
+                    os.remove(p)
+                except OSError:
+                    pass
+                del self._manifest["files"][p]
+            if victims:
+                self._write_manifest()
         return len(victims)
 
 
