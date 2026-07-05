@@ -297,11 +297,21 @@ class EngineSupervisor:
             return self._ensure_next_appended()
         if self._expected_next_path == nxt["path"]:
             return  # already primed
-        # trim any stale pending entries in mpv's playlist, then append
-        count = self._try_get("playlist-count") or 1
-        while count > 1:
-            self._client.command("playlist-remove", count - 1)
-            count -= 1
+        # Reduce mpv's playlist to just the currently-playing file, then append
+        # the one true next. mpv KEEPS finished files in its playlist, so after
+        # an eof-advance the current track sits at playlist-pos > 0 with the
+        # played file(s) before it. The old code blindly removed the LAST entry
+        # ("count-1"), which after an advance is the CURRENT track — mpv stopped
+        # it (end-file reason 'stop') and fell through to the append, silently
+        # skipping ~every other queued item (spots included). Remove every entry
+        # except the current one, and never the current itself.
+        pos = self._try_get("playlist-pos")
+        count = self._try_get("playlist-count")
+        if isinstance(pos, int) and isinstance(count, int) and count > 0:
+            for i in range(count - 1, pos, -1):    # stale primes AFTER current
+                self._client.command("playlist-remove", i)
+            for i in range(pos - 1, -1, -1):        # played files BEFORE current
+                self._client.command("playlist-remove", i)
         self._client.command("loadfile", nxt["path"], "append")
         self._expected_next_path = nxt["path"]
 

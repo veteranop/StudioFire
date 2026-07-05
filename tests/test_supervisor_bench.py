@@ -13,6 +13,7 @@ Scenarios (real mpv, tiny generated WAVs, null audio output):
 
 Run: python tests/test_supervisor_bench.py   (silent; takes ~30-60s)
 """
+import datetime
 import math
 import os
 import struct
@@ -248,6 +249,61 @@ def main():
               "emergency_force_cleared" in journal_events(cfg4))
     finally:
         sup5.stop()
+
+    # ---- 9. no-skip guard: three tracks fed with a next always primed behind
+    # the current one. The old prime-trim bug removed the CURRENT playlist entry
+    # at each boundary (end-file reason 'stop'), skipping ~every other track —
+    # inaudible (no silence) so the torture gate never caught it. Every queued
+    # track must actually air, and no track may be stopped ~instantly.
+    td9 = tempfile.mkdtemp(prefix="sf-bench9-")
+    emdir9 = os.path.join(td9, "emergency")
+    os.makedirs(emdir9)
+    make_wav(os.path.join(emdir9, "filler.wav"), seconds=1.5, freq=880)
+    t9 = []
+    for i in range(3):
+        p = os.path.join(td9, f"track{i}.wav")
+        make_wav(p, seconds=2.0, freq=300 + 120 * i)
+        t9.append(p)
+    cfg9 = build_config(td9, emdir9)
+    cfg9["pipe_name"] += "-t9"
+    sup9 = EngineSupervisor(cfg9)
+    sup9.start()
+    try:
+        sup9.submit_mutation(
+            {"op": "replace", "queue_version": 1,
+             "entries": [entry(0, t9[0]), entry(1, t9[1]), entry(2, t9[2])]})
+        seen = set()
+        t0 = time.monotonic()
+        while time.monotonic() - t0 < 7:      # ~3 x 2s tracks
+            np = sup9.status()["now_playing"]
+            if np:
+                seen.add(np)
+            time.sleep(0.05)
+        check("t9: inner track 1 actually aired (not skipped)", t9[1] in seen)
+        check("t9: all three queued tracks aired",
+              all(t in seen for t in t9))
+        # the skip bug's signature: a track_start (A) immediately (<0.3s)
+        # 'stop'-ended and followed by a DIFFERENT track — i.e. A was dropped
+        # with no airtime and the queue jumped past it. (A same-file restart at
+        # session start is a benign handoff hiccup, not a content skip.)
+        evs9 = list(read_events(cfg9["journal_path"]))
+        starts = [e for e in evs9 if e["event"] == "track_start"]
+
+        def _t(e):
+            return datetime.datetime.fromisoformat(e["ts"])
+        skips = []
+        for i, (a, b) in enumerate(zip(evs9, evs9[1:])):
+            if not (a["event"] == "track_start" and b["event"] == "track_end"
+                    and b.get("reason") == "stop"
+                    and (_t(b) - _t(a)).total_seconds() < 0.3):
+                continue
+            nxt = next((e for e in evs9[i + 2:]
+                        if e["event"] == "track_start"), None)
+            if nxt and nxt.get("path") != a.get("path"):
+                skips.append(a.get("title"))
+        check("t9: no track skipped by a phantom boundary stop", not skips)
+    finally:
+        sup9.stop()
 
     print(f"SUPERVISOR BENCH OK ({passed} checks)")
     return 0
