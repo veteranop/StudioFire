@@ -429,6 +429,19 @@ def main():
               "trigger": "daily", "folder_key": "dir_ads",
               "time_of_day": "06:00", "end_date": "nope"}).status_code == 400)
 
+        # on-air marker resolves by engine id, and FALLS BACK to the cached
+        # file path when the id P1 reports isn't in the feeder's tracked list
+        # (shows get re-fed across batches with fresh ids; path is stable)
+        fake_st = {"fed": [
+            {"id": "eng-A", "path": "C:/cache/x.mp3", "pl_item_id": "l3"},
+            {"id": "eng-B", "path": "C:/cache/y.mp3", "pl_item_id": "l4"}]}
+        check("now-marker resolves by id",
+              feeder._now_item_id(fake_st, "eng-B", None) == "l4")
+        check("now-marker falls back to path when id is stale",
+              feeder._now_item_id(fake_st, "GONE", "C:/cache/x.mp3") == "l3")
+        check("now-marker is None when neither id nor path matches",
+              feeder._now_item_id(fake_st, "GONE", "C:/cache/none.mp3") is None)
+
         # a spot rule can target a single FILE instead of a folder
         fspot = client.post("/api/spots", json={
             "trigger": "manual", "file_path": show_track}).json()["id"]

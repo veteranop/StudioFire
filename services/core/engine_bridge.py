@@ -231,14 +231,23 @@ class Feeder:
         return st
 
     @staticmethod
-    def _now_item_id(st: dict, now_id) -> int | None:
+    def _now_item_id(st: dict, now_id, now_playing=None) -> int | None:
         """The playlist_item id the play-head is on, in whichever program is
-        airing (base rotation or show). None during a spot/emergency."""
-        if not now_id:
-            return None
-        for e in st["fed"]:
-            if e["id"] == now_id:
-                return e.get("pl_item_id")  # None for spots
+        airing (base rotation or show). None during a spot/emergency.
+
+        Match by engine id first; fall back to the currently-playing file path.
+        A show's items can be fed to P1 across several batches with different
+        entry ids (esp. .lst/folder shows), so the id P1 reports may no longer
+        be in the feeder's tracked list — but the cached file path is stable per
+        item, so it still pins the right row for the on-air highlight."""
+        if now_id:
+            for e in st["fed"]:
+                if e["id"] == now_id:
+                    return e.get("pl_item_id")  # None for spots
+        if now_playing:
+            for e in st["fed"]:
+                if e.get("path") == now_playing:
+                    return e.get("pl_item_id")
         return None
 
     def _save_state(self, conn, st: dict) -> None:
@@ -587,7 +596,8 @@ class Feeder:
                                 - status["current_index"] - 1)
             if len(st["fed"]) > pending_count:
                 st["fed"] = st["fed"][len(st["fed"]) - pending_count:]
-        st["now_item_id"] = self._now_item_id(st, now_id)
+        st["now_item_id"] = self._now_item_id(st, now_id,
+                                              status.get("now_playing"))
 
         # a show that has fully aired hands back to the rotation
         self._finalize_show_if_aired(conn, st, status)
@@ -900,8 +910,10 @@ def register(app: FastAPI) -> None:
         whatever is airing so it always matches Now Playing. It's read-only
         while a show is on (you edit your rotation, not a one-time show)."""
         st = feeder._load_state(conn)
-        now_eid = (engine.status() or {}).get("now_id")
-        now_item_id = feeder._now_item_id(st, now_eid)
+        estatus = engine.status() or {}
+        now_eid = estatus.get("now_id")
+        now_item_id = feeder._now_item_id(st, now_eid,
+                                          estatus.get("now_playing"))
 
         def _fmt(items):
             return [{"id": it["id"], "item_type": it["item_type"],
