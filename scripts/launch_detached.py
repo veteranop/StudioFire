@@ -1,6 +1,7 @@
 """Launch P1/P2/P3 fully detached (survive the parent shell), logging each to
 logs/<svc>_console.log. Used to keep the dev stack alive across sessions.
-Run: python scripts/launch_detached.py
+Run: python scripts/launch_detached.py            # all three
+     python scripts/launch_detached.py core        # just P2 (engine/worker names too)
 """
 import os
 import subprocess
@@ -15,10 +16,13 @@ CFG = os.path.join("config", "config.json")
 FLAGS = (getattr(subprocess, "DETACHED_PROCESS", 0)
          | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
 
+want = set(a.lower() for a in sys.argv[1:])  # e.g. {"core"}; empty = launch all
 for mod, delay in [("services.engine.main", 2.0),
                    ("services.core.main", 1.0),
                    ("services.worker.main", 0.0)]:
     name = mod.split(".")[1]
+    if want and name not in want:
+        continue
     logf = open(os.path.join("logs", name + "_console.log"), "ab")
     p = subprocess.Popen([PY, "-m", mod, CFG], stdout=logf, stderr=logf,
                          stdin=subprocess.DEVNULL, creationflags=FLAGS,
