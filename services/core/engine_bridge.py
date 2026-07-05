@@ -336,11 +336,11 @@ class Feeder:
         if entry is None or entry["state"] != "waiting":
             return False, "that show is not waiting to start"
         st = self._load_state(conn)
-        if st.get("show"):
-            return False, "a show is already on air"
         if "pending_ids" in status:  # keep bookkeeping sane before we clear
             live = set(status["pending_ids"])
             st["fed"] = [e for e in st["fed"] if e["id"] in live]
+        if st.get("show"):  # operator intent: take over whatever show is on air
+            self._finish_show(conn, st)
         self._start_show(conn, st, entry, status)
         self._save_state(conn, st)
         ok, why = self.tick(conn)
