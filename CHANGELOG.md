@@ -16,6 +16,15 @@ plain English a non-technical operator can understand.
   still kicks in on its own if the playlist ever can't continue.
 
 ### Changed
+- The middle On Air list now follows whatever is actually on air: when a show is
+  playing it shows the SHOW's playlist (with the on-air song marked), and it goes
+  back to your rotation when the show ends — so the list always matches Now
+  Playing. It's read-only while a show is on air (you edit your rotation, not a
+  one-time show), with a "SHOW ON AIR" badge.
+- Scheduled shows now always take over at their time (a running show ends early),
+  so a long show can't block later scheduled programming; a "Stop show" button
+  ends a show and returns to the rotation. Start now (cut immediately) vs Cue
+  next (after the current song) are separate per-entry actions.
 - The rotation list now pins the on-air song to the top (it stays stuck there as
   you scroll) and hides the songs already played this pass, so you can always see
   where you are and what's coming. Reordering applies to the upcoming songs.

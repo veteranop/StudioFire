@@ -447,15 +447,23 @@ let rotBusy = false;       // true mid-drag (don't let a poll redraw)
 let rotDragId = null;
 let rotLastNow = null;     // for auto-scrolling when the play-head moves
 let rotScrolledAt = 0;     // when the user last scrolled (suppress auto-scroll)
+let rotIsShow = false;     // a show is on air -> list is read-only
 
 async function refreshRotation() {
   try {
     const d = await (await fetch("/api/rotation")).json();
-    document.getElementById("rot-title").textContent =
-      d.playlist ? d.playlist.name : "Now playing list";
+    rotIsShow = !!d.is_show;
+    const t = document.getElementById("rot-title");
+    t.textContent = d.playlist ? d.playlist.name : "Now playing list";
+    if (rotIsShow) {
+      const b = document.createElement("span");
+      b.className = "rot-showbadge"; b.textContent = "SHOW ON AIR";
+      t.append(" ", b);
+    }
     rotItems = d.items; rotNowId = d.now_item_id;
     rotPid = d.playlist ? d.playlist.id : null;
-    const sig = rotItems.map(i => i.id).join(",") + "|" + rotNowId;
+    const sig = rotItems.map(i => i.id).join(",") + "|" + rotNowId +
+                "|" + rotIsShow;
     if (!rotBusy && sig !== rotSig) { rotSig = sig; renderRotation(); }
   } catch (e) { /* next poll */ }
 }
@@ -486,7 +494,8 @@ function renderRotation() {
     li.className = "qitem" + (isNow ? " qnow" : "") + (played ? " qplayed" : "") +
                    (it.id === rotDragId ? " dragging" : "");
     li.dataset.id = it.id;
-    const movable = !filtering && !played && !isNow;  // reorder upcoming only
+    // editing (drag/remove) applies to your rotation, not a one-time show
+    const movable = !filtering && !played && !isNow && !rotIsShow;
     li.draggable = movable;
     const row = document.createElement("div");
     row.className = "qrow";
@@ -495,11 +504,16 @@ function renderRotation() {
     const title = document.createElement("span");
     title.className = "qtitle";
     title.textContent = (isNow ? "▶ " : "") + rotIcon(it.item_type) + it.title;
-    const del = document.createElement("button");
-    del.className = "btn btn-sm rot-x"; del.textContent = "✕";
-    del.title = "Remove from playlist";
-    del.onclick = (ev) => { ev.stopPropagation(); removeRotItem(it.id, it.title); };
-    row.appendChild(grip); row.appendChild(title); row.appendChild(del);
+    row.appendChild(grip); row.appendChild(title);
+    if (!rotIsShow) {
+      const del = document.createElement("button");
+      del.className = "btn btn-sm rot-x"; del.textContent = "✕";
+      del.title = "Remove from playlist";
+      del.onclick = (ev) => {
+        ev.stopPropagation(); removeRotItem(it.id, it.title);
+      };
+      row.appendChild(del);
+    }
     li.appendChild(row);
     if (movable) {
       li.addEventListener("dragstart", () => {
@@ -513,6 +527,10 @@ function renderRotation() {
     ol.insertAdjacentHTML("afterbegin",
       "<li class='muted rot-hint'>" + shown + " match(es) — clear search to " +
       "drag-reorder</li>");
+  else if (rotIsShow)
+    ol.insertAdjacentHTML("afterbegin",
+      "<li class='muted rot-hint'>A show is on air — this is what's playing. " +
+      "Your rotation resumes when it ends.</li>");
   // when the on-air song advances, return the panel to the top so the new
   // current song shows first (unless the operator is scrolling right now)
   if (rotNowId !== rotLastNow && !filtering &&

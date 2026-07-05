@@ -296,6 +296,10 @@ def main():
         check("panel shows the current show",
               (client.get("/api/schedule").json()["current_show"] or {})
               .get("name") == "Syndicated Show")
+        rot_show = client.get("/api/rotation").json()
+        check("on-air list follows the show playlist",
+              rot_show["is_show"] is True
+              and rot_show["playlist"]["name"] == "Syndicated Show")
         check("a show is not double-started",
               client.post(f"/api/schedule/{sid}/start_now").status_code == 409)
 
@@ -312,8 +316,14 @@ def main():
                 break
             time.sleep(0.3)
         check("returns to the rotation after the show", back)
-        check("current show clears once it has aired",
-              client.get("/api/schedule").json()["current_show"] is None)
+        cleared = False
+        for _ in range(6):  # finalize needs a tick that starts on the base song
+            feeder_app.tick(conn2)
+            if client.get("/api/schedule").json()["current_show"] is None:
+                cleared = True
+                break
+            time.sleep(0.3)
+        check("current show clears once it has aired", cleared)
 
         # scheduled (by clock): a past start time fires on the next tick
         sid2 = client.post("/api/schedule",

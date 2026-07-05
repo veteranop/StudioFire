@@ -186,13 +186,13 @@ class Feeder:
 
     @staticmethod
     def _now_item_id(st: dict, now_id) -> int | None:
-        """The base-rotation playlist_item id the play-head is currently on
-        (None while a show/spot/emergency source is playing)."""
+        """The playlist_item id the play-head is on, in whichever program is
+        airing (base rotation or show). None during a spot/emergency."""
         if not now_id:
             return None
         for e in st["fed"]:
-            if e["id"] == now_id and e.get("prog") == "base":
-                return e.get("pl_item_id")
+            if e["id"] == now_id:
+                return e.get("pl_item_id")  # None for spots
         return None
 
     def _save_state(self, conn, st: dict) -> None:
@@ -526,8 +526,10 @@ class Feeder:
                           "source": source, "src": src})
             st["fed"].append({"id": eid, "path": cached, "duration": duration,
                               "title": title, "prog": prog,
-                              # only base-rotation items mark the rotation view
-                              "pl_item_id": item_id if prog == "base" else None})
+                              # the playlist item this came from (base OR show),
+                              # so the on-air list can mark the current song in
+                              # whichever program is playing
+                              "pl_item_id": item_id})
             pending_sec += duration
         if not batch and op != "replace":
             self._save_state(conn, st)
@@ -760,17 +762,27 @@ def register(app: FastAPI) -> None:
 
     @app.get("/api/rotation")
     def api_rotation(conn=Depends(get_conn), _=Depends(api_user)):
-        """The active rotation playlist in full + which item is on air now."""
-        base_pid = coredb.get_setting(conn, "active_playlist_id")
-        row = conn.execute("SELECT id, name FROM playlists WHERE id = ?",
-                           (int(base_pid),)).fetchone() if base_pid else None
-        if row is None:
-            return {"playlist": None, "items": [], "now_item_id": None}
-        items = pl.get_items(conn, row["id"])
+        """The playlist that's actually on air in full + the on-air song.
+        A show overrides the base rotation while it plays; the list follows
+        whatever is airing so it always matches Now Playing. It's read-only
+        while a show is on (you edit your rotation, not a one-time show)."""
         st = feeder._load_state(conn)
+        show = st.get("show")
+        if show:
+            pid, is_show = show.get("playlist_id"), True
+        else:
+            base = coredb.get_setting(conn, "active_playlist_id")
+            pid, is_show = (int(base) if base else None), False
+        row = conn.execute("SELECT id, name FROM playlists WHERE id = ?",
+                           (pid,)).fetchone() if pid else None
+        if row is None:
+            return {"playlist": None, "items": [], "now_item_id": None,
+                    "is_show": False}
+        items = pl.get_items(conn, row["id"])
         now_item_id = feeder._now_item_id(st, (engine.status() or {}).get("now_id"))
         return {
             "playlist": {"id": row["id"], "name": row["name"]},
+            "is_show": is_show,
             "now_item_id": now_item_id,
             "items": [{"id": it["id"], "item_type": it["item_type"],
                        "title": it["title"] or os.path.splitext(

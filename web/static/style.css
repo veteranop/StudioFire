@@ -163,6 +163,11 @@ input {
 .qitem:hover .rot-x { opacity: 1; }
 .rot-x:hover { color: #ff9b9b; background: #2d1a1a; }
 .rot-hint { padding: .3rem .2rem; font-size: .9rem; }
+.rot-showbadge {
+  font-size: .7rem; font-weight: 800; letter-spacing: .5px;
+  color: #fff; background: var(--red); padding: .12rem .45rem;
+  border-radius: 5px; vertical-align: middle;
+}
 
 /* playlist schedule + spots (On Air side panels) */
 .sched-h { margin: 1.2rem 0 .4rem; font-size: 1rem; color: var(--muted);
