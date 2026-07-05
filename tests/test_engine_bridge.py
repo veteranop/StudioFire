@@ -9,6 +9,7 @@ Run: python tests/test_engine_bridge.py   (~30s)
 import json
 import math
 import os
+import shutil
 import struct
 import sys
 import tempfile
@@ -395,6 +396,38 @@ def main():
         check("lst show goes on air", wait_for(
               lambda: engine.status().get("now_source") == "show", 15, "lst show"))
         client.post("/api/schedule/stop_show")
+
+        # a whole FOLDER of segments can be scheduled as a show (plays all its
+        # audio files in filename order — e.g. Floydian Slip)
+        showdir = os.path.join(td, "segments")
+        os.makedirs(showdir, exist_ok=True)
+        shutil.copy(show_track, os.path.join(showdir, "01 seg.mp3"))
+        shutil.copy(show_track, os.path.join(showdir, "02 seg.mp3"))
+        sfold = client.post("/api/schedule", json={
+            "source_kind": "folder", "source_path": showdir}).json()["id"]
+        check("folder show listed by its name",
+              any(u["id"] == sfold and u["source_kind"] == "folder"
+                  for u in client.get("/api/schedule").json()["upcoming"]))
+        check("folder show starts",
+              client.post(f"/api/schedule/{sfold}/start_now").status_code == 200)
+        check("folder show goes on air", wait_for(
+              lambda: engine.status().get("now_source") == "show", 15,
+              "folder show"))
+        client.post("/api/schedule/stop_show")
+        check("schedule rejects a missing folder", client.post(
+              "/api/schedule", json={"source_kind": "folder",
+              "source_path": showdir + "-nope"}).status_code == 400)
+
+        # a recurring daily spot with a stop date is accepted
+        dspot = client.post("/api/spots", json={
+            "trigger": "daily", "folder_key": "dir_station_ids",
+            "time_of_day": "06:00", "end_date": "2026-08-31"}).json()["id"]
+        check("daily spot shows its stop date",
+              any(r["id"] == dspot and r["end_date"] == "2026-08-31"
+                  for r in client.get("/api/spots").json()["rules"]))
+        check("spot rejects a bad stop date", client.post("/api/spots", json={
+              "trigger": "daily", "folder_key": "dir_ads",
+              "time_of_day": "06:00", "end_date": "nope"}).status_code == 400)
 
         # a spot rule can target a single FILE instead of a folder
         fspot = client.post("/api/spots", json={

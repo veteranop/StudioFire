@@ -91,6 +91,8 @@
                 onchange="spotTriggerChange()">
           <option value="interval">Every N minutes</option>
           <option value="clock">At minutes past the hour</option>
+          <option value="daily">Every day at a time</option>
+          <option value="weekly">Certain weekdays at a time</option>
           <option value="once">Once at a date/time</option>
           <option value="manual">Manual (Play now button)</option>
         </select>
@@ -104,8 +106,30 @@
         <label>Minutes past the hour
           <input type="text" id="spot-clock" placeholder="0   or   20,40"></label>
       </div>
+      <div id="spot-p-tod" hidden>
+        <label>Play at (time of day)
+          <input type="time" id="spot-tod"></label>
+        <div id="spot-p-days" class="daypick" hidden>
+          <span class="muted">On these days:</span>
+          <label><input type="checkbox" class="sdchk" data-bit="1">Mon</label>
+          <label><input type="checkbox" class="sdchk" data-bit="2">Tue</label>
+          <label><input type="checkbox" class="sdchk" data-bit="4">Wed</label>
+          <label><input type="checkbox" class="sdchk" data-bit="8">Thu</label>
+          <label><input type="checkbox" class="sdchk" data-bit="16">Fri</label>
+          <label><input type="checkbox" class="sdchk" data-bit="32">Sat</label>
+          <label><input type="checkbox" class="sdchk" data-bit="64">Sun</label>
+        </div>
+      </div>
       <div id="spot-p-once" hidden>
         <label>Date &amp; time <input type="datetime-local" id="spot-once"></label>
+      </div>
+      <div id="spot-p-window" hidden>
+        <div class="row">
+          <label style="flex:1">Start date <span class="muted">(optional)</span>
+            <input type="date" id="spot-start-date"></label>
+          <label style="flex:1">Stop date <span class="muted">(optional)</span>
+            <input type="date" id="spot-end-date"></label>
+        </div>
       </div>
       <button class="btn btn-green" onclick="addSpot()">Add spot rule</button>
     </details>
@@ -127,6 +151,7 @@
         <select id="sched-kind" style="width:100%" onchange="schedKindChange()">
           <option value="playlist">A playlist</option>
           <option value="file">A single file (whole show as one .mp3)</option>
+          <option value="folder">A folder (plays all its files — segments)</option>
           <option value="lst">A ZaraRadio .lst file</option>
         </select>
       </label>
@@ -134,9 +159,9 @@
         <select id="sched-playlist" style="flex:1"></select>
       </div>
       <div id="sched-p-file" hidden>
-        <label>File
+        <label id="sched-file-label">File
           <div class="row">
-            <button type="button" class="btn btn-sm"
+            <button type="button" class="btn btn-sm" id="sched-file-btn"
                     onclick="pickSchedFile()">📁 Choose file…</button>
             <span id="sched-file-name" class="muted">none chosen</span>
           </div>
@@ -190,6 +215,8 @@
     <div class="row">
       <button class="btn btn-sm" onclick="fpGo('')">💻 Drives</button>
       <button class="btn btn-sm" id="fp-up" onclick="fpUp()">⬆ Up</button>
+      <button class="btn btn-sm btn-green" id="fp-usedir" onclick="fpUseDir()"
+              hidden>✓ Use this folder</button>
       <span id="fp-path" class="muted"></span>
     </div>
     <div id="fp-list" class="picker"></div>
@@ -229,15 +256,29 @@ function fmtWhen(s) {
 }
 
 // ---- shared file/folder picker (browse the NAS, pick a file)
-let fpExts = "", fpOnPick = null, fpPath = "", fpParent = null;
+let fpExts = "", fpOnPick = null, fpPath = "", fpParent = null, fpDirMode = false;
 function joinPath(base, name) {
   return base ? base.replace(/[\\/]$/, "") + "\\" + name : name;
 }
 function openFilePicker(exts, title, onPick) {
-  fpExts = exts; fpOnPick = onPick;
+  fpExts = exts; fpOnPick = onPick; fpDirMode = false;
+  document.getElementById("fp-usedir").hidden = true;
   document.getElementById("fp-title").textContent = title;
   document.getElementById("fp-modal").hidden = false;
   fpGo("");
+}
+function openFolderPicker(title, onPick) {
+  fpExts = ""; fpOnPick = onPick; fpDirMode = true;
+  document.getElementById("fp-usedir").hidden = false;
+  document.getElementById("fp-title").textContent = title;
+  document.getElementById("fp-modal").hidden = false;
+  fpGo("");
+}
+function fpUseDir() {
+  if (!fpPath) { alert("Open a folder first."); return; }
+  const cb = fpOnPick, p = fpPath;
+  fpClose();
+  if (cb) cb(p);
 }
 function fpClose() {
   document.getElementById("fp-modal").hidden = true; fpOnPick = null;
@@ -350,15 +391,27 @@ function schedKindChange() {
   const k = document.getElementById("sched-kind").value;
   document.getElementById("sched-p-playlist").hidden = k !== "playlist";
   document.getElementById("sched-p-file").hidden = k === "playlist";
+  const isFolder = k === "folder";
+  document.getElementById("sched-file-label").firstChild.textContent =
+    isFolder ? "Folder" : (k === "lst" ? ".lst file" : "File");
+  document.getElementById("sched-file-btn").textContent =
+    isFolder ? "📁 Choose folder…" : "📁 Choose file…";
+  schedFilePath = null;
+  document.getElementById("sched-file-name").textContent = "none chosen";
 }
 function pickSchedFile() {
   const k = document.getElementById("sched-kind").value;
+  const setName = (p) => {
+    schedFilePath = p;
+    document.getElementById("sched-file-name").textContent =
+      p.split(/[\\/]/).pop() || p;
+  };
+  if (k === "folder") {
+    openFolderPicker("Pick a show folder (all its files play in order)", setName);
+    return;
+  }
   openFilePicker(k === "lst" ? "lst" : "audio",
-    k === "lst" ? "Pick a .lst file" : "Pick an audio file", (p) => {
-      schedFilePath = p;
-      document.getElementById("sched-file-name").textContent =
-        p.split(/[\\/]/).pop();
-    });
+    k === "lst" ? "Pick a .lst file" : "Pick an audio file", setName);
 }
 function schedRecChange() {
   const r = document.getElementById("sched-rec").value;
@@ -536,6 +589,11 @@ function spotTriggerChange() {
   document.getElementById("spot-p-interval").hidden = t !== "interval";
   document.getElementById("spot-p-clock").hidden = t !== "clock";
   document.getElementById("spot-p-once").hidden = t !== "once";
+  document.getElementById("spot-p-tod").hidden = !(t === "daily" || t === "weekly");
+  document.getElementById("spot-p-days").hidden = t !== "weekly";
+  // a run window (start/stop date) applies to every recurring trigger
+  document.getElementById("spot-p-window").hidden =
+    !(t === "interval" || t === "clock" || t === "daily" || t === "weekly");
 }
 let spotFilePath = null;
 function spotTargetChange() {
@@ -623,6 +681,22 @@ async function addSpot() {
     body.clock_minutes = document.getElementById("spot-clock").value;
   if (trigger === "once")
     body.start_at = document.getElementById("spot-once").value;
+  if (trigger === "daily" || trigger === "weekly") {
+    const tod = document.getElementById("spot-tod").value;
+    if (!tod) { alert("Set a time of day."); return; }
+    body.time_of_day = tod;
+    if (trigger === "weekly") {
+      let mask = 0;
+      document.querySelectorAll("#spot-p-days .sdchk:checked")
+        .forEach(c => mask |= Number(c.dataset.bit));
+      if (!mask) { alert("Pick at least one weekday."); return; }
+      body.days_mask = mask;
+    }
+  }
+  if (["interval", "clock", "daily", "weekly"].includes(trigger)) {
+    body.start_date = document.getElementById("spot-start-date").value;
+    body.end_date = document.getElementById("spot-end-date").value;
+  }
   const r = await fetch("/api/spots", {method: "POST",
     headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
   if (!r.ok) {
@@ -631,6 +705,10 @@ async function addSpot() {
   }
   spotFilePath = null;
   document.getElementById("spot-file-name").textContent = "none chosen";
+  document.getElementById("spot-tod").value = "";
+  document.getElementById("spot-start-date").value = "";
+  document.getElementById("spot-end-date").value = "";
+  document.querySelectorAll("#spot-p-days .sdchk").forEach(c => c.checked = false);
   refreshSpots();
 }
 async function playSpot(id) {

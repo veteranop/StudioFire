@@ -67,6 +67,7 @@ def _read_meta(path: str) -> dict:
 DEFAULT_TRACK_SEC = 240.0   # estimate when a track's duration is unknown
 FEED_TICK_SEC = 5.0
 MAX_FEED_BATCH = 50         # sanity cap per tick
+_AUDIO_EXTS = {".mp3", ".m4a", ".mp4", ".aac", ".wav", ".flac", ".ogg"}
 
 
 # --------------------------------------------------------------- engine API
@@ -308,7 +309,28 @@ class Feeder:
                      "title": os.path.splitext(os.path.basename(p))[0]}]
         if kind == "lst":
             return self._lst_items(show.get("source_path") or "")
+        if kind == "folder":
+            return self._folder_items(show.get("source_path") or "")
         return []
+
+    def _folder_items(self, path: str) -> list[dict]:
+        """Every audio file in a folder, filename order — a show made of
+        segments (e.g. Floydian Slip). Read live so updates are picked up."""
+        try:
+            names = sorted(os.listdir(path))
+        except OSError:
+            log.warning("feeder: show folder unreadable: %r", path)
+            return []
+        out = []
+        for i, name in enumerate(names):
+            if os.path.splitext(name)[1].lower() not in _AUDIO_EXTS:
+                continue
+            full = os.path.join(path, name)
+            if not os.path.isfile(full):
+                continue
+            out.append({"id": f"d{i}", "item_type": "file", "path": full,
+                        "title": os.path.splitext(name)[0]})
+        return out
 
     def _lst_items(self, path: str) -> list[dict]:
         """Parse a ZaraRadio .lst live into playable file items (path aliases
@@ -1057,7 +1079,13 @@ def register(app: FastAPI) -> None:
             if kind == "lst" and not path.lower().endswith(".lst"):
                 raise HTTPException(400, "that isn't a .lst file")
             return {"id": sched.add(conn, kind, source_path=path, **timing)}
-        raise HTTPException(400, "source_kind must be playlist, file or lst")
+        if kind == "folder":
+            path = (body.get("source_path") or "").strip()
+            if not path or not os.path.isdir(path):
+                raise HTTPException(400, "that folder does not exist")
+            return {"id": sched.add(conn, "folder", source_path=path, **timing)}
+        raise HTTPException(400,
+                            "source_kind must be playlist, file, lst or folder")
 
     @app.delete("/api/schedule/{sid}")
     def api_schedule_remove(sid: int, conn=Depends(get_conn),
@@ -1112,6 +1140,7 @@ def register(app: FastAPI) -> None:
                 "file_path": r["file_path"],
                 "label": r["label"], "trigger": r["trigger"],
                 "enabled": bool(r["enabled"]),
+                "end_date": r.get("end_date"),
                 "summary": spotmod.describe(r),
                 "next_epoch": spotmod.next_fire_epoch(r, now)})
         # soonest first; manual/disabled (next_epoch None) sink to the bottom
@@ -1122,7 +1151,8 @@ def register(app: FastAPI) -> None:
     def api_spots_add(body: dict, conn=Depends(get_conn), _=Depends(api_user)):
         trig = body.get("trigger")
         if trig not in spotmod.TRIGGERS:
-            raise HTTPException(400, "trigger must be interval/clock/once/manual")
+            raise HTTPException(400, "trigger must be interval/clock/once/"
+                                     "daily/weekly/manual")
         # target a single file, else a whole folder (round-robin)
         file_path = (body.get("file_path") or "").strip() or None
         key = body.get("folder_key")
@@ -1133,6 +1163,7 @@ def register(app: FastAPI) -> None:
         elif key not in {k for k, _, _ in spotmod.FOLDER_CATEGORIES}:
             raise HTTPException(400, "pick a folder or a specific file")
         interval_min = clock_minutes = start_at = None
+        time_of_day = days_mask = None
         if trig == "interval":
             try:
                 interval_min = int(body.get("interval_min"))
@@ -1149,8 +1180,34 @@ def register(app: FastAPI) -> None:
             start_at = (body.get("start_at") or "").strip()
             if spotmod._parse_dt(start_at) is None:
                 raise HTTPException(400, "start time must be YYYY-MM-DDTHH:MM")
+        elif trig in ("daily", "weekly"):
+            time_of_day = (body.get("time_of_day") or "").strip()
+            try:
+                _dt.datetime.strptime(time_of_day, "%H:%M")
+            except ValueError:
+                raise HTTPException(400, "time of day must be HH:MM")
+            if trig == "weekly":
+                try:
+                    days_mask = int(body.get("days_mask") or 0)
+                except (TypeError, ValueError):
+                    days_mask = 0
+                if not days_mask:
+                    raise HTTPException(400, "pick at least one weekday")
+        # optional run window (interval/clock/daily/weekly): the stop date
+        start_date = (body.get("start_date") or "").strip() or None
+        end_date = (body.get("end_date") or "").strip() or None
+        for d in (start_date, end_date):
+            if d is not None:
+                try:
+                    _dt.date.fromisoformat(d)
+                except ValueError:
+                    raise HTTPException(400, "dates must be YYYY-MM-DD")
+        if start_date and end_date and end_date < start_date:
+            raise HTTPException(400, "stop date is before the start date")
         rid = spotmod.add(conn, key, trig, interval_min, clock_minutes,
-                          start_at, file_path=file_path)
+                          start_at, file_path=file_path, time_of_day=time_of_day,
+                          days_mask=days_mask, start_date=start_date,
+                          end_date=end_date)
         return {"id": rid}
 
     @app.delete("/api/spots/{rid}")

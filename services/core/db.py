@@ -167,6 +167,64 @@ ALTER TABLE playlist_schedule ADD COLUMN start_date  TEXT;
 ALTER TABLE playlist_schedule ADD COLUMN end_date    TEXT;
 ALTER TABLE playlist_schedule ADD COLUMN last_fired  TEXT;
 """),
+    (6, """
+-- 'folder' as a schedulable show source: a folder of segments (e.g. Floydian
+-- Slip) played in filename order, always whatever files are in it at air time.
+-- Rebuild to widen the source_kind CHECK (SQLite can't alter a CHECK in place).
+CREATE TABLE playlist_schedule_new (
+    id          INTEGER PRIMARY KEY,
+    playlist_id INTEGER REFERENCES playlists(id) ON DELETE CASCADE,
+    source_kind TEXT NOT NULL DEFAULT 'playlist'
+        CHECK (source_kind IN ('playlist', 'file', 'lst', 'folder')),
+    source_path TEXT,
+    start_at    TEXT,
+    sort        INTEGER NOT NULL DEFAULT 0,
+    state       TEXT NOT NULL DEFAULT 'waiting'
+        CHECK (state IN ('waiting', 'playing', 'done')),
+    created_at  REAL NOT NULL,
+    recurrence  TEXT NOT NULL DEFAULT 'once',
+    time_of_day TEXT,
+    days_mask   INTEGER,
+    start_date  TEXT,
+    end_date    TEXT,
+    last_fired  TEXT
+);
+INSERT INTO playlist_schedule_new SELECT
+    id, playlist_id, source_kind, source_path, start_at, sort, state,
+    created_at, recurrence, time_of_day, days_mask, start_date, end_date,
+    last_fired FROM playlist_schedule;
+DROP TABLE playlist_schedule;
+ALTER TABLE playlist_schedule_new RENAME TO playlist_schedule;
+CREATE INDEX idx_sched_state ON playlist_schedule(state, start_at);
+
+-- Spots get the same daily/weekly recurrence + run window (start/stop date) as
+-- shows. Widen the trigger CHECK and add the window/time-of-day columns.
+CREATE TABLE spot_rules_new (
+    id            INTEGER PRIMARY KEY,
+    folder_key    TEXT NOT NULL,
+    label         TEXT,
+    trigger       TEXT NOT NULL
+        CHECK (trigger IN ('interval', 'clock', 'once', 'manual',
+                           'daily', 'weekly')),
+    interval_min  INTEGER,
+    clock_minutes TEXT,
+    start_at      TEXT,
+    enabled       INTEGER NOT NULL DEFAULT 1,
+    last_fired    REAL,
+    created_at    REAL NOT NULL,
+    file_path     TEXT,
+    time_of_day   TEXT,
+    days_mask     INTEGER,
+    start_date    TEXT,
+    end_date      TEXT
+);
+INSERT INTO spot_rules_new SELECT
+    id, folder_key, label, trigger, interval_min, clock_minutes, start_at,
+    enabled, last_fired, created_at, file_path, NULL, NULL, NULL, NULL
+    FROM spot_rules;
+DROP TABLE spot_rules;
+ALTER TABLE spot_rules_new RENAME TO spot_rules;
+"""),
 ]
 
 SCHEMA_VERSION = MIGRATIONS[-1][0]
