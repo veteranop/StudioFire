@@ -14,15 +14,24 @@ local file paths.
 
 from __future__ import annotations
 
+import logging
 import os
+import re
 import sqlite3
 import time
 
 from fastapi import Depends, FastAPI, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
+from . import db as coredb
+
+log = logging.getLogger("core.playlists")
+
 AUDIO_EXTS = {".mp3", ".m4a", ".mp4", ".aac", ".wav", ".flac", ".ogg"}
 ITEM_TYPES = ("file", "folder-newest", "folder-rotation")
+
+# settings key for the folder StudioFire mirrors playlists into as .lst files
+LST_DIR_KEY = "playlist_lst_dir"
 
 
 # ------------------------------------------------------------------ CRUD
@@ -124,6 +133,94 @@ def get_items(conn: sqlite3.Connection, pid: int) -> list[dict]:
         "SELECT * FROM playlist_items WHERE playlist_id = ? "
         "ORDER BY position", (pid,)).fetchall()
     return [dict(r) for r in rows]
+
+
+# ------------------------------------------------- ZaraRadio .lst export/mirror
+
+def lst_filename(name: str) -> str:
+    """A Windows-safe .lst filename for a playlist name."""
+    safe = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", name).strip().rstrip(". ")
+    return (safe or "playlist") + ".lst"
+
+
+def _expand_folder(conn: sqlite3.Connection, item: dict) -> list[str]:
+    """A folder item has no .lst equivalent — expand it to its current files
+    from the index (sorted), so the exported .lst is still complete/usable."""
+    prefix = (item["path"] or "").rstrip("\\/")
+    if not prefix:
+        return []
+    rows = conn.execute(
+        "SELECT path FROM tracks WHERE missing = 0 AND "
+        "(path LIKE ? OR path LIKE ?) ORDER BY path",
+        (prefix + "\\%", prefix + "/%")).fetchall()
+    return [r["path"] for r in rows]
+
+
+def export_lst_text(conn: sqlite3.Connection, pid: int) -> str:
+    """Render a playlist as ZaraRadio .lst text: a track-count header line, then
+    one track per line as '<duration_ms>\\t<path>'. Durations come from the
+    index (0 when unknown); paths use backslashes, like Zara writes them."""
+    lines = []
+    for it in get_items(conn, pid):
+        paths = [it["path"]] if it["item_type"] == "file" \
+            else _expand_folder(conn, it)
+        for p in paths:
+            row = conn.execute(
+                "SELECT duration_sec FROM tracks WHERE path = ?", (p,)).fetchone()
+            ms = int(round((row["duration_sec"] or 0) * 1000)) \
+                if row and row["duration_sec"] else 0
+            lines.append(f"{ms}\t{p.replace('/', chr(92))}")
+    body = "\r\n".join([str(len(lines))] + lines)
+    return body + "\r\n" if lines else "0\r\n"
+
+
+def remove_lst(lst_dir: str, name: str) -> None:
+    if not lst_dir:
+        return
+    try:
+        os.remove(os.path.join(lst_dir, lst_filename(name)))
+    except OSError:
+        pass
+
+
+def write_lst(conn: sqlite3.Connection, lst_dir: str, pid: int,
+              old_name: str | None = None) -> str | None:
+    """Mirror a playlist to <lst_dir>/<name>.lst (atomic). On a rename, pass the
+    previous name to delete the stale file. No-op if lst_dir isn't set/usable.
+    Best-effort: a mirror failure must never break the playlist edit itself."""
+    if not lst_dir or not os.path.isdir(lst_dir):
+        return None
+    row = conn.execute("SELECT name FROM playlists WHERE id = ?",
+                       (pid,)).fetchone()
+    if row is None:
+        return None
+    if old_name and old_name != row["name"]:
+        remove_lst(lst_dir, old_name)
+    target = os.path.join(lst_dir, lst_filename(row["name"]))
+    tmp = target + ".tmp"
+    try:
+        # cp1252 (Windows ANSI) is what Zara reads/writes; our own parser tries
+        # utf-8-sig then cp1252, so this round-trips both ways.
+        with open(tmp, "w", encoding="cp1252", errors="replace",
+                  newline="") as f:
+            f.write(export_lst_text(conn, pid))
+        os.replace(tmp, target)
+    except OSError as exc:
+        log.warning("could not mirror playlist %d to .lst: %s", pid, exc)
+        return None
+    return target
+
+
+def sync_all_lst(conn: sqlite3.Connection, lst_dir: str) -> int:
+    """Write every playlist to lst_dir (used when the folder is first set, so
+    existing playlists get their .lst without needing an edit)."""
+    if not lst_dir or not os.path.isdir(lst_dir):
+        return 0
+    n = 0
+    for row in conn.execute("SELECT id FROM playlists").fetchall():
+        if write_lst(conn, lst_dir, row["id"]):
+            n += 1
+    return n
 
 
 def add_item(conn: sqlite3.Connection, pid: int, item_type: str,
@@ -301,6 +398,15 @@ def register(app: FastAPI) -> None:
             raise HTTPException(404, "playlist not found")
         return row
 
+    def _sync(conn, pid, old_name=None):
+        """Mirror a playlist to its .lst after a change. Best-effort — a mirror
+        failure must never fail the edit the operator just made."""
+        try:
+            write_lst(conn, coredb.get_setting(conn, LST_DIR_KEY) or "", pid,
+                      old_name)
+        except Exception:  # noqa: BLE001 — mirroring is never critical
+            log.exception("playlist .lst mirror failed (pid %s)", pid)
+
     @app.get("/api/playlists")
     def api_list(conn=Depends(get_conn), _=Depends(api_user)):
         return list_playlists(conn)
@@ -315,6 +421,7 @@ def register(app: FastAPI) -> None:
             pid = create_playlist(conn, name)
         except sqlite3.IntegrityError:
             raise HTTPException(409, "a playlist with that name exists")
+        _sync(conn, pid)
         return {"id": pid, "name": name}
 
     @app.post("/api/playlists/import_lst", status_code=201)
@@ -335,6 +442,7 @@ def register(app: FastAPI) -> None:
         except sqlite3.IntegrityError:
             raise HTTPException(409, "a playlist with that name exists")
         n = add_items_bulk(conn, pid, entries)
+        _sync(conn, pid)
         return {"id": pid, "name": name.strip(), "imported": n}
 
     @app.get("/api/playlists/{pid}")
@@ -346,11 +454,12 @@ def register(app: FastAPI) -> None:
     @app.post("/api/playlists/{pid}/rename")
     def api_rename(pid: int, body: PlaylistIn, conn=Depends(get_conn),
                    _=Depends(api_user)):
-        _playlist_or_404(conn, pid)
+        old = _playlist_or_404(conn, pid)["name"]
         try:
             rename_playlist(conn, pid, body.name.strip())
         except sqlite3.IntegrityError:
             raise HTTPException(409, "a playlist with that name exists")
+        _sync(conn, pid, old_name=old)  # writes new name, deletes old .lst
         return {"ok": True}
 
     @app.post("/api/playlists/{pid}/duplicate", status_code=201)
@@ -361,12 +470,14 @@ def register(app: FastAPI) -> None:
             new_id = duplicate_playlist(conn, pid, body.name.strip())
         except sqlite3.IntegrityError:
             raise HTTPException(409, "a playlist with that name exists")
+        _sync(conn, new_id)
         return {"id": new_id}
 
     @app.delete("/api/playlists/{pid}")
     def api_delete(pid: int, conn=Depends(get_conn), _=Depends(api_user)):
-        _playlist_or_404(conn, pid)
+        name = _playlist_or_404(conn, pid)["name"]
         delete_playlist(conn, pid)
+        remove_lst(coredb.get_setting(conn, LST_DIR_KEY) or "", name)
         return {"ok": True}
 
     @app.post("/api/playlists/{pid}/items", status_code=201)
@@ -377,6 +488,7 @@ def register(app: FastAPI) -> None:
             raise HTTPException(400, f"item_type must be one of {ITEM_TYPES}")
         item_id = add_item(conn, pid, body.item_type, body.path,
                            body.title, body.position)
+        _sync(conn, pid)
         return {"id": item_id}
 
     @app.delete("/api/playlists/{pid}/items/{item_id}")
@@ -384,6 +496,7 @@ def register(app: FastAPI) -> None:
                         _=Depends(api_user)):
         _playlist_or_404(conn, pid)
         remove_item(conn, pid, item_id)
+        _sync(conn, pid)
         return {"ok": True}
 
     @app.post("/api/playlists/{pid}/order")
@@ -394,6 +507,7 @@ def register(app: FastAPI) -> None:
         if set(body.item_ids) != existing:
             raise HTTPException(409, "order list out of sync — reload")
         reorder_items(conn, pid, body.item_ids)
+        _sync(conn, pid)
         return {"ok": True}
 
     def _music_root() -> str:
@@ -405,9 +519,38 @@ def register(app: FastAPI) -> None:
     @app.post("/api/playlists/relink")
     def api_relink_all(conn=Depends(get_conn), _=Depends(api_user)):
         """Repoint stale paths in ALL playlists to the real file in the index."""
-        return relink_broken(conn, _music_root())
+        result = relink_broken(conn, _music_root())
+        sync_all_lst(conn, coredb.get_setting(conn, LST_DIR_KEY) or "")
+        return result
 
     @app.post("/api/playlists/{pid}/relink")
     def api_relink_one(pid: int, conn=Depends(get_conn), _=Depends(api_user)):
         _playlist_or_404(conn, pid)
-        return relink_broken(conn, _music_root(), pid)
+        result = relink_broken(conn, _music_root(), pid)
+        _sync(conn, pid)
+        return result
+
+    @app.get("/api/playlists/lst_dir")
+    def api_lst_dir_get(conn=Depends(get_conn), _=Depends(api_user)):
+        path = coredb.get_setting(conn, LST_DIR_KEY) or ""
+        return {"path": path, "exists": bool(path) and os.path.isdir(path)}
+
+    @app.post("/api/playlists/lst_dir")
+    def api_lst_dir_set(body: PlaylistIn, conn=Depends(get_conn),
+                        _=Depends(api_user)):
+        """Set the folder playlists are mirrored to as .lst, and immediately
+        write every existing playlist there so they're all covered."""
+        path = (body.name or "").strip()
+        if path and not os.path.isdir(path):
+            raise HTTPException(400, "that folder does not exist")
+        coredb.set_setting(conn, LST_DIR_KEY, path)
+        n = sync_all_lst(conn, path) if path else 0
+        return {"ok": True, "path": path, "synced": n}
+
+    @app.post("/api/playlists/sync_lst")
+    def api_sync_lst(conn=Depends(get_conn), _=Depends(api_user)):
+        """Re-mirror every playlist to the configured .lst folder now."""
+        lst_dir = coredb.get_setting(conn, LST_DIR_KEY) or ""
+        if not lst_dir:
+            raise HTTPException(400, "set the playlist .lst folder first")
+        return {"synced": sync_all_lst(conn, lst_dir), "folder": lst_dir}

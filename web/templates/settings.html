@@ -19,6 +19,25 @@
   <div id="dir-rows"></div>
 </div>
 
+<div class="card">
+  <h1>Playlist backup (.lst)</h1>
+  <p class="muted">Mirror every StudioFire playlist into this folder as a
+    ZaraRadio-format <code>.lst</code> file, kept in sync automatically on every
+    edit. Handy for keeping all your playlists as <code>.lst</code> alongside
+    your Zara files. Leave unset to turn it off.</p>
+  <div class="dirrow">
+    <div><strong>Backup folder</strong><br>
+      <small class="muted">e.g. a folder on the NAS next to your .lst files</small></div>
+    <div class="dirval"><code id="lst-path">…</code> <span id="lst-warn"></span></div>
+    <div>
+      <button class="btn btn-sm" id="lst-browse">Browse&#8230;</button>
+      <button class="btn btn-sm" id="lst-clear" onclick="setLstDir('')" hidden>Clear</button>
+      <button class="btn btn-sm btn-green" id="lst-syncall" onclick="syncAllLst()" hidden>Save all now</button>
+    </div>
+  </div>
+  <div id="lst-msg" class="muted" style="margin-top:.5rem"></div>
+</div>
+
 <div class="card" id="picker-card" hidden>
   <h2 id="picker-title">Choose a folder</h2>
   <div class="row">
@@ -118,9 +137,41 @@ function pickerUp() {
 
 async function pickerUse() {
   if (!pickPath) { alert("Open a drive or folder first."); return; }
-  await saveDir(pickKey, pickPath);
+  if (pickKey === "__lst__") await setLstDir(pickPath);
+  else await saveDir(pickKey, pickPath);
   pickerClose();
 }
+
+// ---- playlist .lst backup folder
+async function loadLstDir() {
+  const d = await (await fetch("/api/playlists/lst_dir")).json();
+  const c = document.getElementById("lst-path");
+  c.textContent = d.path || "Not set"; c.dataset.path = d.path || "";
+  document.getElementById("lst-warn").innerHTML = d.path && !d.exists
+    ? "<span class='tile-red-text'>⚠ folder not found</span>" : "";
+  document.getElementById("lst-clear").hidden = !d.path;
+  document.getElementById("lst-syncall").hidden = !d.path;
+}
+async function setLstDir(path) {
+  const r = await fetch("/api/playlists/lst_dir", {method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({name: path})});
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { alert(j.detail || "Could not save"); return; }
+  document.getElementById("lst-msg").textContent = path
+    ? "Saved and wrote " + j.synced + " playlist(s) to " + path : "Turned off.";
+  loadLstDir();
+}
+async function syncAllLst() {
+  const r = await fetch("/api/playlists/sync_lst", {method: "POST"});
+  const j = await r.json().catch(() => ({}));
+  document.getElementById("lst-msg").textContent = r.ok
+    ? "Wrote " + j.synced + " playlist(s) to " + j.folder
+    : (j.detail || "Could not save");
+}
+document.getElementById("lst-browse").onclick = () => pickerOpen(
+  "__lst__", "playlist .lst backup",
+  document.getElementById("lst-path").dataset.path || "");
 
 function pickerClose() {
   document.getElementById("picker-card").hidden = true;
@@ -128,5 +179,6 @@ function pickerClose() {
 }
 
 loadDirs();
+loadLstDir();
 </script>
 {% endblock %}

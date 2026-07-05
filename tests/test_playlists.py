@@ -250,6 +250,69 @@ def main():
           "missing.mp3" in stats["unmatched_examples"])
     rc.close()
 
+    # ---- ZaraRadio .lst mirror (export format + round-trip + rename/delete)
+    lc = db.connect(db_path)
+    lpid = pl.create_playlist(lc, "Drive Time")
+    p1 = r"Z:/G\Artist\Album\01 Song One.mp3"
+    p2 = r"Z:/G\Artist\Album\02 Song Two.mp3"
+    pl.add_item(lc, lpid, "file", p1, "Song One")
+    pl.add_item(lc, lpid, "file", p2, "Song Two")
+    # give one track a known duration in the index (the other stays unknown -> 0)
+    lc.execute("INSERT INTO tracks (path, title, duration_sec, indexed_at, "
+               "missing) VALUES (?, 'Song One', 213.4, 0, 0)", (p1,))
+    lc.commit()
+
+    text = pl.export_lst_text(lc, lpid)
+    lines = text.replace("\r\n", "\n").rstrip("\n").split("\n")
+    check("lst header is the track count", lines[0] == "2")
+    check("lst duration is ms from the index (213.4s -> 213400)",
+          lines[1].split("\t")[0] == "213400")
+    check("lst unknown duration is 0", lines[2].split("\t")[0] == "0")
+    check("lst paths use backslashes (Zara style)",
+          lines[1].split("\t")[1] == r"Z:\G\Artist\Album\01 Song One.mp3")
+    check("lst is CRLF terminated", text.endswith("\r\n") and "\r\n" in text)
+    # our own parser reads it back to the same paths
+    reparsed = pl.parse_lst(text.encode("cp1252"))
+    check("lst round-trips through parse_lst",
+          [e["path"] for e in reparsed]
+          == [r"Z:\G\Artist\Album\01 Song One.mp3",
+              r"Z:\G\Artist\Album\02 Song Two.mp3"])
+
+    lst_dir = os.path.join(td, "lst_out")
+    os.makedirs(lst_dir)
+    written = pl.write_lst(lc, lst_dir, lpid)
+    check("write_lst creates <name>.lst",
+          written == os.path.join(lst_dir, "Drive Time.lst")
+          and os.path.isfile(written))
+    check("write_lst is a no-op when the folder is unset/missing",
+          pl.write_lst(lc, "", lpid) is None
+          and pl.write_lst(lc, os.path.join(td, "nope"), lpid) is None)
+
+    # rename mirrors to the new name and removes the old file
+    pl.rename_playlist(lc, lpid, "Evening Show")
+    pl.write_lst(lc, lst_dir, lpid, old_name="Drive Time")
+    check("rename writes the new .lst",
+          os.path.isfile(os.path.join(lst_dir, "Evening Show.lst")))
+    check("rename removes the old .lst",
+          not os.path.isfile(os.path.join(lst_dir, "Drive Time.lst")))
+
+    # unsafe filename characters are sanitised
+    check("lst filename sanitises path chars",
+          pl.lst_filename('Rock/Pop: "Best"?') == "Rock_Pop_ _Best__.lst")
+
+    # sync_all writes every playlist in the DB
+    pl.create_playlist(lc, "Another")
+    total = lc.execute("SELECT COUNT(*) FROM playlists").fetchone()[0]
+    n = pl.sync_all_lst(lc, lst_dir)
+    check("sync_all_lst writes every playlist", n == total and total >= 2)
+    check("sync_all wrote the new playlist's file",
+          os.path.isfile(os.path.join(lst_dir, "Another.lst")))
+
+    pl.remove_lst(lst_dir, "Evening Show")
+    check("remove_lst deletes the file",
+          not os.path.isfile(os.path.join(lst_dir, "Evening Show.lst")))
+    lc.close()
+
     print(f"PLAYLISTS OK ({passed} checks)")
     return 0
 
