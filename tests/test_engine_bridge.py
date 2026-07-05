@@ -363,6 +363,42 @@ def main():
               (client.get("/api/schedule").json()["current_show"] or {})
               .get("name") == "Show C")
         client.post("/api/schedule/stop_show")
+
+        # a single audio FILE can be scheduled as a show (no playlist needed)
+        sfile = client.post("/api/schedule", json={
+            "source_kind": "file", "source_path": show_track}).json()["id"]
+        check("file show listed by its name",
+              any(u["id"] == sfile and u["source_kind"] == "file"
+                  for u in client.get("/api/schedule").json()["upcoming"]))
+        check("file show starts",
+              client.post(f"/api/schedule/{sfile}/start_now").status_code == 200)
+        check("file show goes on air", wait_for(
+              lambda: engine.status().get("now_source") == "show", 15, "file show"))
+        client.post("/api/schedule/stop_show")
+        check("schedule rejects a missing file", client.post(
+              "/api/schedule", json={"source_kind": "file",
+              "source_path": show_track + ".nope"}).status_code == 400)
+
+        # a ZaraRadio .lst can be scheduled as a show (parsed live)
+        lst_path = os.path.join(td, "myshow.lst")
+        with open(lst_path, "w", encoding="utf-8") as f:
+            f.write("1\n180000\t" + show_track + "\n")
+        slst = client.post("/api/schedule", json={
+            "source_kind": "lst", "source_path": lst_path}).json()["id"]
+        check("lst show starts",
+              client.post(f"/api/schedule/{slst}/start_now").status_code == 200)
+        check("lst show goes on air", wait_for(
+              lambda: engine.status().get("now_source") == "show", 15, "lst show"))
+        client.post("/api/schedule/stop_show")
+
+        # a spot rule can target a single FILE instead of a folder
+        fspot = client.post("/api/spots", json={
+            "trigger": "manual", "file_path": show_track}).json()["id"]
+        check("file spot listed",
+              any(r["id"] == fspot and r["file_path"]
+                  for r in client.get("/api/spots").json()["rules"]))
+        check("file spot play_now accepted",
+              client.post(f"/api/spots/{fspot}/play_now").status_code == 200)
         conn2.close()
 
         # ---- "Stop after current song": hold at the next boundary, then go.

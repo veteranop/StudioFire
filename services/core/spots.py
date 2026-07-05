@@ -68,17 +68,22 @@ def default_label(folder_key: str) -> str:
 
 def add(conn: sqlite3.Connection, folder_key: str, trigger: str,
         interval_min: int | None = None, clock_minutes: str | None = None,
-        start_at: str | None = None) -> int:
+        start_at: str | None = None, file_path: str | None = None) -> int:
+    """A spot rule targets either a folder (round-robin, folder_key) OR one
+    specific file (file_path). file_path wins when set."""
+    import os
     now = time.time()
     # interval rules start their clock at creation (first break N min later)
     last_fired = now if trigger == "interval" else None
+    label = (os.path.splitext(os.path.basename(file_path))[0] if file_path
+             else default_label(folder_key))
     with conn:
         cur = conn.execute(
             "INSERT INTO spot_rules (folder_key, label, trigger, interval_min, "
-            "  clock_minutes, start_at, enabled, last_fired, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)",
-            (folder_key, default_label(folder_key), trigger, interval_min,
-             clock_minutes, start_at, last_fired, now))
+            "  clock_minutes, start_at, file_path, enabled, last_fired, "
+            "  created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
+            (folder_key or "", label, trigger, interval_min, clock_minutes,
+             start_at, file_path, last_fired, now))
     return cur.lastrowid
 
 

@@ -121,6 +121,34 @@ CREATE TABLE spot_rules (
     created_at    REAL NOT NULL
 );
 """),
+    (4, """
+-- Scheduleable sources beyond whole playlists/folders: a single audio file
+-- (e.g. a whole show as one .mp3) or a ZaraRadio .lst read live.
+-- Spots can now target one specific file instead of a folder.
+ALTER TABLE spot_rules ADD COLUMN file_path TEXT;
+
+-- Rebuild playlist_schedule so playlist_id is nullable and it carries a typed
+-- source (playlist / file / lst). SQLite can't relax a NOT NULL column in place.
+CREATE TABLE playlist_schedule_new (
+    id          INTEGER PRIMARY KEY,
+    playlist_id INTEGER REFERENCES playlists(id) ON DELETE CASCADE,
+    source_kind TEXT NOT NULL DEFAULT 'playlist'
+        CHECK (source_kind IN ('playlist', 'file', 'lst')),
+    source_path TEXT,
+    start_at    TEXT,
+    sort        INTEGER NOT NULL DEFAULT 0,
+    state       TEXT NOT NULL DEFAULT 'waiting'
+        CHECK (state IN ('waiting', 'playing', 'done')),
+    created_at  REAL NOT NULL
+);
+INSERT INTO playlist_schedule_new
+    (id, playlist_id, source_kind, source_path, start_at, sort, state, created_at)
+    SELECT id, playlist_id, 'playlist', NULL, start_at, sort, state, created_at
+    FROM playlist_schedule;
+DROP TABLE playlist_schedule;
+ALTER TABLE playlist_schedule_new RENAME TO playlist_schedule;
+CREATE INDEX idx_sched_state ON playlist_schedule(state, start_at);
+"""),
 ]
 
 SCHEMA_VERSION = MIGRATIONS[-1][0]

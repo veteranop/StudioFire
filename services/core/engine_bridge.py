@@ -293,8 +293,42 @@ class Feeder:
     # ---- scheduled/cued "shows" that interrupt the rotation (§6 Phase 3)
 
     def _show_items(self, conn, st: dict) -> list[dict]:
+        """The items of whatever the active show is — a playlist, a single
+        file, or a live-parsed .lst."""
         show = st.get("show")
-        return pl.get_items(conn, show["playlist_id"]) if show else []
+        if not show:
+            return []
+        kind = show.get("kind", "playlist")
+        if kind == "playlist":
+            return pl.get_items(conn, show["playlist_id"])
+        if kind == "file":
+            p = show.get("source_path") or ""
+            return [{"id": "f0", "item_type": "file", "path": p,
+                     "title": os.path.splitext(os.path.basename(p))[0]}]
+        if kind == "lst":
+            return self._lst_items(show.get("source_path") or "")
+        return []
+
+    def _lst_items(self, path: str) -> list[dict]:
+        """Parse a ZaraRadio .lst live into playable file items (path aliases
+        applied, same as import)."""
+        try:
+            with open(path, "rb") as f:
+                entries = pl.parse_lst(f.read())
+        except OSError:
+            log.warning("feeder: .lst show unreadable: %r", path)
+            return []
+        aliases = self.cfg.get("path_aliases") or {}
+        out = []
+        for i, e in enumerate(entries):
+            p = e["path"]
+            for prefix, repl in aliases.items():
+                if p.lower().startswith(prefix.lower()):
+                    p = repl + p[len(prefix):]
+                    break
+            out.append({"id": f"l{i}", "item_type": "file", "path": p,
+                        "title": e["title"]})
+        return out
 
     def _clear_pending(self, conn, st: dict, status: dict) -> dict:
         """Drop P1's pending queue so a show starts at the next song boundary.
@@ -316,10 +350,13 @@ class Feeder:
     def _start_show(self, conn, st: dict, entry: dict, status: dict) -> dict:
         sched.set_state(conn, entry["id"], "playing")
         st["show"] = {"sched_id": entry["id"],
-                      "playlist_id": entry["playlist_id"], "cursor": 0}
+                      "kind": entry.get("source_kind", "playlist"),
+                      "playlist_id": entry.get("playlist_id"),
+                      "source_path": entry.get("source_path"),
+                      "cursor": 0}
         log.warning("feeder: show '%s' on air (schedule %d) — interrupting "
                     "rotation at next boundary",
-                    entry.get("playlist_name"), entry["id"])
+                    entry.get("name") or entry.get("playlist_name"), entry["id"])
         return self._clear_pending(conn, st, status)
 
     def _finish_show(self, conn, st: dict) -> None:
@@ -433,25 +470,33 @@ class Feeder:
 
     # ---- spots: station IDs / ads / jingles / PSAs between songs (§ spots)
 
-    def insert_spot(self, conn, folder_key: str,
-                    label: str | None = None) -> tuple[bool, str]:
-        """Resolve one round-robin file from a settings folder and drop it in
-        right after the current song (airs at the next boundary)."""
+    def insert_spot(self, conn, folder_key: str | None = None,
+                    label: str | None = None,
+                    file_path: str | None = None) -> tuple[bool, str]:
+        """Drop a spot in right after the current song (airs at the next
+        boundary). Targets a specific file (file_path) or one round-robin file
+        from a settings folder (folder_key)."""
         status = self.engine.status()
         if status is None:
             return False, "engine unreachable"
-        folder = coredb.get_setting(conn, folder_key)
-        if not folder or not os.path.isdir(folder):
-            return False, f"the {label or folder_key} folder is not set up"
-        src = pl.resolve_item(conn, {"item_type": "folder-rotation",
-                                     "path": folder})
-        if src is None:
-            return False, "no playable files in that folder"
+        if file_path:
+            src = file_path if os.path.isfile(file_path) else None
+            if src is None:
+                return False, "that spot file is not there"
+            title = label or os.path.splitext(os.path.basename(src))[0]
+        else:
+            folder = coredb.get_setting(conn, folder_key)
+            if not folder or not os.path.isdir(folder):
+                return False, f"the {label or folder_key} folder is not set up"
+            src = pl.resolve_item(conn, {"item_type": "folder-rotation",
+                                         "path": folder})
+            if src is None:
+                return False, "no playable files in that folder"
+            title = f"{label or spotmod.default_label(folder_key)}: " + \
+                os.path.splitext(os.path.basename(src))[0]
         cached = self.precache.ensure(src)
         if cached is None:
             return False, "the spot file could not be cached"
-        title = f"{label or spotmod.default_label(folder_key)}: " + \
-            os.path.splitext(os.path.basename(src))[0]
         entry = {"id": uuid.uuid4().hex, "path": cached, "title": title,
                  "source": "spot", "src": src}
         mutation = {"op": "insert_next",
@@ -483,10 +528,12 @@ class Feeder:
         for rule in spotmod.list_enabled(conn):
             if rule["trigger"] == "manual" or not spotmod.due(rule, now):
                 continue
-            ok, why = self.insert_spot(conn, rule["folder_key"], rule["label"])
+            ok, why = self.insert_spot(conn, rule["folder_key"], rule["label"],
+                                       file_path=rule.get("file_path"))
             spotmod.mark_fired(conn, rule, now)  # advance schedule either way
             if ok:
-                log.info("spot fired (%s): %s", rule["folder_key"], why)
+                log.info("spot fired (%s): %s",
+                         rule.get("file_path") or rule["folder_key"], why)
             else:
                 log.warning("spot rule %d skipped: %s", rule["id"], why)
 
@@ -825,28 +872,28 @@ def register(app: FastAPI) -> None:
         whatever is airing so it always matches Now Playing. It's read-only
         while a show is on (you edit your rotation, not a one-time show)."""
         st = feeder._load_state(conn)
-        show = st.get("show")
-        if show:
-            pid, is_show = show.get("playlist_id"), True
-        else:
-            base = coredb.get_setting(conn, "active_playlist_id")
-            pid, is_show = (int(base) if base else None), False
+        now_item_id = feeder._now_item_id(st, (engine.status() or {}).get("now_id"))
+
+        def _fmt(items):
+            return [{"id": it["id"], "item_type": it["item_type"],
+                     "title": it["title"] or os.path.splitext(
+                         os.path.basename(it["path"]))[0]} for it in items]
+
+        if st.get("show"):  # a show is on air — follow it (playlist/file/lst)
+            cur = sched.playing(conn)
+            name = (cur.get("name") if cur else None) or "Show on air"
+            return {"playlist": {"id": None, "name": name}, "is_show": True,
+                    "now_item_id": now_item_id,
+                    "items": _fmt(feeder._show_items(conn, st))}
+        base = coredb.get_setting(conn, "active_playlist_id")
         row = conn.execute("SELECT id, name FROM playlists WHERE id = ?",
-                           (pid,)).fetchone() if pid else None
+                           (int(base),)).fetchone() if base else None
         if row is None:
             return {"playlist": None, "items": [], "now_item_id": None,
                     "is_show": False}
-        items = pl.get_items(conn, row["id"])
-        now_item_id = feeder._now_item_id(st, (engine.status() or {}).get("now_id"))
-        return {
-            "playlist": {"id": row["id"], "name": row["name"]},
-            "is_show": is_show,
-            "now_item_id": now_item_id,
-            "items": [{"id": it["id"], "item_type": it["item_type"],
-                       "title": it["title"] or os.path.splitext(
-                           os.path.basename(it["path"]))[0]}
-                      for it in items],
-        }
+        return {"playlist": {"id": row["id"], "name": row["name"]},
+                "is_show": False, "now_item_id": now_item_id,
+                "items": _fmt(pl.get_items(conn, row["id"]))}
 
     @app.get("/api/history")
     def api_history(limit: int = 40, conn=Depends(get_conn),
@@ -911,28 +958,43 @@ def register(app: FastAPI) -> None:
         cur = sched.playing(conn)
         return {
             "base": base,
-            "current_show": ({"sched_id": cur["id"],
-                              "name": cur["playlist_name"]} if cur else None),
+            "current_show": ({"sched_id": cur["id"], "name": cur["name"]}
+                             if cur else None),
             "now": sched.now_local(),
-            "upcoming": [{"id": e["id"], "playlist_id": e["playlist_id"],
-                          "name": e["playlist_name"], "start_at": e["start_at"]}
+            "upcoming": [{"id": e["id"], "name": e["name"],
+                          "source_kind": e["source_kind"],
+                          "start_at": e["start_at"]}
                          for e in sched.list_waiting(conn)],
         }
 
     @app.post("/api/schedule", status_code=201)
     def api_schedule_add(body: dict, conn=Depends(get_conn),
                          _=Depends(api_user)):
-        try:
-            pid = int(body.get("playlist_id"))
-        except (TypeError, ValueError):
-            raise HTTPException(400, "playlist_id required")
-        if conn.execute("SELECT 1 FROM playlists WHERE id = ?",
-                        (pid,)).fetchone() is None:
-            raise HTTPException(404, "playlist not found")
+        """Schedule a show: a playlist, a single audio file, or a .lst file."""
+        kind = body.get("source_kind") or (
+            "playlist" if body.get("playlist_id") is not None else None)
         start_at = (body.get("start_at") or "").strip() or None
         if start_at and len(start_at) < 16:  # 'YYYY-MM-DDTHH:MM'
             raise HTTPException(400, "start time must be YYYY-MM-DDTHH:MM")
-        return {"id": sched.add(conn, pid, start_at)}
+        if kind == "playlist":
+            try:
+                pid = int(body.get("playlist_id"))
+            except (TypeError, ValueError):
+                raise HTTPException(400, "playlist_id required")
+            if conn.execute("SELECT 1 FROM playlists WHERE id = ?",
+                            (pid,)).fetchone() is None:
+                raise HTTPException(404, "playlist not found")
+            return {"id": sched.add(conn, "playlist", playlist_id=pid,
+                                    start_at=start_at)}
+        if kind in ("file", "lst"):
+            path = (body.get("source_path") or "").strip()
+            if not path or not os.path.isfile(path):
+                raise HTTPException(400, "that file does not exist")
+            if kind == "lst" and not path.lower().endswith(".lst"):
+                raise HTTPException(400, "that isn't a .lst file")
+            return {"id": sched.add(conn, kind, source_path=path,
+                                    start_at=start_at)}
+        raise HTTPException(400, "source_kind must be playlist, file or lst")
 
     @app.delete("/api/schedule/{sid}")
     def api_schedule_remove(sid: int, conn=Depends(get_conn),
@@ -984,6 +1046,7 @@ def register(app: FastAPI) -> None:
         for r in spotmod.list_all(conn):
             rules.append({
                 "id": r["id"], "folder_key": r["folder_key"],
+                "file_path": r["file_path"],
                 "label": r["label"], "trigger": r["trigger"],
                 "enabled": bool(r["enabled"]),
                 "summary": spotmod.describe(r),
@@ -994,12 +1057,18 @@ def register(app: FastAPI) -> None:
 
     @app.post("/api/spots", status_code=201)
     def api_spots_add(body: dict, conn=Depends(get_conn), _=Depends(api_user)):
-        key = body.get("folder_key")
-        if key not in {k for k, _, _ in spotmod.FOLDER_CATEGORIES}:
-            raise HTTPException(400, "unknown folder")
         trig = body.get("trigger")
         if trig not in spotmod.TRIGGERS:
             raise HTTPException(400, "trigger must be interval/clock/once/manual")
+        # target a single file, else a whole folder (round-robin)
+        file_path = (body.get("file_path") or "").strip() or None
+        key = body.get("folder_key")
+        if file_path:
+            if not os.path.isfile(file_path):
+                raise HTTPException(400, "that file does not exist")
+            key = ""
+        elif key not in {k for k, _, _ in spotmod.FOLDER_CATEGORIES}:
+            raise HTTPException(400, "pick a folder or a specific file")
         interval_min = clock_minutes = start_at = None
         if trig == "interval":
             try:
@@ -1017,7 +1086,8 @@ def register(app: FastAPI) -> None:
             start_at = (body.get("start_at") or "").strip()
             if spotmod._parse_dt(start_at) is None:
                 raise HTTPException(400, "start time must be YYYY-MM-DDTHH:MM")
-        rid = spotmod.add(conn, key, trig, interval_min, clock_minutes, start_at)
+        rid = spotmod.add(conn, key, trig, interval_min, clock_minutes,
+                          start_at, file_path=file_path)
         return {"id": rid}
 
     @app.delete("/api/spots/{rid}")
@@ -1039,7 +1109,8 @@ def register(app: FastAPI) -> None:
         rule = spotmod.get(conn, rid)
         if rule is None:
             raise HTTPException(404, "spot rule not found")
-        ok, why = feeder.insert_spot(conn, rule["folder_key"], rule["label"])
+        ok, why = feeder.insert_spot(conn, rule["folder_key"], rule["label"],
+                                     file_path=rule.get("file_path"))
         if not ok:
             raise HTTPException(409, why)
         return {"ok": True, "detail": why}

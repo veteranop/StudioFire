@@ -201,29 +201,44 @@ def create_app(cfg: dict) -> FastAPI:
         db.set_setting(conn, key, path)
         return {"ok": True}
 
+    _AUDIO_EXTS = {".mp3", ".m4a", ".mp4", ".aac", ".wav", ".flac", ".ogg"}
+
     @app.get("/api/fs/list")
-    def fs_list(path: str = "", _=Depends(api_admin)):
-        """Folder browser for the settings page (directories only)."""
+    def fs_list(path: str = "", files: str = "", _=Depends(api_user)):
+        """Browser for pickers. Always lists sub-folders; if `files` is given
+        (comma list: 'audio', 'lst', or explicit exts) also lists matching
+        files so you can pick a single file / .lst."""
+        want = set()
+        for tok in (files or "").split(","):
+            tok = tok.strip().lower()
+            if tok == "audio":
+                want |= _AUDIO_EXTS
+            elif tok == "lst":
+                want.add(".lst")
+            elif tok.startswith("."):
+                want.add(tok)
         if not path:
             drives = [f"{c}:\\" for c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
                       if os.path.exists(f"{c}:\\")]
-            return {"path": "", "parent": None, "dirs": drives}
+            return {"path": "", "parent": None, "dirs": drives, "files": []}
         norm = os.path.abspath(path)
         if not os.path.isdir(norm):
             raise HTTPException(400, "not a folder")
-        dirs = []
+        dirs, filelist = [], []
         try:
             for name in sorted(os.listdir(norm), key=str.lower):
                 if name.startswith(("$", ".")):
                     continue
-                if os.path.isdir(os.path.join(norm, name)):
+                full = os.path.join(norm, name)
+                if os.path.isdir(full):
                     dirs.append(name)
+                elif want and os.path.splitext(name)[1].lower() in want:
+                    filelist.append(name)
         except OSError:
             raise HTTPException(400, "cannot read that folder")
         parent = os.path.dirname(norm.rstrip("\\/"))
-        return {"path": norm,
-                "parent": parent if parent != norm else "",
-                "dirs": dirs}
+        return {"path": norm, "parent": parent if parent != norm else "",
+                "dirs": dirs, "files": filelist}
 
     @app.get("/api/backup")
     def backup(conn=Depends(get_conn), _=Depends(api_admin)):
