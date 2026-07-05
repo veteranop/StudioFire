@@ -40,6 +40,7 @@
   <div class="nowplaying">
     <div>
       <div id="np-title" class="np-title">—</div>
+      <div id="np-artist" class="np-artist"></div>
       <div id="np-pos" class="np-pos muted"></div>
     </div>
     <div class="controls">
@@ -580,13 +581,16 @@ async function refresh() {
     oa.classList.toggle("live", onAir);
     oa.textContent = onAir ? "ON AIR" : "OFF AIR";
     document.getElementById("emergency-banner").hidden = !q.emergency_mode;
-    let title = q.now_title;
+    // song title on the big line, "Artist • Album" underneath
+    let title = q.now_song || q.now_title;
     if (!title && q.now_playing) {
       title = (q.now_source === "emergency" || q.now_source === "baked_in")
         ? "Emergency filler" : basename(q.now_playing);
     }
     document.getElementById("np-title").textContent =
       title || "Nothing playing";
+    document.getElementById("np-artist").textContent =
+      [q.now_artist, q.now_album].filter(Boolean).join("  •  ");
     let pos = "";
     if (q.position != null) {
       pos = fmt(q.position);

@@ -452,6 +452,11 @@ def main():
         check("rotation marks the on-air item", wait_for(
               lambda: client.get("/api/rotation").json()["now_item_id"]
               in set(item_ids), 8, "now-marker"))
+        # Now Playing carries per-song fields (read from the cached file;
+        # these test wavs have no tags, so now_song is the filename title)
+        check("now playing exposes song metadata fields", wait_for(
+              lambda: bool(client.get("/api/queue").json().get("now_song")),
+              8, "now_song"))
 
         # reorder: reverse -> saved to the playlist AND re-synced on air
         r = client.post("/api/rotation/reorder",

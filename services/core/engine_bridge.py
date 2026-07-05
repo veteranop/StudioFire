@@ -39,6 +39,30 @@ from . import spots as spotmod
 
 log = logging.getLogger("core.bridge")
 
+
+def _read_meta(path: str) -> dict:
+    """Best-effort artist/album/title/duration from a LOCAL audio file — the
+    pre-cached copy, so it's fast and works even off the NAS. Never raises."""
+    out = {"artist": None, "album": None, "title": None, "duration": None}
+    try:
+        import mutagen
+        m = mutagen.File(path, easy=True)
+    except Exception:  # noqa: BLE001 — mutagen raises wildly varied errors
+        return out
+    if m is None:
+        return out
+    if getattr(m, "info", None) is not None:
+        out["duration"] = round(getattr(m.info, "length", 0.0) or 0.0, 2) or None
+    if m.tags:
+        def first(k):
+            v = m.tags.get(k)
+            return (str(v[0]).strip() or None) if v else None
+        out["artist"] = first("artist")
+        out["album"] = first("album")
+        out["title"] = first("title")
+    return out
+
+
 DEFAULT_TRACK_SEC = 240.0   # estimate when a track's duration is unknown
 FEED_TICK_SEC = 5.0
 MAX_FEED_BATCH = 50         # sanity cap per tick
@@ -520,16 +544,23 @@ class Feeder:
                 if cache_fails >= max(1, len(base_items) + len(show_items)):
                     break  # NAS is gone — stop burning the tick, retry later
                 continue  # source vanished mid-feed; try the next item
-            duration = self._duration_of(conn, src)
+            # read real artist/album/title/duration from the cached copy
+            meta = _read_meta(cached)
+            song = meta["title"] or title           # tag title, else filename
+            artist, album = meta["artist"], meta["album"]
+            duration = meta["duration"] or self._duration_of(conn, src)
+            disp = f"{artist} - {song}" if artist else song  # log + Now Playing
             eid = uuid.uuid4().hex
-            batch.append({"id": eid, "path": cached, "title": title,
+            batch.append({"id": eid, "path": cached, "title": disp,
                           "source": source, "src": src})
             st["fed"].append({"id": eid, "path": cached, "duration": duration,
-                              "title": title, "prog": prog,
+                              "title": disp, "prog": prog,
                               # the playlist item this came from (base OR show),
                               # so the on-air list can mark the current song in
                               # whichever program is playing
-                              "pl_item_id": item_id})
+                              "pl_item_id": item_id,
+                              # full metadata for the Now Playing panel
+                              "artist": artist, "album": album, "song": song})
             pending_sec += duration
         if not batch and op != "replace":
             self._save_state(conn, st)
@@ -669,6 +700,10 @@ def register(app: FastAPI) -> None:
         st = engine.status()
         fst = feeder._load_state(conn)
         pending = fst["fed"]
+        # the currently-playing fed entry carries full artist/album/song
+        now_id = (st or {}).get("now_id")
+        now_e = next((e for e in fst["fed"] if e["id"] == now_id), None) \
+            if now_id else None
         if st is not None and "pending_ids" in st:
             order = {i: k for k, i in enumerate(st["pending_ids"])}
             pending = sorted((e for e in pending if e["id"] in order),
@@ -680,6 +715,9 @@ def register(app: FastAPI) -> None:
         return {"engine_online": st is not None,
                 "now_playing": (st or {}).get("now_playing"),
                 "now_title": (st or {}).get("now_title"),
+                "now_artist": (now_e or {}).get("artist"),
+                "now_album": (now_e or {}).get("album"),
+                "now_song": (now_e or {}).get("song"),
                 "now_source": (st or {}).get("now_source"),
                 "duration": (st or {}).get("duration"),
                 "position": (st or {}).get("position"),
@@ -796,7 +834,7 @@ def register(app: FastAPI) -> None:
         """As-aired log: the most recent track starts/ends from play_history."""
         rows = conn.execute(
             "SELECT ts, event, title, source, path FROM play_history "
-            "WHERE event IN ('track_start', 'track_end') "
+            "WHERE event = 'track_start' "  # what aired; titles are Artist - Song
             "ORDER BY id DESC LIMIT ?", (max(1, min(limit, 200)),)).fetchall()
         out = []
         for r in rows:

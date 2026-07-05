@@ -82,6 +82,8 @@ input {
 .nowplaying { display: flex; flex-wrap: wrap; gap: 1.5rem;
               align-items: center; justify-content: space-between; }
 .np-title { font-size: 2rem; font-weight: 700; }
+.np-artist { font-size: 1.25rem; color: #b9c6d6; margin-top: .15rem; }
+.np-artist:empty { display: none; }
 .np-pos { font-size: 1.3rem; }
 .controls { display: flex; gap: 1rem; }
 .controls .btn-big { width: auto; min-width: 220px; margin-top: 0; }
