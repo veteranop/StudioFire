@@ -327,8 +327,12 @@ class Feeder:
         ok, why = self.tick(conn)            # refill from the base rotation
         return ok, f"back to the rotation ({why})"
 
-    def start_show_now(self, conn, sched_id: int) -> tuple[bool, str]:
-        """Manual cue: put a waiting show on air right now (next boundary)."""
+    def start_show_now(self, conn, sched_id: int,
+                       cut: bool = False) -> tuple[bool, str]:
+        """Put a waiting show on air. cut=False ("Cue next"): the current song
+        finishes, then the show plays. cut=True ("Start now"): the current song
+        is stopped immediately and the show starts now. Either way it takes
+        over whatever show is already on air."""
         status = self.engine.status()
         if status is None:
             return False, "engine unreachable"
@@ -343,7 +347,9 @@ class Feeder:
             self._finish_show(conn, st)
         self._start_show(conn, st, entry, status)
         self._save_state(conn, st)
-        ok, why = self.tick(conn)
+        ok, why = self.tick(conn)  # feed the show in behind the current song
+        if ok and cut:
+            self.engine.op("skip")  # hard cut: drop the current song, show now
         return ok, f"show started ({why})"
 
     def resync_rotation(self, conn) -> tuple[bool, str]:
@@ -867,7 +873,17 @@ def register(app: FastAPI) -> None:
     @app.post("/api/schedule/{sid}/start_now")
     def api_schedule_start_now(sid: int, conn=Depends(get_conn),
                                _=Depends(api_user)):
-        ok, why = feeder.start_show_now(conn, sid)
+        """Cut to this show immediately (stop the current song)."""
+        ok, why = feeder.start_show_now(conn, sid, cut=True)
+        if not ok:
+            raise HTTPException(409, why)
+        return {"ok": True, "detail": why}
+
+    @app.post("/api/schedule/{sid}/cue_next")
+    def api_schedule_cue_next(sid: int, conn=Depends(get_conn),
+                              _=Depends(api_user)):
+        """Play this show after the current song finishes (graceful)."""
+        ok, why = feeder.start_show_now(conn, sid, cut=False)
         if not ok:
             raise HTTPException(409, why)
         return {"ok": True, "detail": why}

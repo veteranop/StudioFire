@@ -187,14 +187,20 @@ async function refreshSchedule() {
       const btns = document.createElement("div");
       btns.className = "item-btns";
       const start = document.createElement("button");
-      start.className = "btn btn-sm btn-green";
+      start.className = "btn btn-sm btn-red";
       start.textContent = "Start now";
+      start.title = "Cut the current song and play this now";
       start.onclick = () => startShow(e.id);
+      const cue = document.createElement("button");
+      cue.className = "btn btn-sm btn-green";
+      cue.textContent = "Cue next";
+      cue.title = "Play this after the current song finishes";
+      cue.onclick = () => cueShow(e.id);
       const del = document.createElement("button");
       del.className = "btn btn-sm";
       del.textContent = "Remove";
       del.onclick = () => removeSchedule(e.id);
-      btns.appendChild(start); btns.appendChild(del);
+      btns.appendChild(start); btns.appendChild(cue); btns.appendChild(del);
       li.appendChild(info); li.appendChild(btns);
       ol.appendChild(li);
     }
@@ -215,11 +221,16 @@ async function addSchedule() {
   refreshSchedule();
 }
 async function startShow(id) {
-  if (!confirm("Put this playlist on air now?\n\nIt starts at the end of the " +
-               "current song, plays once through, then returns to the " +
+  if (!confirm("Cut to this playlist NOW?\n\nThe current song stops " +
+               "immediately. It plays once through, then returns to the " +
                "regular rotation.")) return;
   const r = await fetch("/api/schedule/" + id + "/start_now", {method: "POST"});
   if (!r.ok) alert((await r.json().catch(() => ({}))).detail || "Could not start");
+  refreshSchedule(); refresh();
+}
+async function cueShow(id) {
+  const r = await fetch("/api/schedule/" + id + "/cue_next", {method: "POST"});
+  if (!r.ok) alert((await r.json().catch(() => ({}))).detail || "Could not cue");
   refreshSchedule();
 }
 async function removeSchedule(id) {

@@ -341,6 +341,18 @@ def main():
               client.get("/api/schedule").json()["current_show"] is None)
         check("stop_show with no show -> 409",
               client.post("/api/schedule/stop_show").status_code == 409)
+
+        # Cue next (graceful) also puts a waiting show on air
+        show_c = pl.create_playlist(conn, "Show C")
+        pl.add_item(conn, show_c, "file", show_track, "SHOW C SEG")
+        scid = client.post("/api/schedule",
+                           json={"playlist_id": show_c}).json()["id"]
+        check("cue_next accepted",
+              client.post(f"/api/schedule/{scid}/cue_next").status_code == 200)
+        check("cue_next puts the show on air",
+              (client.get("/api/schedule").json()["current_show"] or {})
+              .get("name") == "Show C")
+        client.post("/api/schedule/stop_show")
         conn2.close()
 
         # ---- "Stop after current song": hold at the next boundary, then go.
