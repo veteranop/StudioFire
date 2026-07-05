@@ -235,7 +235,9 @@ async function fpGo(path) {
     b.className = "pickdir pickfile"; b.textContent = "🎵 " + name;
     b.onclick = () => {
       const p = joinPath(d.path, name);
-      fpClose(); if (fpOnPick) fpOnPick(p);
+      const cb = fpOnPick;
+      fpClose();
+      if (cb) cb(p);
     };
     list.appendChild(b);
   }
