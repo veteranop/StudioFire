@@ -403,12 +403,16 @@ def create_app(cfg: dict) -> FastAPI:
                 s = _json.loads(raw)
                 n = conn.execute("SELECT COUNT(*) FROM tracks "
                                  "WHERE missing = 0").fetchone()[0]
-                tiles.append({"name": "Library index",
-                              "state": "green",
-                              "detail": (f"{n} tracks"
-                                         + (" — indexing…"
-                                            if s.get("state") == "scanning"
-                                            else ""))})
+                detail = f"{n} tracks"
+                if s.get("state") == "scanning":
+                    if s.get("phase") == "tags":
+                        left = s.get("tags_left")
+                        detail += (f" — reading tags ({left:,} left)"
+                                   if left else " — reading tags…")
+                    else:
+                        detail += " — finding files…"
+                tiles.append({"name": "Library index", "state": "green",
+                              "detail": detail})
             except ValueError:
                 pass
         else:

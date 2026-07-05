@@ -225,6 +225,15 @@ INSERT INTO spot_rules_new SELECT
 DROP TABLE spot_rules;
 ALTER TABLE spot_rules_new RENAME TO spot_rules;
 """),
+    (7, """
+-- Two-phase indexing: a fast path-only walk makes every file searchable in
+-- minutes, then tags (artist/album/duration) are backfilled in the background.
+-- tags_read = 0 means "path known, tags not read yet". Existing rows were fully
+-- tag-read by the old single-pass indexer, so mark them done.
+ALTER TABLE tracks ADD COLUMN tags_read INTEGER NOT NULL DEFAULT 0;
+UPDATE tracks SET tags_read = 1;
+CREATE INDEX idx_tracks_tags_read ON tracks(tags_read) WHERE tags_read = 0;
+"""),
 ]
 
 SCHEMA_VERSION = MIGRATIONS[-1][0]

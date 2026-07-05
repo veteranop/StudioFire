@@ -14,7 +14,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 from services.core import db                      # noqa: E402
-from services.worker.indexer import scan          # noqa: E402
+from services.worker.indexer import (              # noqa: E402
+    scan, _walk_paths, _backfill_tags)
 
 passed = 0
 
@@ -123,6 +124,36 @@ def main():
     status = json.loads(db.get_setting(conn, "indexer_status"))
     check("status row written", status["state"] == "idle"
           and "finished_at" in status)
+
+    # ---- two-phase: paths are searchable BEFORE tags are read ----
+    td2 = tempfile.mkdtemp(prefix="sf-idx2-")
+    nas2 = os.path.join(td2, "nas")
+    os.makedirs(os.path.join(nas2, "Tool", "Lateralus"))
+    make_wav(os.path.join(nas2, "Tool", "Lateralus", "01 Schism.wav"), 1.0, 440)
+    db2 = os.path.join(td2, "t2.db")
+    db.migrate(db2)
+    c2 = db.connect(db2)
+
+    stats, seen, dirs = _walk_paths(c2, nas2, time.time(), lambda: False)
+    check("phase 1 records the path", stats["added"] == 1)
+    row = c2.execute("SELECT * FROM tracks WHERE path LIKE '%Schism%'").fetchone()
+    check("phase 1 title is the filename", row["title"] == "01 Schism")
+    check("phase 1 leaves tags unread (tags_read=0)", row["tags_read"] == 0)
+    check("phase 1 has no artist/duration yet",
+          row["artist"] is None and row["duration_sec"] is None)
+    # searchable by folder/path immediately (this is the whole point)
+    hit = c2.execute("SELECT COUNT(*) FROM tracks WHERE path LIKE '%Tool%' "
+                     "OR title LIKE '%Tool%'").fetchone()[0]
+    check("findable by path before any tag read", hit == 1)
+
+    tagged = _backfill_tags(c2, nas2, time.time(), dict(stats), lambda: False)
+    check("phase 2 tags the new row", tagged == 1)
+    row = c2.execute("SELECT * FROM tracks WHERE path LIKE '%Schism%'").fetchone()
+    check("phase 2 fills duration + marks read",
+          row["tags_read"] == 1 and abs(row["duration_sec"] - 1.0) < 0.1)
+    check("phase 2 backfill is a no-op when nothing is unread",
+          _backfill_tags(c2, nas2, time.time(), dict(stats), lambda: False) == 0)
+    c2.close()
 
     print(f"INDEXER OK ({passed} checks)")
     return 0
