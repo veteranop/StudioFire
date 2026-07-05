@@ -11,6 +11,18 @@ plain English a non-technical operator can understand.
 - A ⟳ "restart everything" button next to the ON AIR light (and restart-all.bat)
   to manually cycle all services during testing. Guarded by a config flag
   (allow_gui_restart) so it can be turned off on the on-air PC.
+- Now Playing and the History / Log now show the real Artist / Album / Song,
+  read straight from each song's tags (via its cached copy) — no more cache-hash
+  gibberish in the log, and track times are accurate too.
+- "Fix broken file paths" on the Playlists page: many playlists (imported before
+  the NAS move) point at old locations — this repoints each stale track to the
+  real file in your library, matched by name. No re-import needed.
+
+### Fixed
+- Intermittent errors on every page under load — the database connection wasn't
+  safe to hand between the web server's worker threads. Fixed.
+- A rare file-lock error while caching songs ahead (which also quietly skipped a
+  feed cycle now and then) is gone.
 
 ### Changed
 - On Air controls are simpler and clearer. The 🚨 EMERGENCY button is gone;
@@ -19,8 +31,6 @@ plain English a non-technical operator can understand.
   current Song (finishes the song that's playing, then goes off air with the
   next song cued and ready — press GO to continue). Automatic emergency filler
   still kicks in on its own if the playlist ever can't continue.
-
-### Changed
 - The middle On Air list now follows whatever is actually on air: when a show is
   playing it shows the SHOW's playlist (with the on-air song marked), and it goes
   back to your rotation when the show ends — so the list always matches Now
