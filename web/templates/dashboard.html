@@ -65,9 +65,27 @@
     <ol id="spot-list" class="schedlist"><li class="muted">loading…</li></ol>
     <details class="advanced">
       <summary>➕ Add a spot rule</summary>
-      <label>Folder
-        <select id="spot-folder" style="width:100%"></select>
+      <label>Play
+        <select id="spot-target" style="width:100%"
+                onchange="spotTargetChange()">
+          <option value="folder">A whole folder (rotate through it)</option>
+          <option value="file">One specific file</option>
+        </select>
       </label>
+      <div id="spot-t-folder">
+        <label>Folder
+          <select id="spot-folder" style="width:100%"></select>
+        </label>
+      </div>
+      <div id="spot-t-file" hidden>
+        <label>File
+          <div class="row">
+            <button type="button" class="btn btn-sm"
+                    onclick="pickSpotFile()">📁 Choose file…</button>
+            <span id="spot-file-name" class="muted">none chosen</span>
+          </div>
+        </label>
+      </div>
       <label>When
         <select id="spot-trigger" style="width:100%"
                 onchange="spotTriggerChange()">
@@ -99,20 +117,52 @@
     <ol id="rot-list" class="queue"><li class="muted">loading…</li></ol>
   </div>
   <div class="card">
-    <h2>Playlists on air</h2>
+    <h2>On-Air schedule</h2>
     <div id="sched-now" class="muted">loading…</div>
     <h3 class="sched-h">Up next</h3>
     <ol id="sched-list" class="schedlist"><li class="muted">—</li></ol>
     <details class="advanced">
-      <summary>➕ Schedule or cue a playlist</summary>
-      <div class="row">
+      <summary>➕ Add to the schedule</summary>
+      <label>What to play
+        <select id="sched-kind" style="width:100%" onchange="schedKindChange()">
+          <option value="playlist">A playlist</option>
+          <option value="file">A single file (whole show as one .mp3)</option>
+          <option value="lst">A ZaraRadio .lst file</option>
+        </select>
+      </label>
+      <div id="sched-p-playlist" class="row">
         <select id="sched-playlist" style="flex:1"></select>
+      </div>
+      <div id="sched-p-file" hidden>
+        <label>File
+          <div class="row">
+            <button type="button" class="btn btn-sm"
+                    onclick="pickSchedFile()">📁 Choose file…</button>
+            <span id="sched-file-name" class="muted">none chosen</span>
+          </div>
+        </label>
       </div>
       <label>Start time <span class="muted">(leave blank to cue for manual start)</span>
         <input type="datetime-local" id="sched-time">
       </label>
       <button class="btn btn-green" onclick="addSchedule()">Add to schedule</button>
     </details>
+  </div>
+</div>
+
+<!-- shared file/folder picker -->
+<div id="fp-modal" class="fp-modal" hidden>
+  <div class="fp-box card">
+    <div class="row" style="justify-content:space-between;margin-top:0">
+      <strong id="fp-title">Pick a file</strong>
+      <button class="btn btn-sm" onclick="fpClose()">✕ Close</button>
+    </div>
+    <div class="row">
+      <button class="btn btn-sm" onclick="fpGo('')">💻 Drives</button>
+      <button class="btn btn-sm" id="fp-up" onclick="fpUp()">⬆ Up</button>
+      <span id="fp-path" class="muted"></span>
+    </div>
+    <div id="fp-list" class="picker"></div>
   </div>
 </div>
 <div class="card">
@@ -148,7 +198,52 @@ function fmtWhen(s) {
   return d + " at " + t;
 }
 
-// ---- playlist schedule: base rotation + upcoming shows
+// ---- shared file/folder picker (browse the NAS, pick a file)
+let fpExts = "", fpOnPick = null, fpPath = "", fpParent = null;
+function joinPath(base, name) {
+  return base ? base.replace(/[\\/]$/, "") + "\\" + name : name;
+}
+function openFilePicker(exts, title, onPick) {
+  fpExts = exts; fpOnPick = onPick;
+  document.getElementById("fp-title").textContent = title;
+  document.getElementById("fp-modal").hidden = false;
+  fpGo("");
+}
+function fpClose() {
+  document.getElementById("fp-modal").hidden = true; fpOnPick = null;
+}
+function fpUp() { if (fpParent !== null) fpGo(fpParent); }
+async function fpGo(path) {
+  let d;
+  try {
+    d = await (await fetch("/api/fs/list?files=" +
+      encodeURIComponent(fpExts) + "&path=" + encodeURIComponent(path))).json();
+  } catch (e) { alert("Can't open that folder"); return; }
+  fpPath = d.path; fpParent = d.parent;
+  document.getElementById("fp-path").textContent = d.path || "Choose a drive";
+  document.getElementById("fp-up").disabled = d.parent === null;
+  const list = document.getElementById("fp-list");
+  list.innerHTML = "";
+  for (const name of d.dirs) {
+    const b = document.createElement("button");
+    b.className = "pickdir"; b.textContent = "📁 " + name;
+    b.onclick = () => fpGo(joinPath(d.path, name));
+    list.appendChild(b);
+  }
+  for (const name of (d.files || [])) {
+    const b = document.createElement("button");
+    b.className = "pickdir pickfile"; b.textContent = "🎵 " + name;
+    b.onclick = () => {
+      const p = joinPath(d.path, name);
+      fpClose(); if (fpOnPick) fpOnPick(p);
+    };
+    list.appendChild(b);
+  }
+  if (!d.dirs.length && !(d.files || []).length)
+    list.innerHTML = "<div class='muted'>Nothing here</div>";
+}
+
+// ---- On-Air schedule: base rotation + upcoming shows
 async function loadPlaylistOptions() {
   try {
     const pls = await (await fetch("/api/playlists")).json();
@@ -187,8 +282,10 @@ async function refreshSchedule() {
     for (const e of sc.upcoming) {
       const li = document.createElement("li");
       const info = document.createElement("div");
-      info.innerHTML = "<strong>" + esc(e.name) + "</strong><br>" +
-        "<small class='muted'>" + esc(fmtWhen(e.start_at)) + "</small>";
+      const kindTag = e.source_kind === "file" ? " <span class='src-tag'>file</span>"
+        : e.source_kind === "lst" ? " <span class='src-tag'>.lst</span>" : "";
+      info.innerHTML = "<strong>" + esc(e.name) + "</strong>" + kindTag +
+        "<br><small class='muted'>" + esc(fmtWhen(e.start_at)) + "</small>";
       const btns = document.createElement("div");
       btns.className = "item-btns";
       const start = document.createElement("button");
@@ -211,18 +308,42 @@ async function refreshSchedule() {
     }
   } catch (e) { /* next poll */ }
 }
+let schedFilePath = null;
+function schedKindChange() {
+  const k = document.getElementById("sched-kind").value;
+  document.getElementById("sched-p-playlist").hidden = k !== "playlist";
+  document.getElementById("sched-p-file").hidden = k === "playlist";
+}
+function pickSchedFile() {
+  const k = document.getElementById("sched-kind").value;
+  openFilePicker(k === "lst" ? "lst" : "audio",
+    k === "lst" ? "Pick a .lst file" : "Pick an audio file", (p) => {
+      schedFilePath = p;
+      document.getElementById("sched-file-name").textContent =
+        p.split(/[\\/]/).pop();
+    });
+}
 async function addSchedule() {
-  const pid = document.getElementById("sched-playlist").value;
-  if (!pid) { alert("Pick a playlist first."); return; }
+  const kind = document.getElementById("sched-kind").value;
   const t = document.getElementById("sched-time").value;  // '' or ISO local
+  const body = {source_kind: kind, start_at: t};
+  if (kind === "playlist") {
+    const pid = document.getElementById("sched-playlist").value;
+    if (!pid) { alert("Pick a playlist first."); return; }
+    body.playlist_id = Number(pid);
+  } else {
+    if (!schedFilePath) { alert("Choose a file first."); return; }
+    body.source_path = schedFilePath;
+  }
   const r = await fetch("/api/schedule", {method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({playlist_id: Number(pid), start_at: t})});
+    headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
   if (!r.ok) {
     alert((await r.json().catch(() => ({}))).detail || "Could not add");
     return;
   }
   document.getElementById("sched-time").value = "";
+  schedFilePath = null;
+  document.getElementById("sched-file-name").textContent = "none chosen";
   refreshSchedule();
 }
 async function startShow(id) {
@@ -353,6 +474,19 @@ function spotTriggerChange() {
   document.getElementById("spot-p-clock").hidden = t !== "clock";
   document.getElementById("spot-p-once").hidden = t !== "once";
 }
+let spotFilePath = null;
+function spotTargetChange() {
+  const v = document.getElementById("spot-target").value;
+  document.getElementById("spot-t-folder").hidden = v !== "folder";
+  document.getElementById("spot-t-file").hidden = v !== "file";
+}
+function pickSpotFile() {
+  openFilePicker("audio", "Pick a spot file", (p) => {
+    spotFilePath = p;
+    document.getElementById("spot-file-name").textContent =
+      p.split(/[\\/]/).pop();
+  });
+}
 function fmtCountdown(next) {
   if (next == null) return "manual";
   const rem = Math.round(next - (Date.now() / 1000 + spotSkew));
@@ -410,10 +544,16 @@ function tickSpotCountdowns() {
   }
 }
 async function addSpot() {
-  const key = document.getElementById("spot-folder").value;
-  if (!key) { alert("Pick a folder first (set it up on the Settings page)."); return; }
   const trigger = document.getElementById("spot-trigger").value;
-  const body = {folder_key: key, trigger};
+  const body = {trigger};
+  if (document.getElementById("spot-target").value === "file") {
+    if (!spotFilePath) { alert("Choose a file first."); return; }
+    body.file_path = spotFilePath;
+  } else {
+    const key = document.getElementById("spot-folder").value;
+    if (!key) { alert("Pick a folder first (set it up on the Settings page)."); return; }
+    body.folder_key = key;
+  }
   if (trigger === "interval")
     body.interval_min = Number(document.getElementById("spot-interval").value);
   if (trigger === "clock")
@@ -426,6 +566,8 @@ async function addSpot() {
     alert((await r.json().catch(() => ({}))).detail || "Could not add");
     return;
   }
+  spotFilePath = null;
+  document.getElementById("spot-file-name").textContent = "none chosen";
   refreshSpots();
 }
 async function playSpot(id) {
