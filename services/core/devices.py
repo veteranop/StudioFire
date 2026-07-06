@@ -21,6 +21,9 @@ import time
 PING_INTERVAL = 20.0     # seconds between sweeps of all devices
 PING_TIMEOUT_MS = 1500   # per-device wait
 _WIN = sys.platform.startswith("win")
+# CREATE_NO_WINDOW: keep the ping subprocess from flashing a console window on
+# Windows (P2 runs with no console, so each ping would otherwise pop one up).
+_NO_WINDOW = 0x08000000 if _WIN else 0
 # grab the reported round-trip time from ping output (Windows 'time=12ms' /
 # 'time<1ms'; unix 'time=12.3 ms')
 _RTT = re.compile(r"time[=<]\s*([\d.]+)\s*ms", re.IGNORECASE)
@@ -58,7 +61,8 @@ def ping(host: str, timeout_ms: int = PING_TIMEOUT_MS) -> tuple[bool, float | No
         cmd = ["ping", "-c", "1", "-W", str(max(1, timeout_ms // 1000)), host]
     try:
         out = subprocess.run(cmd, capture_output=True, text=True,
-                             timeout=timeout_ms / 1000 + 2)
+                             timeout=timeout_ms / 1000 + 2,
+                             creationflags=_NO_WINDOW)
     except (subprocess.TimeoutExpired, OSError):
         return False, None
     if out.returncode != 0:
