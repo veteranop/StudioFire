@@ -149,17 +149,13 @@
       <summary>➕ Add to the schedule</summary>
       <label>What to play
         <select id="sched-kind" style="width:100%" onchange="schedKindChange()">
-          <option value="playlist">A playlist</option>
-          <option value="file">A single file (whole show as one .mp3)</option>
-          <option value="folder">A folder (plays all its files — segments)</option>
-          <option value="lst">A ZaraRadio .lst file</option>
+          <option value="lst">Playlist</option>
+          <option value="file">Single file (whole show as one .mp3)</option>
+          <option value="folder">Folder (plays all its files — segments)</option>
         </select>
       </label>
-      <div id="sched-p-playlist" class="row">
-        <select id="sched-playlist" style="flex:1"></select>
-      </div>
-      <div id="sched-p-file" hidden>
-        <label id="sched-file-label">File
+      <div id="sched-p-file">
+        <label id="sched-file-label">Playlist
           <div class="row">
             <button type="button" class="btn btn-sm" id="sched-file-btn"
                     onclick="pickSchedFile()">📁 Choose file…</button>
@@ -260,12 +256,12 @@ let fpExts = "", fpOnPick = null, fpPath = "", fpParent = null, fpDirMode = fals
 function joinPath(base, name) {
   return base ? base.replace(/[\\/]$/, "") + "\\" + name : name;
 }
-function openFilePicker(exts, title, onPick) {
+function openFilePicker(exts, title, onPick, startPath) {
   fpExts = exts; fpOnPick = onPick; fpDirMode = false;
   document.getElementById("fp-usedir").hidden = true;
   document.getElementById("fp-title").textContent = title;
   document.getElementById("fp-modal").hidden = false;
-  fpGo("");
+  fpGo(startPath || "");
 }
 function openFolderPicker(title, onPick) {
   fpExts = ""; fpOnPick = onPick; fpDirMode = true;
@@ -317,18 +313,6 @@ async function fpGo(path) {
 }
 
 // ---- On-Air schedule: base rotation + upcoming shows
-async function loadPlaylistOptions() {
-  try {
-    const pls = await (await fetch("/api/playlists")).json();
-    const sel = document.getElementById("sched-playlist");
-    sel.innerHTML = "";
-    for (const p of pls) {
-      const o = document.createElement("option");
-      o.value = p.id; o.textContent = p.name;
-      sel.appendChild(o);
-    }
-  } catch (e) { /* retry next time the page loads */ }
-}
 async function refreshSchedule() {
   try {
     const sc = await (await fetch("/api/schedule")).json();
@@ -389,17 +373,16 @@ async function refreshSchedule() {
 let schedFilePath = null;
 function schedKindChange() {
   const k = document.getElementById("sched-kind").value;
-  document.getElementById("sched-p-playlist").hidden = k !== "playlist";
-  document.getElementById("sched-p-file").hidden = k === "playlist";
-  const isFolder = k === "folder";
-  document.getElementById("sched-file-label").firstChild.textContent =
-    isFolder ? "Folder" : (k === "lst" ? ".lst file" : "File");
+  const label = k === "folder" ? "Folder"
+    : k === "file" ? "File" : "Playlist";
+  document.getElementById("sched-file-label").firstChild.textContent = label;
   document.getElementById("sched-file-btn").textContent =
-    isFolder ? "📁 Choose folder…" : "📁 Choose file…";
+    k === "folder" ? "📁 Choose folder…"
+    : k === "file" ? "📁 Choose file…" : "📁 Choose playlist…";
   schedFilePath = null;
   document.getElementById("sched-file-name").textContent = "none chosen";
 }
-function pickSchedFile() {
+async function pickSchedFile() {
   const k = document.getElementById("sched-kind").value;
   const setName = (p) => {
     schedFilePath = p;
@@ -410,8 +393,15 @@ function pickSchedFile() {
     openFolderPicker("Pick a show folder (all its files play in order)", setName);
     return;
   }
-  openFilePicker(k === "lst" ? "lst" : "audio",
-    k === "lst" ? "Pick a .lst file" : "Pick an audio file", setName);
+  if (k === "file") {
+    openFilePicker("audio", "Pick an audio file", setName);
+    return;
+  }
+  // Playlist = a .lst file — start in the playlist backup folder if set
+  let start = "";
+  try { start = (await (await fetch("/api/playlists/lst_dir")).json()).path || ""; }
+  catch (e) { /* fall back to drives */ }
+  openFilePicker("lst", "Pick a playlist (.lst)", setName, start);
 }
 function schedRecChange() {
   const r = document.getElementById("sched-rec").value;
@@ -423,14 +413,12 @@ async function addSchedule() {
   const kind = document.getElementById("sched-kind").value;
   const rec = document.getElementById("sched-rec").value;
   const body = {source_kind: kind, recurrence: rec};
-  if (kind === "playlist") {
-    const pid = document.getElementById("sched-playlist").value;
-    if (!pid) { alert("Pick a playlist first."); return; }
-    body.playlist_id = Number(pid);
-  } else {
-    if (!schedFilePath) { alert("Choose a file first."); return; }
-    body.source_path = schedFilePath;
+  if (!schedFilePath) {
+    alert(kind === "folder" ? "Choose a folder first."
+      : kind === "file" ? "Choose a file first." : "Choose a playlist first.");
+    return;
   }
+  body.source_path = schedFilePath;
   if (rec === "once") {
     body.start_at = document.getElementById("sched-time").value;  // '' or ISO
   } else {
@@ -1008,7 +996,7 @@ rotListEl.addEventListener("dragover", (ev) => {
 });
 rotListEl.addEventListener("scroll", () => { rotScrolledAt = Date.now(); });
 
-refresh(); refreshTiles(); loadPlaylistOptions(); refreshSchedule();
+refresh(); refreshTiles(); refreshSchedule();
 loadSpotFolders(); refreshSpots(); refreshRotation(); refreshHistory();
 setInterval(refresh, 2000);
 setInterval(refreshTiles, 10000);
