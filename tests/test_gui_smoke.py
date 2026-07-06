@@ -167,6 +167,45 @@ def main():
     check("lst picker bypasses the index (lists live)",
           not live.get("from_index"))
 
+    # ---- user administration + role gating
+    users = client.get("/api/users").json()
+    check("users list has the first admin",
+          any(u["role"] == "admin" for u in users))
+    r = client.post("/api/users", json={"username": "dj",
+                    "password": "longenough", "role": "basic"})
+    check("create Basic user (stored as operator)", r.status_code == 201)
+    uid = r.json()["id"]
+    check("Basic user has operator role",
+          any(u["id"] == uid and u["role"] == "operator"
+              for u in client.get("/api/users").json()))
+    check("reject short password", client.post("/api/users", json={
+          "username": "x", "password": "short", "role": "basic"}
+          ).status_code == 400)
+    check("reject duplicate username", client.post("/api/users", json={
+          "username": "dj", "password": "longenough", "role": "basic"}
+          ).status_code == 409)
+    # a Basic user can reach settings + edit folders but NOT manage users
+    bc = TestClient(app, follow_redirects=False)
+    bc.post("/login", data={"username": "dj", "password": "longenough"})
+    check("Basic can open the settings page", bc.get("/settings").status_code == 200)
+    check("Basic can edit station folders", bc.post("/api/settings/dirs",
+          json={"key": "dir_ads", "path": ""}).status_code == 200)
+    check("Basic CANNOT list users (403)", bc.get("/api/users").status_code == 403)
+    check("Basic CANNOT create users (403)", bc.post("/api/users", json={
+          "username": "z", "password": "longenough", "role": "basic"}
+          ).status_code == 403)
+    # admin: promote, reset password, delete
+    check("promote Basic -> Admin",
+          client.post(f"/api/users/{uid}/role", json={"role": "admin"}
+                      ).status_code == 200)
+    check("reset a user's password",
+          client.post(f"/api/users/{uid}/password",
+                      json={"password": "anotherlong"}).status_code == 200)
+    check("delete a user", client.delete(f"/api/users/{uid}").status_code == 200)
+    me = next(u for u in client.get("/api/users").json() if u["role"] == "admin")
+    check("can't delete the last admin / yourself",
+          client.delete(f"/api/users/{me['id']}").status_code == 400)
+
     # NAS yanked -> red tile
     os.rename(nas, nas + "-gone")
     tiles = {t["name"]: t for t in client.get("/api/health/tiles").json()}

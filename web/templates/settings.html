@@ -38,6 +38,31 @@
   <div id="lst-msg" class="muted" style="margin-top:.5rem"></div>
 </div>
 
+{% if role == 'admin' %}
+<div class="card">
+  <h1>Users</h1>
+  <p class="muted">Admins can do everything, including managing users. Basic
+    users can do everything <em>except</em> add or remove users.</p>
+  <div id="user-rows"></div>
+  <details class="advanced">
+    <summary>&#10133; Add a user</summary>
+    <div class="row">
+      <label style="flex:1">Username
+        <input id="nu-name" autocomplete="off"></label>
+      <label style="flex:1">Password <span class="muted">(min 8)</span>
+        <input id="nu-pass" type="password" autocomplete="new-password"></label>
+      <label>Role
+        <select id="nu-role">
+          <option value="operator">Basic</option>
+          <option value="admin">Admin</option>
+        </select></label>
+    </div>
+    <button class="btn btn-green" onclick="addUser()">Create user</button>
+    <div id="user-msg" class="muted" style="margin-top:.4rem"></div>
+  </details>
+</div>
+{% endif %}
+
 <div class="card" id="picker-card" hidden>
   <h2 id="picker-title">Choose a folder</h2>
   <div class="row">
@@ -178,7 +203,82 @@ function pickerClose() {
   pickKey = null;
 }
 
+// ---- users (admin only; the section isn't rendered for Basic)
+async function loadUsers() {
+  const box = document.getElementById("user-rows");
+  if (!box) return;
+  let users;
+  try { users = await (await fetch("/api/users")).json(); }
+  catch (e) { return; }
+  box.innerHTML = "";
+  for (const u of users) {
+    const row = document.createElement("div");
+    row.className = "dirrow";
+    const who = document.createElement("div");
+    const name = document.createElement("strong");
+    name.textContent = u.username;
+    const tag = document.createElement("span");
+    tag.className = "src-tag";
+    tag.textContent = u.role === "admin" ? "Admin" : "Basic";
+    who.append(name, " ", tag);
+    const btns = document.createElement("div");
+    const tog = document.createElement("button");
+    tog.className = "btn btn-sm";
+    tog.textContent = u.role === "admin" ? "Make Basic" : "Make Admin";
+    tog.onclick = () => setRole(u.id, u.role === "admin" ? "operator" : "admin");
+    const pw = document.createElement("button");
+    pw.className = "btn btn-sm";
+    pw.textContent = "Reset password";
+    pw.onclick = () => resetPw(u.id, u.username);
+    const del = document.createElement("button");
+    del.className = "btn btn-sm btn-red";
+    del.textContent = "Remove";
+    del.onclick = () => delUser(u.id, u.username);
+    btns.append(tog, pw, del);
+    row.append(who, btns);
+    box.appendChild(row);
+  }
+}
+async function addUser() {
+  const body = {
+    username: document.getElementById("nu-name").value.trim(),
+    password: document.getElementById("nu-pass").value,
+    role: document.getElementById("nu-role").value};
+  const r = await fetch("/api/users", {method: "POST",
+    headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+  const j = await r.json().catch(() => ({}));
+  const msg = document.getElementById("user-msg");
+  if (!r.ok) { msg.textContent = j.detail || "Could not create"; return; }
+  msg.textContent = "Created " + body.username + ".";
+  document.getElementById("nu-name").value = "";
+  document.getElementById("nu-pass").value = "";
+  loadUsers();
+}
+async function setRole(id, role) {
+  const r = await fetch("/api/users/" + id + "/role", {method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({role})});
+  if (!r.ok) alert((await r.json().catch(() => ({}))).detail || "Could not change");
+  loadUsers();
+}
+async function resetPw(id, username) {
+  const pw = prompt("New password for " + username + " (min 8 characters):");
+  if (!pw) return;
+  const r = await fetch("/api/users/" + id + "/password", {method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({password: pw})});
+  alert(r.ok ? "Password updated."
+    : ((await r.json().catch(() => ({}))).detail || "Could not update"));
+}
+async function delUser(id, username) {
+  if (!confirm("Remove user " + username + "?")) return;
+  const r = await fetch("/api/users/" + id, {method: "DELETE"});
+  if (!r.ok) alert((await r.json().catch(() => ({}))).detail || "Could not remove");
+  loadUsers();
+}
+
 loadDirs();
 loadLstDir();
+loadUsers();
 </script>
 {% endblock %}

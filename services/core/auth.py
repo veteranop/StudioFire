@@ -92,3 +92,38 @@ def authenticate(conn: sqlite3.Connection, username: str,
 
 def any_users(conn: sqlite3.Connection) -> bool:
     return conn.execute("SELECT 1 FROM users LIMIT 1").fetchone() is not None
+
+
+# ------------------------------------------------------- user administration
+
+def list_users(conn: sqlite3.Connection) -> list[dict]:
+    rows = conn.execute("SELECT id, username, role, created_at FROM users "
+                        "ORDER BY username").fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_user(conn: sqlite3.Connection, uid: int) -> dict | None:
+    row = conn.execute("SELECT id, username, role, created_at FROM users "
+                       "WHERE id = ?", (uid,)).fetchone()
+    return dict(row) if row else None
+
+
+def count_admins(conn: sqlite3.Connection) -> int:
+    return conn.execute("SELECT COUNT(*) FROM users WHERE role = 'admin'"
+                        ).fetchone()[0]
+
+
+def delete_user(conn: sqlite3.Connection, uid: int) -> None:
+    with conn:
+        conn.execute("DELETE FROM users WHERE id = ?", (uid,))
+
+
+def set_password(conn: sqlite3.Connection, uid: int, password: str) -> None:
+    with conn:
+        conn.execute("UPDATE users SET password_hash = ? WHERE id = ?",
+                     (hash_password(password), uid))
+
+
+def set_role(conn: sqlite3.Connection, uid: int, role: str) -> None:
+    with conn:
+        conn.execute("UPDATE users SET role = ? WHERE id = ?", (role, uid))

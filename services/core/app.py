@@ -221,25 +221,92 @@ def create_app(cfg: dict) -> FastAPI:
 
     @app.get("/settings", response_class=HTMLResponse)
     def settings_page(request: Request, sess: dict = Depends(page_user)):
-        if sess["role"] != "admin":
-            return RedirectResponse("/", status_code=303)
+        # Basic (operator) can do everything except manage users; the Users
+        # section is only rendered/enabled for admins (role passed to template).
         return render(request, "settings.html", role=sess["role"])
 
     @app.get("/api/settings/dirs")
-    def get_dirs(conn=Depends(get_conn), _=Depends(api_admin)):
+    def get_dirs(conn=Depends(get_conn), _=Depends(api_user)):
         return [{"key": k, "label": lbl, "hint": hint,
                  "path": db.get_setting(conn, k) or "",
                  "exists": os.path.isdir(db.get_setting(conn, k) or "")}
                 for k, lbl, hint in DIR_SETTINGS]
 
     @app.post("/api/settings/dirs")
-    def set_dir(body: dict, conn=Depends(get_conn), _=Depends(api_admin)):
+    def set_dir(body: dict, conn=Depends(get_conn), _=Depends(api_user)):
         key, path = body.get("key"), (body.get("path") or "").strip()
         if key not in {k for k, _, _ in DIR_SETTINGS}:
             raise HTTPException(400, "unknown setting")
         if path and not os.path.isdir(path):
             raise HTTPException(400, "that folder does not exist")
         db.set_setting(conn, key, path)
+        return {"ok": True}
+
+    # ---- user administration (admin only: the one thing Basic can't do)
+    def _norm_role(r: str | None) -> str | None:
+        r = (r or "").strip().lower()
+        return "admin" if r == "admin" else \
+            "operator" if r in ("basic", "operator") else None
+
+    @app.get("/api/users")
+    def api_users_list(conn=Depends(get_conn), _=Depends(api_admin)):
+        return auth.list_users(conn)
+
+    @app.post("/api/users", status_code=201)
+    def api_users_create(body: dict, conn=Depends(get_conn),
+                         _=Depends(api_admin)):
+        import sqlite3
+        username = (body.get("username") or "").strip()
+        password = body.get("password") or ""
+        role = _norm_role(body.get("role"))
+        if not username:
+            raise HTTPException(400, "username required")
+        if len(password) < 8:
+            raise HTTPException(400, "password must be at least 8 characters")
+        if role is None:
+            raise HTTPException(400, "role must be Admin or Basic")
+        try:
+            uid = auth.create_user(conn, username, password, role)
+        except sqlite3.IntegrityError:
+            raise HTTPException(409, "a user with that name already exists")
+        return {"id": uid}
+
+    @app.delete("/api/users/{uid}")
+    def api_users_delete(uid: int, conn=Depends(get_conn),
+                         sess: dict = Depends(api_admin)):
+        target = auth.get_user(conn, uid)
+        if target is None:
+            raise HTTPException(404, "user not found")
+        if uid == sess["uid"]:
+            raise HTTPException(400, "you can't delete your own account")
+        if target["role"] == "admin" and auth.count_admins(conn) <= 1:
+            raise HTTPException(400, "can't remove the last admin")
+        auth.delete_user(conn, uid)
+        return {"ok": True}
+
+    @app.post("/api/users/{uid}/role")
+    def api_users_role(uid: int, body: dict, conn=Depends(get_conn),
+                       sess: dict = Depends(api_admin)):
+        role = _norm_role(body.get("role"))
+        if role is None:
+            raise HTTPException(400, "role must be Admin or Basic")
+        target = auth.get_user(conn, uid)
+        if target is None:
+            raise HTTPException(404, "user not found")
+        if target["role"] == "admin" and role != "admin" \
+                and auth.count_admins(conn) <= 1:
+            raise HTTPException(400, "can't demote the last admin")
+        auth.set_role(conn, uid, role)
+        return {"ok": True}
+
+    @app.post("/api/users/{uid}/password")
+    def api_users_password(uid: int, body: dict, conn=Depends(get_conn),
+                           _=Depends(api_admin)):
+        if len(body.get("password") or "") < 8:
+            raise HTTPException(400, "password must be at least 8 characters")
+        if auth.get_user(conn, uid) is None:
+            raise HTTPException(404, "user not found")
+        auth.set_password(conn, uid, body["password"])
         return {"ok": True}
 
     _AUDIO_EXTS = {".mp3", ".m4a", ".mp4", ".aac", ".wav", ".flac", ".ogg"}
@@ -291,7 +358,7 @@ def create_app(cfg: dict) -> FastAPI:
                 "dirs": dirs, "files": filelist}
 
     @app.get("/api/backup")
-    def backup(conn=Depends(get_conn), _=Depends(api_admin)):
+    def backup(conn=Depends(get_conn), _=Depends(api_user)):
         """One-click export: every playlist + its items, as a JSON file."""
         import datetime
         import json as _json
@@ -317,7 +384,7 @@ def create_app(cfg: dict) -> FastAPI:
 
     @app.post("/api/restore")
     def restore(file: UploadFile, conn=Depends(get_conn),
-                _=Depends(api_admin)):
+                _=Depends(api_user)):
         """Import a backup file. Existing playlists are kept; a restored
         playlist whose name is taken gets a ' (restored)' suffix."""
         import json as _json
