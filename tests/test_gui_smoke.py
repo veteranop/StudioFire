@@ -229,17 +229,23 @@ def main():
           client.get("/api/devices").json() == [])
 
     # ---- schedule calendar page + API
-    check("schedule page renders", b"cal-cells" in client.get("/schedule").content)
+    check("schedule page renders", b"cal-weeks" in client.get("/schedule").content)
     cal = client.get("/api/calendar?month=2026-08").json()
     check("calendar returns the requested month",
           cal["year"] == 2026 and cal["month"] == 8
           and cal["month_name"] == "August")
     check("calendar has a cell per day (Aug = 31)", len(cal["days"]) == 31)
-    check("calendar day carries shows + spots lists",
-          "shows" in cal["days"][0] and "spots" in cal["days"][0])
+    check("calendar day carries a shows list (spots excluded)",
+          "shows" in cal["days"][0] and "spots" not in cal["days"][0])
     check("calendar bad month falls back to current",
           client.get("/api/calendar?month=nope").json()["month"]
           == datetime.date.today().month)
+    from services.core import schedule as _sched
+    _sched.add(conn, "playlist", playlist_id=pid, start_at="2026-08-15T09:00")
+    cal2 = client.get("/api/calendar?month=2026-08").json()
+    day15 = next(d for d in cal2["days"] if d["day"] == 15)
+    check("a scheduled show lands on its calendar day",
+          any(s["time"] == "09:00" for s in day15["shows"]))
 
     # NAS yanked -> red tile
     os.rename(nas, nas + "-gone")
