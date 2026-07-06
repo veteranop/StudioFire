@@ -309,6 +309,49 @@ def create_app(cfg: dict) -> FastAPI:
         auth.set_password(conn, uid, body["password"])
         return {"ok": True}
 
+    # ---- station equipment monitor (ICMP ping)
+    from . import devices as devmod
+    pinger = devmod.Pinger(db.connect, cfg["db_path"])
+
+    @app.on_event("startup")
+    def _start_pinger():
+        pinger.start()
+
+    @app.on_event("shutdown")
+    def _stop_pinger():
+        pinger.stop()
+
+    @app.get("/api/devices")
+    def api_devices(conn=Depends(get_conn), _=Depends(api_user)):
+        out = []
+        for d in devmod.list_devices(conn):
+            st = pinger.status(d["id"]) or {}
+            out.append({**d, "up": st.get("up"),
+                        "latency_ms": st.get("latency_ms"),
+                        "checked_at": st.get("checked_at")})
+        return out
+
+    @app.post("/api/devices", status_code=201)
+    def api_devices_add(body: dict, conn=Depends(get_conn), _=Depends(api_user)):
+        name = (body.get("name") or "").strip()
+        host = (body.get("host") or "").strip()
+        if not name or not host:
+            raise HTTPException(400, "give the device a name and an IP/host")
+        return {"id": devmod.add(conn, name, host)}
+
+    @app.delete("/api/devices/{did}")
+    def api_devices_del(did: int, conn=Depends(get_conn), _=Depends(api_user)):
+        devmod.remove(conn, did)
+        return {"ok": True}
+
+    @app.post("/api/devices/{did}/ping")
+    def api_devices_ping(did: int, conn=Depends(get_conn), _=Depends(api_user)):
+        d = next((x for x in devmod.list_devices(conn) if x["id"] == did), None)
+        if d is None:
+            raise HTTPException(404, "device not found")
+        up, rtt = devmod.ping(d["host"])
+        return {"up": up, "latency_ms": rtt}
+
     _AUDIO_EXTS = {".mp3", ".m4a", ".mp4", ".aac", ".wav", ".flac", ".ogg"}
 
     @app.get("/api/fs/list")
@@ -529,6 +572,18 @@ def create_app(cfg: dict) -> FastAPI:
         else:
             tiles.append({"name": "Library index", "state": "yellow",
                           "detail": "Indexer has not run yet"})
+        devs = devmod.list_devices(conn)
+        if devs:
+            checked = [pinger.status(d["id"]) for d in devs]
+            up = sum(1 for s in checked if s and s.get("up"))
+            unknown = sum(1 for s in checked if not s)
+            state = ("green" if up == len(devs)
+                     else "yellow" if (up or unknown) else "red")
+            detail = f"{up}/{len(devs)} reachable"
+            if unknown:
+                detail += " (checking…)"
+            tiles.append({"name": "Station equipment", "state": state,
+                          "detail": detail})
         return tiles
 
     from . import engine_bridge, playlists

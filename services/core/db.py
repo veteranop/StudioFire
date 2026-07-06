@@ -234,6 +234,17 @@ ALTER TABLE tracks ADD COLUMN tags_read INTEGER NOT NULL DEFAULT 0;
 UPDATE tracks SET tags_read = 1;
 CREATE INDEX idx_tracks_tags_read ON tracks(tags_read) WHERE tags_read = 0;
 """),
+    (8, """
+-- Station equipment to monitor. ICMP (ping) for now — TX, Barix, switches,
+-- UniFi gear, etc. Status is computed live by a background pinger, not stored.
+CREATE TABLE devices (
+    id         INTEGER PRIMARY KEY,
+    name       TEXT NOT NULL,
+    host       TEXT NOT NULL,
+    sort       INTEGER NOT NULL DEFAULT 0,
+    created_at REAL NOT NULL
+);
+"""),
 ]
 
 SCHEMA_VERSION = MIGRATIONS[-1][0]

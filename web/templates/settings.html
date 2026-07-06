@@ -38,6 +38,25 @@
   <div id="lst-msg" class="muted" style="margin-top:.5rem"></div>
 </div>
 
+<div class="card">
+  <h1>Station equipment</h1>
+  <p class="muted">Gear to keep an eye on by ping (ICMP) — transmitter, Barix,
+    switches, UniFi. <span class="tile-green-text">Green</span> = reachable,
+    <span class="tile-red-text">red</span> = not responding.</p>
+  <div id="dev-rows"><div class="muted">loading&#8230;</div></div>
+  <details class="advanced">
+    <summary>&#10133; Add a device</summary>
+    <div class="row">
+      <label style="flex:1">Name
+        <input id="nd-name" autocomplete="off" placeholder="TX150"></label>
+      <label style="flex:1">IP / host
+        <input id="nd-host" autocomplete="off" placeholder="10.0.0.5"></label>
+    </div>
+    <button class="btn btn-green" onclick="addDevice()">Add device</button>
+    <div id="dev-msg" class="muted" style="margin-top:.4rem"></div>
+  </details>
+</div>
+
 {% if role == 'admin' %}
 <div class="card">
   <h1>Users</h1>
@@ -277,8 +296,62 @@ async function delUser(id, username) {
   loadUsers();
 }
 
+// ---- station equipment (ICMP monitor)
+function devStatus(d) {
+  if (d.up === true) return ["🟢 up" +
+    (d.latency_ms != null ? " (" + Math.round(d.latency_ms) + " ms)" : ""), ""];
+  if (d.up === false) return ["🔴 not responding", "tile-red-text"];
+  return ["… checking", "muted"];
+}
+async function loadDevices() {
+  const box = document.getElementById("dev-rows");
+  if (!box) return;
+  let devs;
+  try { devs = await (await fetch("/api/devices")).json(); }
+  catch (e) { return; }
+  box.innerHTML = "";
+  if (!devs.length) { box.innerHTML = "<div class='muted'>No devices yet</div>"; return; }
+  for (const d of devs) {
+    const row = document.createElement("div"); row.className = "dirrow";
+    const info = document.createElement("div");
+    const nm = document.createElement("strong"); nm.textContent = d.name;
+    const host = document.createElement("small");
+    host.className = "muted"; host.textContent = d.host;
+    info.append(nm, document.createElement("br"), host);
+    const [txt, cls] = devStatus(d);
+    const status = document.createElement("div");
+    status.className = "dirval " + cls; status.textContent = txt;
+    const btns = document.createElement("div");
+    const del = document.createElement("button");
+    del.className = "btn btn-sm btn-red"; del.textContent = "Remove";
+    del.onclick = () => delDevice(d.id, d.name);
+    btns.append(del);
+    row.append(info, status, btns);
+    box.appendChild(row);
+  }
+}
+async function addDevice() {
+  const body = {name: document.getElementById("nd-name").value.trim(),
+                host: document.getElementById("nd-host").value.trim()};
+  const r = await fetch("/api/devices", {method: "POST",
+    headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+  const j = await r.json().catch(() => ({}));
+  const msg = document.getElementById("dev-msg");
+  if (!r.ok) { msg.textContent = j.detail || "Could not add"; return; }
+  document.getElementById("nd-name").value = "";
+  document.getElementById("nd-host").value = "";
+  msg.textContent = ""; loadDevices();
+}
+async function delDevice(id, name) {
+  if (!confirm("Remove " + name + "?")) return;
+  await fetch("/api/devices/" + id, {method: "DELETE"});
+  loadDevices();
+}
+
 loadDirs();
 loadLstDir();
 loadUsers();
+loadDevices();
+setInterval(loadDevices, 10000);
 </script>
 {% endblock %}

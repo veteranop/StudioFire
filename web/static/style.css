@@ -310,6 +310,7 @@ select {
 .dirrow > div:first-child { flex: 0 0 220px; }
 .dirval { flex: 1; word-break: break-all; }
 .tile-red-text { color: #e05555; }
+.tile-green-text { color: #4ccf7f; }
 .picker { max-height: 320px; overflow-y: auto; margin: 10px 0;
           border: 1px solid var(--border, #333); border-radius: 6px;
           padding: 6px; }

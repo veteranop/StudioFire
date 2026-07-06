@@ -206,6 +206,27 @@ def main():
     check("can't delete the last admin / yourself",
           client.delete(f"/api/users/{me['id']}").status_code == 400)
 
+    # ---- station equipment (ICMP monitor)
+    check("devices list starts empty", client.get("/api/devices").json() == [])
+    r = client.post("/api/devices", json={"name": "Loopback", "host": "127.0.0.1"})
+    check("add a device", r.status_code == 201)
+    devid = r.json()["id"]
+    check("device add needs name + host",
+          client.post("/api/devices", json={"name": "", "host": ""}
+                      ).status_code == 400)
+    devs = client.get("/api/devices").json()
+    check("device listed with a status shape",
+          len(devs) == 1 and devs[0]["host"] == "127.0.0.1"
+          and "up" in devs[0])
+    # ping-now: localhost is always reachable
+    pong = client.post(f"/api/devices/{devid}/ping").json()
+    check("ping-now reports localhost reachable", pong["up"] is True)
+    check("ping-now 404 for unknown device",
+          client.post("/api/devices/999/ping").status_code == 404)
+    check("delete a device", client.delete(f"/api/devices/{devid}").status_code == 200)
+    check("devices empty again after delete",
+          client.get("/api/devices").json() == [])
+
     # NAS yanked -> red tile
     os.rename(nas, nas + "-gone")
     tiles = {t["name"]: t for t in client.get("/api/health/tiles").json()}
