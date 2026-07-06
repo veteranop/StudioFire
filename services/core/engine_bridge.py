@@ -308,11 +308,19 @@ class Feeder:
     # ---- scheduled/cued "shows" that interrupt the rotation (§6 Phase 3)
 
     def _show_items(self, conn, st: dict) -> list[dict]:
-        """The items of whatever the active show is — a playlist, a single
-        file, or a live-parsed .lst."""
+        """The active show's items. Once a show is on air its items are
+        SNAPSHOT into st['show']['items'] so an operator can reorder/remove/add
+        them on the fly; before that (or for a legacy overlay) they're resolved
+        live from the source."""
         show = st.get("show")
         if not show:
             return []
+        if show.get("items") is not None:
+            return show["items"]
+        return self._resolve_show_items(conn, show)
+
+    def _resolve_show_items(self, conn, show: dict) -> list[dict]:
+        """Resolve a show's source (playlist / file / .lst / folder) to items."""
         kind = show.get("kind", "playlist")
         if kind == "playlist":
             return pl.get_items(conn, show["playlist_id"])
@@ -391,11 +399,14 @@ class Feeder:
         if (entry.get("recurrence") or "once") != "once":
             # a recurring slot has aired for today — don't fire it again today
             sched.mark_fired(conn, entry["id"], _dt.date.today().isoformat())
-        st["show"] = {"sched_id": entry["id"],
-                      "kind": entry.get("source_kind", "playlist"),
-                      "playlist_id": entry.get("playlist_id"),
-                      "source_path": entry.get("source_path"),
-                      "cursor": 0}
+        show = {"sched_id": entry["id"],
+                "kind": entry.get("source_kind", "playlist"),
+                "playlist_id": entry.get("playlist_id"),
+                "source_path": entry.get("source_path"),
+                "cursor": 0}
+        # snapshot the items so they can be edited on the fly during the airing
+        show["items"] = self._resolve_show_items(conn, show)
+        st["show"] = show
         log.warning("feeder: show '%s' on air (schedule %d) — interrupting "
                     "rotation at next boundary",
                     entry.get("name") or entry.get("playlist_name"), entry["id"])
@@ -511,6 +522,64 @@ class Feeder:
         self._save_state(conn, st)
         ok, why = self.tick(conn)
         return ok, f"re-synced ({why})"
+
+    # ---- on-the-fly editing of the show that's on air (§ shows are editable)
+
+    def _resync_show(self, conn, st: dict) -> tuple[bool, str]:
+        """Re-feed the on-air show after its item list was edited: keep the
+        current song, re-point the cursor to just after the play-head, and
+        rebuild the pending buffer from the new order."""
+        status = self.engine.status()
+        if status is None:
+            return False, "engine unreachable"
+        show = st["show"]
+        items = show.get("items") or []
+        now_id = status.get("now_id")
+        cur = next((e for e in st["fed"] if e["id"] == now_id), None)
+        cur_item_id = (cur.get("pl_item_id") if cur and cur.get("prog") == "show"
+                       else st.get("now_item_id"))
+        idx_by_id = {it["id"]: i for i, it in enumerate(items)}
+        if cur_item_id in idx_by_id:
+            show["cursor"] = idx_by_id[cur_item_id] + 1
+        else:
+            show["cursor"] = min(show.get("cursor", 0), len(items))
+        show["done_feeding"] = False  # the edit may have added items back
+        status = self._clear_pending(conn, st, status)
+        if cur is not None:
+            st["fed"] = [cur]
+        self._save_state(conn, st)
+        ok, why = self.tick(conn)
+        return ok, f"show re-synced ({why})"
+
+    def _ensure_show_items(self, conn, show: dict) -> None:
+        """A show started before snapshots existed has no editable item list —
+        materialise it from the source on first edit."""
+        if show.get("items") is None:
+            show["items"] = self._resolve_show_items(conn, show)
+
+    def reorder_show(self, conn, item_ids: list) -> tuple[bool, str]:
+        """Set the on-air show's item order to exactly this id sequence."""
+        st = self._load_state(conn)
+        show = st.get("show")
+        if not show:
+            return False, "no show is on air"
+        self._ensure_show_items(conn, show)
+        by_id = {str(it["id"]): it for it in (show.get("items") or [])}
+        if {str(i) for i in item_ids} != set(by_id):
+            return False, "list changed — reload the page"
+        show["items"] = [by_id[str(i)] for i in item_ids]
+        return self._resync_show(conn, st)
+
+    def remove_show_item(self, conn, item_id) -> tuple[bool, str]:
+        """Drop one item from the on-air show (this airing only)."""
+        st = self._load_state(conn)
+        show = st.get("show")
+        if not show:
+            return False, "no show is on air"
+        self._ensure_show_items(conn, show)
+        items = show.get("items") or []
+        show["items"] = [it for it in items if str(it["id"]) != str(item_id)]
+        return self._resync_show(conn, st)
 
     # ---- spots: station IDs / ads / jingles / PSAs between songs (§ spots)
 
@@ -1005,23 +1074,42 @@ def register(app: FastAPI) -> None:
     @app.post("/api/rotation/reorder")
     def api_rotation_reorder(body: dict, conn=Depends(get_conn),
                              _=Depends(api_user)):
-        pid = _active_pid(conn)
         item_ids = body.get("item_ids")
         if not isinstance(item_ids, list):
             raise HTTPException(400, "item_ids must be a list")
+        # a show on air is edited live (this airing only); otherwise the base
+        # rotation playlist is edited permanently
+        if feeder._load_state(conn).get("show"):
+            ok, why = feeder.reorder_show(conn, item_ids)
+            if not ok:
+                raise HTTPException(409, why)
+            return {"ok": True}
+        pid = _active_pid(conn)
+        try:
+            ids = [int(i) for i in item_ids]
+        except (TypeError, ValueError):
+            raise HTTPException(400, "bad item ids")
         existing = {i["id"] for i in pl.get_items(conn, pid)}
-        if set(item_ids) != existing:
+        if set(ids) != existing:
             raise HTTPException(409, "list changed — reload the page")
-        pl.reorder_items(conn, pid, item_ids)     # permanent edit
+        pl.reorder_items(conn, pid, ids)          # permanent edit
         feeder.resync_rotation(conn)              # take effect on air now
         return {"ok": True}
 
     @app.post("/api/rotation/remove")
     def api_rotation_remove(body: dict, conn=Depends(get_conn),
                             _=Depends(api_user)):
+        item_id = body.get("item_id")
+        if item_id is None:
+            raise HTTPException(400, "item_id required")
+        if feeder._load_state(conn).get("show"):
+            ok, why = feeder.remove_show_item(conn, item_id)
+            if not ok:
+                raise HTTPException(409, why)
+            return {"ok": True}
         pid = _active_pid(conn)
         try:
-            item_id = int(body.get("item_id"))
+            item_id = int(item_id)
         except (TypeError, ValueError):
             raise HTTPException(400, "item_id required")
         pl.remove_item(conn, pid, item_id)        # permanent edit

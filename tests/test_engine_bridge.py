@@ -418,6 +418,41 @@ def main():
               "/api/schedule", json={"source_kind": "folder",
               "source_path": showdir + "-nope"}).status_code == 400)
 
+        # a show on air is EDITABLE live: reorder / remove its items (the same
+        # /api/rotation endpoints, now show-aware; edits are this-airing-only)
+        os.makedirs(os.path.join(td, "editshow"), exist_ok=True)
+        elst = os.path.join(td, "edit.lst")
+        with open(elst, "w", encoding="utf-8") as f:
+            for i in range(3):
+                p = os.path.join(td, "editshow", f"{i}.mp3")
+                shutil.copy(show_track, p)
+                f.write("180000\t" + p + "\n")
+        esid = client.post("/api/schedule", json={
+            "source_kind": "lst", "source_path": elst}).json()["id"]
+        client.post(f"/api/schedule/{esid}/start_now")
+        check("edit-show goes on air", wait_for(
+              lambda: engine.status().get("now_source") == "show", 15, "editshow"))
+
+        def show_ids():
+            return [it["id"] for it in client.get("/api/rotation").json()["items"]
+                    if it["item_type"] != "insert"]
+        ids = show_ids()
+        check("show lists its items", len(ids) == 3)
+        swapped = [ids[0], ids[2], ids[1]]              # reorder the upcoming two
+        check("show reorder accepted (live)", client.post(
+              "/api/rotation/reorder", json={"item_ids": swapped}
+              ).status_code == 200)
+        check("show order changed", show_ids() == swapped)
+        check("show remove accepted (live)", client.post(
+              "/api/rotation/remove", json={"item_id": ids[2]}).status_code == 200)
+        after = show_ids()
+        check("show item removed (this airing)",
+              len(after) == 2 and ids[2] not in after)
+        check("reorder rejects a stale show id set", client.post(
+              "/api/rotation/reorder", json={"item_ids": ["l0", "l9", "l8"]}
+              ).status_code == 409)
+        client.post("/api/schedule/stop_show")
+
         # a recurring daily spot with a stop date is accepted
         dspot = client.post("/api/spots", json={
             "trigger": "daily", "folder_key": "dir_station_ids",
