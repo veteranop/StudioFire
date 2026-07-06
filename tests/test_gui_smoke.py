@@ -3,6 +3,7 @@ sanely with the engine offline (P2 must degrade, never 500).
 
 Run: python tests/test_gui_smoke.py
 """
+import datetime
 import math
 import os
 import struct
@@ -226,6 +227,19 @@ def main():
     check("delete a device", client.delete(f"/api/devices/{devid}").status_code == 200)
     check("devices empty again after delete",
           client.get("/api/devices").json() == [])
+
+    # ---- schedule calendar page + API
+    check("schedule page renders", b"cal-cells" in client.get("/schedule").content)
+    cal = client.get("/api/calendar?month=2026-08").json()
+    check("calendar returns the requested month",
+          cal["year"] == 2026 and cal["month"] == 8
+          and cal["month_name"] == "August")
+    check("calendar has a cell per day (Aug = 31)", len(cal["days"]) == 31)
+    check("calendar day carries shows + spots lists",
+          "shows" in cal["days"][0] and "spots" in cal["days"][0])
+    check("calendar bad month falls back to current",
+          client.get("/api/calendar?month=nope").json()["month"]
+          == datetime.date.today().month)
 
     # NAS yanked -> red tile
     os.rename(nas, nas + "-gone")

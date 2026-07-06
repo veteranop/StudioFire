@@ -20,6 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from . import auth, db, spots
+from . import schedule as sched
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 WEB = os.path.join(ROOT, "web")
@@ -585,6 +586,42 @@ def create_app(cfg: dict) -> FastAPI:
             tiles.append({"name": "Station equipment", "state": state,
                           "detail": detail})
         return tiles
+
+    @app.get("/schedule", response_class=HTMLResponse)
+    def schedule_calendar_page(request: Request, sess: dict = Depends(page_user)):
+        return render(request, "schedule.html", role=sess["role"])
+
+    @app.get("/api/calendar")
+    def api_calendar(month: str = "", conn=Depends(get_conn),
+                     _=Depends(api_user)):
+        """A month of programming for the calendar: the base rotation plus,
+        for each day, the shows and spots that will air (recurring rules
+        resolved against that date)."""
+        import calendar as _cal
+        today = datetime.date.today()
+        try:
+            y, m = (int(x) for x in month.split("-"))
+            datetime.date(y, m, 1)
+        except (ValueError, TypeError, AttributeError):
+            y, m = today.year, today.month
+        base = None
+        bpid = db.get_setting(conn, "active_playlist_id")
+        if bpid:
+            row = conn.execute("SELECT name FROM playlists WHERE id = ?",
+                               (int(bpid),)).fetchone()
+            base = row["name"] if row else None
+        rules = spots.list_all(conn)
+        days = []
+        for d in range(1, _cal.monthrange(y, m)[1] + 1):
+            date = datetime.date(y, m, d)
+            sp = [s for s in (spots.occurrences_on(r, date) for r in rules) if s]
+            sp.sort(key=lambda x: x["time"] or "~")
+            days.append({"day": d, "weekday": date.weekday(),
+                         "today": date == today,
+                         "shows": sched.occurrences_on(conn, date), "spots": sp})
+        return {"year": y, "month": m, "month_name": _cal.month_name[m],
+                "first_weekday": datetime.date(y, m, 1).weekday(),
+                "base": base, "days": days}
 
     from . import engine_bridge, playlists
     playlists.register(app)

@@ -331,3 +331,26 @@ select {
   font-size: .7rem; font-weight: 700; color: #cbd5e1; background: #26303d;
   border-radius: 5px; padding: .05rem .4rem; vertical-align: middle;
 }
+
+/* schedule calendar */
+.cal-head { display: flex; align-items: center; gap: 1rem; margin-bottom: .4rem; }
+.cal-head h1 { flex: 1; text-align: center; margin: 0; }
+.cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
+#cal-dow { margin-top: .8rem; }
+.cal-dow { text-align: center; font-weight: 700; color: var(--muted); padding: .3rem 0; }
+.cal-cell {
+  min-height: 112px; background: var(--bg); border: 1px solid var(--border);
+  border-radius: 8px; padding: .35rem; overflow: hidden;
+}
+.cal-blank { background: transparent; border: none; }
+.cal-weekend { background: #151b24; }
+.cal-today { border-color: var(--green); box-shadow: inset 0 0 0 1px var(--green); }
+.cal-num { font-weight: 700; color: var(--muted); margin-bottom: .25rem; }
+.cal-today .cal-num { color: var(--green); }
+.cal-item {
+  font-size: .72rem; line-height: 1.25; border-radius: 5px;
+  padding: .12rem .3rem; margin-bottom: 3px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.cal-show { background: #17271d; color: #cfeeda; }
+.cal-spot { background: #26303d; color: #cbd5e1; }

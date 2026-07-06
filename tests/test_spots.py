@@ -124,6 +124,23 @@ def main():
               iid not in {r["id"] for r in spots.list_enabled(conn)})
         spots.remove(conn, mid)
         check("remove deletes the rule", spots.get(conn, mid) is None)
+
+        # ---- calendar: occurrences_on per date ----
+        wed = dt.date(2026, 8, 5)  # Wednesday, inside the window
+        o = spots.occurrences_on(spots.get(conn, did), wed)  # daily 06:00
+        check("calendar: daily spot resolves to its time",
+              o and o["time"] == "06:00" and o["trigger"] == "daily")
+        o = spots.occurrences_on(spots.get(conn, wid), wed)  # weekly Mon/Wed/Fri
+        check("calendar: weekly spot on its weekday", o and o["time"] == "17:00")
+        check("calendar: weekly spot off-day is None",
+              spots.occurrences_on(spots.get(conn, wid),
+                                   dt.date(2026, 8, 6)) is None)
+        check("calendar: windowed spot past stop date is None",
+              spots.occurrences_on(spots.get(conn, pid),
+                                   dt.date(2026, 9, 1)) is None)
+        ointerval = spots.occurrences_on(spots.get(conn, iid), wed)
+        # iid was disabled earlier in this test -> not shown
+        check("calendar: disabled rule is None", ointerval is None)
         conn.close()
 
     print(f"SPOTS OK ({passed} checks)")

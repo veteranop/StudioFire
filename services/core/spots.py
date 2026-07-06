@@ -267,6 +267,35 @@ def _fmt_tod(tod: str | None) -> str:
         return tod
 
 
+def occurrences_on(rule: dict, date: _dt.date) -> dict | None:
+    """How this spot rule fires on `date` (for the calendar), or None if it
+    doesn't. interval/clock are all-day ('note' carries the cadence); daily/
+    weekly/once resolve to a time."""
+    if not rule["enabled"] or rule["trigger"] == "manual":
+        return None
+    t = rule["trigger"]
+    iso = date.isoformat()
+    if t != "once":
+        sd, ed = rule.get("start_date"), rule.get("end_date")
+        if (sd and iso < sd) or (ed and iso > ed):
+            return None
+    if t == "once":
+        sa = rule.get("start_at")
+        return {"time": sa[11:16], "label": rule["label"], "trigger": "once"} \
+            if sa and sa[:10] == iso else None
+    if t == "daily":
+        return {"time": rule.get("time_of_day") or "", "label": rule["label"],
+                "trigger": "daily"}
+    if t == "weekly":
+        if (rule.get("days_mask") or 0) & (1 << date.weekday()):
+            return {"time": rule.get("time_of_day") or "",
+                    "label": rule["label"], "trigger": "weekly"}
+        return None
+    # interval / clock: all day
+    return {"time": "", "label": rule["label"], "trigger": t,
+            "note": describe(rule)}
+
+
 def describe(rule: dict) -> str:
     """Human summary of the trigger, e.g. 'every 15 min · until 2026-08-31'."""
     t = rule["trigger"]

@@ -125,6 +125,28 @@ def main():
     check("weekly label lists the weekdays",
           "Mon" in wlbl and "Wed" in wlbl and "Fri" in wlbl)
 
+    # ---- calendar: occurrences_on resolves recurring + one-shot per date ----
+    conn.execute("DELETE FROM playlist_schedule")
+    conn.commit()
+    daily = sched.add(conn, "playlist", playlist_id=pid, recurrence="daily",
+                      time_of_day="06:00", end_date="2026-08-31")
+    wk = sched.add(conn, "playlist", playlist_id=pid, recurrence="weekly",
+                   time_of_day="17:00", days_mask=21)  # Mon/Wed/Fri
+    one = sched.add(conn, "playlist", playlist_id=pid,
+                    start_at="2026-08-05T09:00")
+    aug5 = sched.occurrences_on(conn, dt.date(2026, 8, 5))   # a Wednesday
+    names = {(o["recurrence"], o["time"]) for o in aug5}
+    check("calendar: daily show appears on the date", ("daily", "06:00") in names)
+    check("calendar: weekly show appears on its weekday (Wed)",
+          ("weekly", "17:00") in names)
+    check("calendar: one-shot appears on its date", ("once", "09:00") in names)
+    check("calendar: sorted by time (06:00 first)", aug5[0]["time"] == "06:00")
+    aug6 = sched.occurrences_on(conn, dt.date(2026, 8, 6))   # Thursday
+    check("calendar: weekly absent on an off day",
+          not any(o["recurrence"] == "weekly" for o in aug6))
+    check("calendar: daily absent after its stop date",
+          not sched.occurrences_on(conn, dt.date(2026, 9, 1)))
+
     conn.close()
     try:
         os.remove(path)

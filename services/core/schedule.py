@@ -197,6 +197,35 @@ def _recurring_due(r: dict, now_dt: _dt.datetime) -> bool:
     return 0 <= delta <= CATCH_UP_MIN * 60
 
 
+def occurrences_on(conn: sqlite3.Connection, date: _dt.date) -> list[dict]:
+    """Every scheduled show that airs on `date` (a datetime.date), for the
+    calendar view: [{time, name, source_kind, recurrence}], sorted by time.
+    Recurring shows resolve against their weekday/run-window; one-shots match
+    their start_at date. 'done' one-shots are excluded."""
+    iso = date.isoformat()
+    out = []
+    for row in conn.execute(_SEL + "WHERE s.state != 'done'").fetchall():
+        r = _display(row)
+        rec = r.get("recurrence") or "once"
+        if rec == "once":
+            sa = r.get("start_at")
+            if sa and sa[:10] == iso:
+                out.append({"time": sa[11:16], "name": r["name"],
+                            "source_kind": r["source_kind"],
+                            "recurrence": "once"})
+            continue
+        sd, ed = r.get("start_date"), r.get("end_date")
+        if (sd and iso < sd) or (ed and iso > ed):
+            continue
+        if rec == "weekly" and not ((r.get("days_mask") or 0)
+                                    & (1 << date.weekday())):
+            continue
+        out.append({"time": r.get("time_of_day") or "", "name": r["name"],
+                    "source_kind": r["source_kind"], "recurrence": rec})
+    out.sort(key=lambda x: x["time"] or "99:99")
+    return out
+
+
 def due(conn: sqlite3.Connection,
         now: _dt.datetime | None = None) -> dict | None:
     """The next waiting show whose time has arrived — recurring slots first,

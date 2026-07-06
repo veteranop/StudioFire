@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block title %}Schedule — {{ station }}{% endblock %}
+{% block nav %}
+<nav class="nav-links">
+  <a href="/">On Air</a>
+  <a href="/playlists">Playlists</a>
+  <a href="/schedule" class="active">Schedule</a>
+  <a href="/settings">Settings</a>
+  <a href="/reports">Reports</a>
+</nav>
+<form method="post" action="/logout" class="nav-right">
+  <button type="submit" class="btn">Sign out</button>
+</form>
+{% endblock %}
+{% block content %}
+<div class="card">
+  <div class="cal-head">
+    <button class="btn" onclick="calMove(-1)">&#8592; Prev</button>
+    <h1 id="cal-title">&nbsp;</h1>
+    <button class="btn" onclick="calMove(1)">Next &#8594;</button>
+    <button class="btn btn-sm" onclick="calToday()">Today</button>
+  </div>
+  <div id="cal-base" class="muted"></div>
+  <div class="cal-grid" id="cal-dow">
+    <div class="cal-dow">Mon</div><div class="cal-dow">Tue</div>
+    <div class="cal-dow">Wed</div><div class="cal-dow">Thu</div>
+    <div class="cal-dow">Fri</div><div class="cal-dow">Sat</div>
+    <div class="cal-dow">Sun</div>
+  </div>
+  <div class="cal-grid" id="cal-cells"></div>
+</div>
+
+<script>
+let calY, calM;  // current year, month (1-12)
+function esc(s) {
+  return String(s == null ? "" : s).replace(/[&<>"]/g,
+    c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+}
+function fmtTime(t) {
+  if (!t) return "";
+  const [h, m] = t.split(":").map(Number);
+  const ap = h < 12 ? "AM" : "PM";
+  const h12 = (h % 12) || 12;
+  return h12 + ":" + String(m).padStart(2, "0") + " " + ap;
+}
+async function loadCal() {
+  const mm = String(calM).padStart(2, "0");
+  const d = await (await fetch("/api/calendar?month=" + calY + "-" + mm)).json();
+  calY = d.year; calM = d.month;
+  document.getElementById("cal-title").textContent = d.month_name + " " + d.year;
+  document.getElementById("cal-base").innerHTML = d.base
+    ? "<strong>Base rotation:</strong> " + esc(d.base) +
+      " <span class='muted'>— plays whenever nothing else is scheduled.</span>"
+    : "<span class='muted'>No base rotation on air. Put a playlist on air from the Playlists page.</span>";
+  const cells = document.getElementById("cal-cells");
+  cells.innerHTML = "";
+  for (let i = 0; i < d.first_weekday; i++) {
+    const blank = document.createElement("div");
+    blank.className = "cal-cell cal-blank";
+    cells.appendChild(blank);
+  }
+  for (const day of d.days) {
+    const cell = document.createElement("div");
+    cell.className = "cal-cell" + (day.today ? " cal-today" : "") +
+      (day.weekday >= 5 ? " cal-weekend" : "");
+    const num = document.createElement("div");
+    num.className = "cal-num"; num.textContent = day.day;
+    cell.appendChild(num);
+    for (const s of day.shows) {
+      const e = document.createElement("div");
+      e.className = "cal-item cal-show";
+      e.title = "Show" + (s.recurrence !== "once" ? " (" + s.recurrence + ")" : "");
+      e.innerHTML = (s.time ? "<b>" + fmtTime(s.time) + "</b> " : "") +
+        "📻 " + esc(s.name);
+      cell.appendChild(e);
+    }
+    for (const s of day.spots) {
+      const e = document.createElement("div");
+      e.className = "cal-item cal-spot";
+      e.innerHTML = s.time ? "<b>" + fmtTime(s.time) + "</b> " + esc(s.label)
+        : "🔁 " + esc(s.label) + (s.note ? " <span class='muted'>" + esc(s.note) + "</span>" : "");
+      cell.appendChild(e);
+    }
+    cells.appendChild(cell);
+  }
+}
+function calMove(delta) {
+  calM += delta;
+  if (calM < 1) { calM = 12; calY -= 1; }
+  if (calM > 12) { calM = 1; calY += 1; }
+  loadCal();
+}
+function calToday() {
+  const now = new Date();
+  calY = now.getFullYear(); calM = now.getMonth() + 1;
+  loadCal();
+}
+calToday();
+</script>
+{% endblock %}
