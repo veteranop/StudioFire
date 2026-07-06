@@ -845,17 +845,6 @@ function renderRotation() {
   }
   rotLastNow = rotNowId;
 }
-function dragAfter(container, y) {
-  const items = [...container.querySelectorAll(
-    ".qitem:not(.dragging):not(.qplayed):not(.qnow):not(.qcued)")];
-  let best = { offset: -Infinity, el: null };
-  for (const child of items) {
-    const box = child.getBoundingClientRect();
-    const offset = y - box.top - box.height / 2;
-    if (offset < 0 && offset > best.offset) best = { offset, el: child };
-  }
-  return best.el;
-}
 async function finishRotDrag(li) {
   li.classList.remove("dragging");
   const ol = document.getElementById("rot-list");
@@ -999,12 +988,16 @@ async function restartSystem() {
 const rotListEl = document.getElementById("rot-list");
 rotListEl.addEventListener("dragover", (ev) => {
   ev.preventDefault();
-  const ol = ev.currentTarget;
-  const dragging = ol.querySelector(".dragging");
+  const dragging = rotListEl.querySelector(".dragging");
   if (!dragging) return;
-  const after = dragAfter(ol, ev.clientY);
-  if (after == null) ol.appendChild(dragging);
-  else ol.insertBefore(dragging, after);
+  // O(1): position relative to the item under the cursor, not a scan of the
+  // whole list — big playlists (1000+ songs) were unusably laggy otherwise.
+  const over = ev.target.closest(".qitem");
+  if (!over || over === dragging || over.classList.contains("qplayed") ||
+      over.classList.contains("qnow") || over.classList.contains("qcued")) return;
+  const box = over.getBoundingClientRect();
+  const before = ev.clientY < box.top + box.height / 2;
+  rotListEl.insertBefore(dragging, before ? over : over.nextSibling);
 });
 rotListEl.addEventListener("scroll", () => { rotScrolledAt = Date.now(); });
 
