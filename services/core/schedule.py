@@ -145,6 +145,24 @@ def finish(conn: sqlite3.Connection, sid: int, today: str | None = None) -> None
     set_state(conn, sid, "waiting" if (recurring and not expired) else "done")
 
 
+def finish_all_playing(conn: sqlite3.Connection,
+                       except_id: int | None = None) -> int:
+    """Retire/re-arm every row marked 'playing' (except `except_id`). Exactly
+    one show is ever on air, but the feeder's overlay can drift out of sync with
+    these state flags (crashes, restarts, two Start-nows) leaving a stale
+    'playing' row — which then wrongly shows as SHOW ON AIR. Called whenever a
+    show starts, so a fresh start always supersedes any strays. Returns count."""
+    rows = conn.execute("SELECT id FROM playlist_schedule "
+                        "WHERE state = 'playing'").fetchall()
+    n = 0
+    for r in rows:
+        if except_id is not None and r["id"] == except_id:
+            continue
+        finish(conn, r["id"])
+        n += 1
+    return n
+
+
 def expire_past(conn: sqlite3.Connection, today: str | None = None) -> int:
     """Retire recurring rows whose end_date has passed so they drop off the
     upcoming list. Returns how many were retired."""

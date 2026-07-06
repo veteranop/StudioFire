@@ -147,6 +147,26 @@ def main():
     check("calendar: daily absent after its stop date",
           not sched.occurrences_on(conn, dt.date(2026, 9, 1)))
 
+    # ---- only one show is ever 'playing': finish_all_playing clears strays ----
+    conn.execute("DELETE FROM playlist_schedule")
+    conn.commit()
+    a = sched.add(conn, "playlist", playlist_id=pid)
+    b = sched.add(conn, "playlist", playlist_id=pid)
+    c = sched.add(conn, "playlist", playlist_id=pid, recurrence="daily",
+                  time_of_day="06:00")
+    for s in (a, b, c):
+        sched.set_state(conn, s, "playing")   # simulate drift: 3 rows 'playing'
+    n = sched.finish_all_playing(conn, except_id=b)
+    check("finish_all_playing retires the strays", n == 2)
+    check("the on-air show stays playing", sched.get(conn, b)["state"] == "playing")
+    check("a stray one-shot is retired (done)", sched.get(conn, a)["state"] == "done")
+    check("a stray recurring show re-arms (waiting)",
+          sched.get(conn, c)["state"] == "waiting")
+    check("playing() now returns the single on-air show",
+          sched.playing(conn)["id"] == b)
+    check("finish_all_playing(None) clears everything",
+          sched.finish_all_playing(conn) == 1 and sched.playing(conn) is None)
+
     conn.close()
     try:
         os.remove(path)

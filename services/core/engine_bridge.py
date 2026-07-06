@@ -384,6 +384,9 @@ class Feeder:
         return status
 
     def _start_show(self, conn, st: dict, entry: dict, status: dict) -> dict:
+        # supersede any stray 'playing' rows so exactly one show is ever on air
+        # (guards against overlay/schedule drift after restarts or double-starts)
+        sched.finish_all_playing(conn, except_id=entry["id"])
         sched.set_state(conn, entry["id"], "playing")
         if (entry.get("recurrence") or "once") != "once":
             # a recurring slot has aired for today — don't fire it again today
@@ -608,6 +611,12 @@ class Feeder:
         # a scheduled show whose time has come interrupts the rotation
         if op != "replace":
             status = self._maybe_fire_scheduled(conn, st, status)
+        # keep the schedule's 'playing' flags in lockstep with the overlay:
+        # exactly the on-air show (if any) stays 'playing'; strays are retired
+        # (a stray would wrongly display as SHOW ON AIR)
+        _show = st.get("show")
+        sched.finish_all_playing(conn,
+                                 except_id=_show["sched_id"] if _show else None)
 
         base_pid = coredb.get_setting(conn, "active_playlist_id")
         base_items = pl.get_items(conn, int(base_pid)) if base_pid else []
