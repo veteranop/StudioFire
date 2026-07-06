@@ -245,6 +245,13 @@ CREATE TABLE devices (
     created_at REAL NOT NULL
 );
 """),
+    (9, """
+-- Spots can target a browsed folder path (not just a preset station-folder
+-- key), and choose how a file is picked from it: 'rotate' (round-robin) or
+-- 'random'. folder_key stays for legacy rules.
+ALTER TABLE spot_rules ADD COLUMN folder_path TEXT;
+ALTER TABLE spot_rules ADD COLUMN pick_mode TEXT;   -- 'rotate' | 'random'
+"""),
 ]
 
 SCHEMA_VERSION = MIGRATIONS[-1][0]

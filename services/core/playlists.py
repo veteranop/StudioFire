@@ -352,6 +352,9 @@ def resolve_item(conn: sqlite3.Connection, item: dict) -> str | None:
         return None
     if kind == "folder-newest":
         return max(files, key=lambda p: os.path.getmtime(p))
+    if kind == "folder-random":
+        import random
+        return random.choice(files)
     if kind == "folder-rotation":
         files.sort(key=lambda p: os.path.basename(p).lower())
         row = conn.execute(

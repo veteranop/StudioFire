@@ -515,11 +515,12 @@ class Feeder:
     # ---- spots: station IDs / ads / jingles / PSAs between songs (§ spots)
 
     def insert_spot(self, conn, folder_key: str | None = None,
-                    label: str | None = None,
-                    file_path: str | None = None) -> tuple[bool, str]:
+                    label: str | None = None, file_path: str | None = None,
+                    folder_path: str | None = None,
+                    pick_mode: str | None = None) -> tuple[bool, str]:
         """Drop a spot in right after the current song (airs at the next
-        boundary). Targets a specific file (file_path) or one round-robin file
-        from a settings folder (folder_key)."""
+        boundary). Targets, in priority: a specific file, a browsed folder
+        (rotate/random via pick_mode), or a legacy preset station folder."""
         status = self.engine.status()
         if status is None:
             return False, "engine unreachable"
@@ -528,6 +529,15 @@ class Feeder:
             if src is None:
                 return False, "that spot file is not there"
             title = label or os.path.splitext(os.path.basename(src))[0]
+        elif folder_path:
+            if not os.path.isdir(folder_path):
+                return False, "that spot folder is not there"
+            kind = "folder-random" if pick_mode == "random" else "folder-rotation"
+            src = pl.resolve_item(conn, {"item_type": kind, "path": folder_path})
+            if src is None:
+                return False, "no playable files in that folder"
+            title = f"{label or os.path.basename(folder_path.rstrip(chr(92) + '/'))}: " + \
+                os.path.splitext(os.path.basename(src))[0]
         else:
             folder = coredb.get_setting(conn, folder_key)
             if not folder or not os.path.isdir(folder):
@@ -572,8 +582,11 @@ class Feeder:
         for rule in spotmod.list_enabled(conn):
             if rule["trigger"] == "manual" or not spotmod.due(rule, now):
                 continue
-            ok, why = self.insert_spot(conn, rule["folder_key"], rule["label"],
-                                       file_path=rule.get("file_path"))
+            ok, why = self.insert_spot(
+                conn, rule["folder_key"], rule["label"],
+                file_path=rule.get("file_path"),
+                folder_path=rule.get("folder_path"),
+                pick_mode=rule.get("pick_mode"))
             spotmod.mark_fired(conn, rule, now)  # advance schedule either way
             if ok:
                 log.info("spot fired (%s): %s",
@@ -1163,6 +1176,8 @@ def register(app: FastAPI) -> None:
             rules.append({
                 "id": r["id"], "folder_key": r["folder_key"],
                 "file_path": r["file_path"],
+                "folder_path": r.get("folder_path"),
+                "pick_mode": r.get("pick_mode"),
                 "label": r["label"], "trigger": r["trigger"],
                 "enabled": bool(r["enabled"]),
                 "end_date": r.get("end_date"),
@@ -1178,12 +1193,19 @@ def register(app: FastAPI) -> None:
         if trig not in spotmod.TRIGGERS:
             raise HTTPException(400, "trigger must be interval/clock/once/"
                                      "daily/weekly/manual")
-        # target a single file, else a whole folder (round-robin)
+        # target: a single file, a browsed folder (rotate/random), or a legacy
+        # preset station folder (folder_key)
         file_path = (body.get("file_path") or "").strip() or None
-        key = body.get("folder_key")
+        folder_path = (body.get("folder_path") or "").strip() or None
+        pick_mode = "random" if body.get("pick_mode") == "random" else "rotate"
+        key = body.get("folder_key") or ""
         if file_path:
             if not os.path.isfile(file_path):
                 raise HTTPException(400, "that file does not exist")
+            key = ""
+        elif folder_path:
+            if not os.path.isdir(folder_path):
+                raise HTTPException(400, "that folder does not exist")
             key = ""
         elif key not in {k for k, _, _ in spotmod.FOLDER_CATEGORIES}:
             raise HTTPException(400, "pick a folder or a specific file")
@@ -1232,7 +1254,10 @@ def register(app: FastAPI) -> None:
         rid = spotmod.add(conn, key, trig, interval_min, clock_minutes,
                           start_at, file_path=file_path, time_of_day=time_of_day,
                           days_mask=days_mask, start_date=start_date,
-                          end_date=end_date)
+                          end_date=end_date,
+                          folder_path=folder_path if not file_path else None,
+                          pick_mode=pick_mode if folder_path and not file_path
+                          else None)
         return {"id": rid}
 
     @app.delete("/api/spots/{rid}")
@@ -1254,8 +1279,11 @@ def register(app: FastAPI) -> None:
         rule = spotmod.get(conn, rid)
         if rule is None:
             raise HTTPException(404, "spot rule not found")
-        ok, why = feeder.insert_spot(conn, rule["folder_key"], rule["label"],
-                                     file_path=rule.get("file_path"))
+        ok, why = feeder.insert_spot(
+            conn, rule["folder_key"], rule["label"],
+            file_path=rule.get("file_path"),
+            folder_path=rule.get("folder_path"),
+            pick_mode=rule.get("pick_mode"))
         if not ok:
             raise HTTPException(409, why)
         return {"ok": True, "detail": why}

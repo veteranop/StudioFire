@@ -69,21 +69,17 @@
       <label>Play
         <select id="spot-target" style="width:100%"
                 onchange="spotTargetChange()">
-          <option value="folder">A whole folder (rotate through it)</option>
-          <option value="file">One specific file</option>
+          <option value="folder">A whole folder</option>
+          <option value="random">Random tracks from a folder</option>
+          <option value="file">Pick a file</option>
         </select>
       </label>
-      <div id="spot-t-folder">
-        <label>Folder
-          <select id="spot-folder" style="width:100%"></select>
-        </label>
-      </div>
-      <div id="spot-t-file" hidden>
-        <label>File
+      <div id="spot-pick">
+        <label id="spot-pick-label">Folder
           <div class="row">
-            <button type="button" class="btn btn-sm"
-                    onclick="pickSpotFile()">📁 Choose file…</button>
-            <span id="spot-file-name" class="muted">none chosen</span>
+            <button type="button" class="btn btn-sm" id="spot-pick-btn"
+                    onclick="pickSpotTarget()">📁 Choose folder…</button>
+            <span id="spot-pick-name" class="muted">none chosen</span>
           </div>
         </label>
       </div>
@@ -92,9 +88,7 @@
                 onchange="spotTriggerChange()">
           <option value="interval">Every N minutes</option>
           <option value="clock">At minutes past the hour</option>
-          <option value="daily">Every day at a time</option>
-          <option value="weekly">Certain weekdays at a time</option>
-          <option value="once">Once at a date/time</option>
+          <option value="schedule">Schedule (day &amp; time)</option>
           <option value="manual">Manual (Play now button)</option>
         </select>
       </label>
@@ -107,10 +101,21 @@
         <label>Minutes past the hour
           <input type="text" id="spot-clock" placeholder="0   or   20,40"></label>
       </div>
-      <div id="spot-p-tod" hidden>
-        <label>Play at (time of day)
-          <input type="time" id="spot-tod"></label>
-        <div id="spot-p-days" class="daypick" hidden>
+      <div id="spot-p-schedule" hidden>
+        <label>How often
+          <select id="spot-rec" style="width:100%" onchange="spotRecChange()">
+            <option value="once">Just once</option>
+            <option value="daily">Every day</option>
+            <option value="weekly">Certain weekdays</option>
+          </select>
+        </label>
+        <div id="spot-s-once">
+          <label>Date &amp; time <input type="datetime-local" id="spot-once"></label>
+        </div>
+        <div id="spot-s-tod" hidden>
+          <label>Play at (time of day) <input type="time" id="spot-tod"></label>
+        </div>
+        <div id="spot-s-days" class="daypick" hidden>
           <span class="muted">On these days:</span>
           <label><input type="checkbox" class="sdchk" data-bit="1">Mon</label>
           <label><input type="checkbox" class="sdchk" data-bit="2">Tue</label>
@@ -120,16 +125,13 @@
           <label><input type="checkbox" class="sdchk" data-bit="32">Sat</label>
           <label><input type="checkbox" class="sdchk" data-bit="64">Sun</label>
         </div>
-      </div>
-      <div id="spot-p-once" hidden>
-        <label>Date &amp; time <input type="datetime-local" id="spot-once"></label>
-      </div>
-      <div id="spot-p-window" hidden>
-        <div class="row">
-          <label style="flex:1">Start date <span class="muted">(optional)</span>
-            <input type="date" id="spot-start-date"></label>
-          <label style="flex:1">Stop date <span class="muted">(optional)</span>
-            <input type="date" id="spot-end-date"></label>
+        <div id="spot-s-window" hidden>
+          <div class="row">
+            <label style="flex:1">Start date <span class="muted">(optional)</span>
+              <input type="date" id="spot-start-date"></label>
+            <label style="flex:1">Stop date <span class="muted">(optional)</span>
+              <input type="date" id="spot-end-date"></label>
+          </div>
         </div>
       </div>
       <button class="btn btn-green" onclick="addSpot()">Add spot rule</button>
@@ -560,42 +562,45 @@ async function refreshHistory() {
 // ---- spots: station IDs / ads / jingles / PSAs between songs
 let spotRules = [];
 let spotSkew = 0;   // server_epoch - client_epoch, to align countdowns
-async function loadSpotFolders() {
-  try {
-    const fs = await (await fetch("/api/spots/folders")).json();
-    const sel = document.getElementById("spot-folder");
-    sel.innerHTML = "";
-    for (const f of fs) {
-      const o = document.createElement("option");
-      o.value = f.key; o.disabled = !f.ready;
-      o.textContent = f.label + (f.ready ? "" : "  (set folder in Settings)");
-      sel.appendChild(o);
-    }
-  } catch (e) { /* retry on next page load */ }
-}
 function spotTriggerChange() {
   const t = document.getElementById("spot-trigger").value;
   document.getElementById("spot-p-interval").hidden = t !== "interval";
   document.getElementById("spot-p-clock").hidden = t !== "clock";
-  document.getElementById("spot-p-once").hidden = t !== "once";
-  document.getElementById("spot-p-tod").hidden = !(t === "daily" || t === "weekly");
-  document.getElementById("spot-p-days").hidden = t !== "weekly";
-  // a run window (start/stop date) applies to every recurring trigger
-  document.getElementById("spot-p-window").hidden =
-    !(t === "interval" || t === "clock" || t === "daily" || t === "weekly");
+  document.getElementById("spot-p-schedule").hidden = t !== "schedule";
+  if (t === "schedule") spotRecChange();
 }
-let spotFilePath = null;
+function spotRecChange() {
+  const r = document.getElementById("spot-rec").value;
+  document.getElementById("spot-s-once").hidden = r !== "once";
+  document.getElementById("spot-s-tod").hidden = r === "once";
+  document.getElementById("spot-s-days").hidden = r !== "weekly";
+  // a run window (start/stop date) applies to the recurring options
+  document.getElementById("spot-s-window").hidden = r === "once";
+}
+let spotFilePath = null, spotFolderPath = null;
 function spotTargetChange() {
   const v = document.getElementById("spot-target").value;
-  document.getElementById("spot-t-folder").hidden = v !== "folder";
-  document.getElementById("spot-t-file").hidden = v !== "file";
+  const isFile = v === "file";
+  document.getElementById("spot-pick-label").firstChild.textContent =
+    isFile ? "File" : "Folder";
+  document.getElementById("spot-pick-btn").textContent =
+    isFile ? "📁 Choose file…" : "📁 Choose folder…";
+  spotFilePath = null; spotFolderPath = null;
+  document.getElementById("spot-pick-name").textContent = "none chosen";
 }
-function pickSpotFile() {
-  openFilePicker("audio", "Pick a spot file", (p) => {
-    spotFilePath = p;
-    document.getElementById("spot-file-name").textContent =
-      p.split(/[\\/]/).pop();
-  });
+function pickSpotTarget() {
+  const v = document.getElementById("spot-target").value;
+  const setName = (p) => document.getElementById("spot-pick-name").textContent =
+    p.split(/[\\/]/).pop() || p;
+  if (v === "file") {
+    openFilePicker("audio", "Pick a spot file", (p) => {
+      spotFilePath = p; spotFolderPath = null; setName(p);
+    });
+  } else {
+    openFolderPicker("Pick a spot folder", (p) => {
+      spotFolderPath = p; spotFilePath = null; setName(p);
+    });
+  }
 }
 function fmtCountdown(next) {
   if (next == null) return "manual";
@@ -654,16 +659,22 @@ function tickSpotCountdowns() {
   }
 }
 async function addSpot() {
-  const trigger = document.getElementById("spot-trigger").value;
-  const body = {trigger};
-  if (document.getElementById("spot-target").value === "file") {
+  const target = document.getElementById("spot-target").value;
+  const when = document.getElementById("spot-trigger").value;
+  const body = {};
+  // what to play
+  if (target === "file") {
     if (!spotFilePath) { alert("Choose a file first."); return; }
     body.file_path = spotFilePath;
   } else {
-    const key = document.getElementById("spot-folder").value;
-    if (!key) { alert("Pick a folder first (set it up on the Settings page)."); return; }
-    body.folder_key = key;
+    if (!spotFolderPath) { alert("Choose a folder first."); return; }
+    body.folder_path = spotFolderPath;
+    body.pick_mode = target === "random" ? "random" : "rotate";
   }
+  // when — 'schedule' maps to the once/daily/weekly recurrence trigger
+  const trigger = when === "schedule"
+    ? document.getElementById("spot-rec").value : when;
+  body.trigger = trigger;
   if (trigger === "interval")
     body.interval_min = Number(document.getElementById("spot-interval").value);
   if (trigger === "clock")
@@ -676,7 +687,7 @@ async function addSpot() {
     body.time_of_day = tod;
     if (trigger === "weekly") {
       let mask = 0;
-      document.querySelectorAll("#spot-p-days .sdchk:checked")
+      document.querySelectorAll("#spot-s-days .sdchk:checked")
         .forEach(c => mask |= Number(c.dataset.bit));
       if (!mask) { alert("Pick at least one weekday."); return; }
       body.days_mask = mask;
@@ -692,12 +703,12 @@ async function addSpot() {
     alert((await r.json().catch(() => ({}))).detail || "Could not add");
     return;
   }
-  spotFilePath = null;
-  document.getElementById("spot-file-name").textContent = "none chosen";
+  spotFilePath = null; spotFolderPath = null;
+  document.getElementById("spot-pick-name").textContent = "none chosen";
   document.getElementById("spot-tod").value = "";
   document.getElementById("spot-start-date").value = "";
   document.getElementById("spot-end-date").value = "";
-  document.querySelectorAll("#spot-p-days .sdchk").forEach(c => c.checked = false);
+  document.querySelectorAll("#spot-s-days .sdchk").forEach(c => c.checked = false);
   refreshSpots();
 }
 async function playSpot(id) {
@@ -998,7 +1009,7 @@ rotListEl.addEventListener("dragover", (ev) => {
 rotListEl.addEventListener("scroll", () => { rotScrolledAt = Date.now(); });
 
 refresh(); refreshTiles(); refreshSchedule();
-loadSpotFolders(); refreshSpots(); refreshRotation(); refreshHistory();
+refreshSpots(); refreshRotation(); refreshHistory();
 setInterval(refresh, 2000);
 setInterval(refreshTiles, 10000);
 setInterval(refreshSchedule, 5000);

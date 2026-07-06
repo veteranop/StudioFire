@@ -82,24 +82,32 @@ def add(conn: sqlite3.Connection, folder_key: str, trigger: str,
         interval_min: int | None = None, clock_minutes: str | None = None,
         start_at: str | None = None, file_path: str | None = None,
         time_of_day: str | None = None, days_mask: int | None = None,
-        start_date: str | None = None, end_date: str | None = None) -> int:
-    """A spot rule targets either a folder (round-robin, folder_key) OR one
-    specific file (file_path). file_path wins when set."""
+        start_date: str | None = None, end_date: str | None = None,
+        folder_path: str | None = None, pick_mode: str | None = None) -> int:
+    """A spot rule targets, in priority order: a specific file (file_path), a
+    browsed folder (folder_path, picked 'rotate'/'random' via pick_mode), or a
+    legacy preset station folder (folder_key)."""
     import os
     now = time.time()
     # interval rules start their clock at creation (first break N min later)
     last_fired = now if trigger == "interval" else None
-    label = (os.path.splitext(os.path.basename(file_path))[0] if file_path
-             else default_label(folder_key))
+    if file_path:
+        label = os.path.splitext(os.path.basename(file_path))[0]
+    elif folder_path:
+        base = os.path.basename(folder_path.rstrip("\\/")) or folder_path
+        label = base + (" (random)" if pick_mode == "random" else "")
+    else:
+        label = default_label(folder_key)
     with conn:
         cur = conn.execute(
             "INSERT INTO spot_rules (folder_key, label, trigger, interval_min, "
             "  clock_minutes, start_at, file_path, enabled, last_fired, "
-            "  created_at, time_of_day, days_mask, start_date, end_date) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)",
+            "  created_at, time_of_day, days_mask, start_date, end_date, "
+            "  folder_path, pick_mode) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)",
             (folder_key or "", label, trigger, interval_min, clock_minutes,
              start_at, file_path, last_fired, now, time_of_day, days_mask,
-             start_date or None, end_date or None))
+             start_date or None, end_date or None, folder_path, pick_mode))
     return cur.lastrowid
 
 

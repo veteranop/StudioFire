@@ -454,6 +454,25 @@ def main():
                   for r in client.get("/api/spots").json()["rules"]))
         check("file spot play_now accepted",
               client.post(f"/api/spots/{fspot}/play_now").status_code == 200)
+
+        # a spot rule can target a browsed FOLDER, rotate or random
+        rot = client.post("/api/spots", json={
+            "trigger": "manual", "folder_path": showdir,
+            "pick_mode": "rotate"}).json()["id"]
+        check("folder spot stores the path + mode",
+              any(r["id"] == rot and r["folder_path"] == showdir
+                  and r["pick_mode"] == "rotate"
+                  for r in client.get("/api/spots").json()["rules"]))
+        check("folder spot (rotate) play_now airs a file",
+              client.post(f"/api/spots/{rot}/play_now").status_code == 200)
+        rnd = client.post("/api/spots", json={
+            "trigger": "manual", "folder_path": showdir,
+            "pick_mode": "random"}).json()["id"]
+        check("folder spot (random) play_now airs a file",
+              client.post(f"/api/spots/{rnd}/play_now").status_code == 200)
+        check("folder spot rejects a missing folder", client.post(
+              "/api/spots", json={"trigger": "manual",
+              "folder_path": showdir + "-nope"}).status_code == 400)
         conn2.close()
 
         # ---- "Stop after current song": hold at the next boundary, then go.
