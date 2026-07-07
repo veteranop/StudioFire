@@ -37,3 +37,6 @@ assets/emergency/*.mp3
 # local screenshots / playwright artifacts
 .playwright-mcp/
 /*.png
+
+# Obsidian vault config (per-user; not part of the project)
+.obsidian/
