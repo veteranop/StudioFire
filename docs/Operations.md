@@ -1,6 +1,6 @@
 # Operations
 
-Running, restarting, deploying, and soak-testing. Deploy details in [[DEPLOY]].
+Running, restarting, deploying, and soak-testing. Deploy details in [[StudioFire/DEPLOY|DEPLOY]].
 
 ## Dev environment
 - Python = **Anaconda 3.13** (`C:\Users\markd\anaconda3\python.exe`) — mandate.
@@ -11,7 +11,7 @@ Running, restarting, deploying, and soak-testing. Deploy details in [[DEPLOY]].
 
 ## Run / stop the stack
 - `start-all.bat` / `stop-all.bat` — dev box (each service in its own window).
-  On the on-air PC use auto-restarting Windows services (NSSM) — see [[DEPLOY]].
+  On the on-air PC use auto-restarting Windows services (NSSM) — see [[StudioFire/DEPLOY|DEPLOY]].
 - Detached (survives the shell): `python scripts/launch_detached.py [engine|core|worker]`
   — no arg launches all three; a name launches just that one.
 
@@ -20,7 +20,7 @@ Running, restarting, deploying, and soak-testing. Deploy details in [[DEPLOY]].
   It kills core/worker WITHOUT `/T` (so the helper, a child of core, survives)
   and tree-kills the engine (to also stop mpv). Logs to `logs/restart.log`.
   A `.bat`'s `start cmd /k` can't create windows from P2 — that's why. See
-  [[Gotchas]].
+  [[StudioFire/docs/Gotchas|Gotchas]].
 - P1 restart = a brief filler blip (crash-safe by design).
 
 ## Database

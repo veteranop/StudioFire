@@ -1,11 +1,11 @@
 # Roadmap
 
-Phases (v0.2, post-review). Full detail in [[PLAN]]; shipped work in [[CHANGELOG]].
+Phases (v0.2, post-review). Full detail in [[StudioFire/PLAN|PLAN]]; shipped work in [[StudioFire/CHANGELOG|CHANGELOG]].
 
 ## Phases
 - **Phase 0 — bulletproof engine core** ✅ — mpv supervisor, persisted queue,
   3-tier failover, 1s watchdog, torture matrix. No GUI.
-- **Phase 1 — web GUI + library** ✅ — FastAPI GUI, playlists, [[Architecture|P3]]
+- **Phase 1 — web GUI + library** ✅ — FastAPI GUI, playlists, [[StudioFire/docs/Architecture|P3]]
   indexer, library search, on-air cockpit.
 - **Phase 2 — studio monitor + IDs** — the [[#Station equipment]] ICMP monitor
   is in; top-of-hour IDs / full P4 poller still to come.
@@ -27,14 +27,14 @@ Phases (v0.2, post-review). Full detail in [[PLAN]]; shipped work in [[CHANGELOG
 - **Settings** — station folders, playlist `.lst` backup, **Users** (Admin /
   Basic; Basic does everything except manage users), **Station equipment**
   (ICMP ping).
-- **Ops** — GUI restart, detached launch, [[Operations|soak monitor]].
+- **Ops** — GUI restart, detached launch, [[StudioFire/docs/Operations|soak monitor]].
 
 ## Station equipment
 Add gear by name + IP; a background pinger shows green/red + latency. First
-slice of the [[Architecture|P4]] monitor.
+slice of the [[StudioFire/docs/Architecture|P4]] monitor.
 
 ## Known follow-ups
 - Missing durations for many tracks (tag reads flaky over VPN — clean on-site
   re-scan fills them in).
 - Canonicalize playlist paths to UNC for on-air portability (deliberate,
-  backed-up pass — see [[Gotchas]]).
+  backed-up pass — see [[StudioFire/docs/Gotchas|Gotchas]]).

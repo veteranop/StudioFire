@@ -2,20 +2,22 @@
 
 Radio-automation platform (a ZaraRadio replacement) for a small FM station.
 Python (Anaconda), local-first, "audio is everything." This note is the map of
-the project — open the **project root** as an Obsidian vault and start here.
+the project. The Obsidian vault is your **Desktop**; this project lives under
+`StudioFire/`, so links here are written as `StudioFire/…` and resolve no matter
+what other projects are in the vault.
 
 ## Start here
-- [[Architecture]] — the four isolated services and why
-- [[Roadmap]] — phases and what's built so far
-- [[Operations]] — running, restarting, deploying, the soak test
-- [[Gotchas]] — hard-won lessons (read before touching the audio path)
+- [[StudioFire/docs/Architecture|Architecture]] — the four isolated services and why
+- [[StudioFire/docs/Roadmap|Roadmap]] — phases and what's built so far
+- [[StudioFire/docs/Operations|Operations]] — running, restarting, deploying, the soak test
+- [[StudioFire/docs/Gotchas|Gotchas]] — hard-won lessons (read before touching the audio path)
 
 ## Reference docs (repo root)
-- [[PLAN]] — the full binding spec (§10 is the engine contract)
-- [[CHANGELOG]] — what changed, release by release
-- [[DEPLOY]] — deploying to the on-air / production box
-- [[REVIEW]] — the doc handed to Grok for second opinions
-- [[README]]
+- [[StudioFire/PLAN|PLAN]] — the full binding spec (§10 is the engine contract)
+- [[StudioFire/CHANGELOG|CHANGELOG]] — what changed, release by release
+- [[StudioFire/DEPLOY|DEPLOY]] — deploying to the on-air / production box
+- [[StudioFire/REVIEW|REVIEW]] — the doc handed to Grok for second opinions
+- [[StudioFire/README|README]]
 
 ## The one-paragraph version
 Four Windows services, isolated so a failure in one can't take air off:
@@ -23,4 +25,4 @@ Four Windows services, isolated so a failure in one can't take air off:
 persisted queue, 3-tier failover, never touches the DB), **P2 core/GUI**
 (FastAPI + the feeder that pre-caches NAS files locally), **P3 indexer** (walks
 the NAS into SQLite), **P4 monitor** (not built yet). DJs just browse to P2's
-web GUI. See [[Architecture]].
+web GUI. See [[StudioFire/docs/Architecture|Architecture]].

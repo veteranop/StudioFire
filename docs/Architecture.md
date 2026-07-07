@@ -2,7 +2,7 @@
 
 Mandate: **segmented — "audio on is everything."** Four isolated Windows
 services so nothing outside the audio path can ever cause dead air. Full spec in
-[[PLAN]] §5–§10.
+[[StudioFire/PLAN|PLAN]] §5–§10.
 
 ## The four services
 - **P1 — audio engine** (`services/engine/`) — the ONLY process in the audio
@@ -15,9 +15,9 @@ services so nothing outside the audio path can ever cause dead air. Full spec in
   (WAL). DJs browse here.
 - **P3 — indexer** (`services/worker/`) — throttled background NAS walk into
   SQLite (mutagen tags). Two-phase: fast path walk, then tag backfill. See
-  [[Gotchas]].
+  [[StudioFire/docs/Gotchas|Gotchas]].
 - **P4 — monitor** — separate poller for TX / Barix / UniFi. Not built yet;
-  the [[Operations|Station equipment]] ICMP monitor is an early piece.
+  the [[StudioFire/docs/Operations|Station equipment]] ICMP monitor is an early piece.
 
 ## Key contracts
 - **queue_version protocol** — monotonic; P1 rejects a stale mutation with 409,
@@ -26,11 +26,11 @@ services so nothing outside the audio path can ever cause dead air. Full spec in
   watchdog checks the play-head is advancing.
 - **Show overlay** — a scheduled show interrupts the base rotation, plays once
   through, then hands back (`active_playlist_id`). Items are snapshot into the
-  feeder overlay so they're [[Roadmap|editable live]].
+  feeder overlay so they're [[StudioFire/docs/Roadmap|editable live]].
 - **Path aliases** — playlists store `\\KDPI-Media\music\…`; each box aliases it
-  to its local mount (`Z:` at home). See [[Gotchas]].
+  to its local mount (`Z:` at home). See [[StudioFire/docs/Gotchas|Gotchas]].
 
 ## Data
-SQLite schema is versioned ([[Operations|migrations]] run at startup). P1 never
+SQLite schema is versioned ([[StudioFire/docs/Operations|migrations]] run at startup). P1 never
 touches it. The library index (`tracks`), playlists, schedule, spots, devices,
 and settings all live here.

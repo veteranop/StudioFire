@@ -23,7 +23,7 @@ Hard-won lessons. Read before touching the audio path or the indexer.
   mid-scan to "fix" missing artists — that resets it to A.
 - **Two-phase + scandir.** Phase 1 records paths (searchable fast), phase 2
   backfills tags. `os.scandir` gives free `stat()` on Windows (no per-file SMB
-  round-trip). See [[Architecture|P3]].
+  round-trip). See [[StudioFire/docs/Architecture|P3]].
 - **`._` AppleDouble junk** carries audio extensions but no audio — filter it.
 
 ## Network / paths
@@ -37,4 +37,4 @@ Hard-won lessons. Read before touching the audio path or the indexer.
 ## Restart / deploy
 - **GUI restart button** uses `scripts/restart_all.py` (detached Python), NOT
   the `.bat` — `start cmd /k` can't spawn windows from P2's no-console process.
-  See [[Operations]].
+  See [[StudioFire/docs/Operations|Operations]].
