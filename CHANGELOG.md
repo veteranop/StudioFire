@@ -10,6 +10,11 @@ plain English a non-technical operator can understand.
 ## [Unreleased]
 
 ### Added
+- Google Analytics (GA4) usage telemetry in the web GUI, so we can see which
+  features stations actually use. The station name is attached to the data.
+  It never affects playback and the GUI works identically with no internet.
+  A station can opt out (or use its own GA property) with
+  `"core": {"ga_measurement_id": ""}` in config.json.
 - A Windows installer (installer\StudioFire.iss + build_payload.py): one
   setup.exe that bundles Python, mpv, and NSSM — nothing to pre-install on a
   customer PC. The wizard asks for the station name and music folder, can

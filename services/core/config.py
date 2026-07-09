@@ -15,6 +15,13 @@ import os
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 log = logging.getLogger("core.config")
 
+# Product telemetry: GA4 measurement ID baked into every install so feature
+# usage across customer stations lands in one property (station_name rides
+# along as a user property). A station can override with its own ID — or
+# disable entirely with  "core": {"ga_measurement_id": ""}  — in config.json.
+# The GUI works identically offline; the tag just never loads.
+GA_MEASUREMENT_ID_DEFAULT = ""  # paste the StudioFire GA4 "G-XXXXXXXXXX" here
+
 
 def load_config(path: str | None = None) -> dict:
     cfg = {}
@@ -51,6 +58,8 @@ def load_config(path: str | None = None) -> dict:
         # dev/dry-run convenience: a GUI "restart everything" button. Set this
         # to false on the ON-AIR PC so nobody can drop audio from the browser.
         "allow_gui_restart": bool(core.get("allow_gui_restart", True)),
+        "ga_measurement_id": core.get("ga_measurement_id",
+                                      GA_MEASUREMENT_ID_DEFAULT),
         "precache_target_minutes": int(core.get("precache_target_minutes", 45)),
         "engine_url": "http://%s:%d" % (engine.get("ipc_host", "127.0.0.1"),
                                         int(engine.get("ipc_port", 7701))),

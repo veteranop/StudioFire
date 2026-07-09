@@ -66,6 +66,10 @@ def create_app(cfg: dict) -> FastAPI:
     db.migrate(cfg["db_path"])
     sessions = auth.Sessions(auth.load_secret(cfg["secret_path"]))
     templates = Jinja2Templates(directory=os.path.join(WEB, "templates"))
+    # env globals so EVERY render (routers included) sees them without
+    # threading extra ctx through each handler
+    templates.env.globals["ga_id"] = cfg.get("ga_measurement_id") or ""
+    templates.env.globals["ga_station"] = cfg["station_name"]
     app = FastAPI(title="StudioFire", docs_url=None, redoc_url=None)
     app.state.cfg = cfg
     app.state.sessions = sessions
