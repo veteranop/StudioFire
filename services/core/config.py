@@ -20,7 +20,7 @@ log = logging.getLogger("core.config")
 # along as a user property). A station can override with its own ID — or
 # disable entirely with  "core": {"ga_measurement_id": ""}  — in config.json.
 # The GUI works identically offline; the tag just never loads.
-GA_MEASUREMENT_ID_DEFAULT = ""  # paste the StudioFire GA4 "G-XXXXXXXXXX" here
+GA_MEASUREMENT_ID_DEFAULT = "G-3BK3GZDSJN"  # StudioFire GA4 property (VeteranOp)
 
 
 def load_config(path: str | None = None) -> dict:
