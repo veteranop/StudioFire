@@ -84,7 +84,16 @@ scripts\install-services.bat
 ```
 It registers all three (auto-start, restart-on-crash, rotated service logs)
 with the working directory set correctly. `scripts\remove-services.bat` undoes
-it. **Easier still:** build the customer installer — see
+it.
+
+**Then do BOTH of these, or the services sit "Paused" (learned 2026-07-08):**
+1. **Log On as a real user** — services.msc → each StudioFire\* service →
+   Log On → *This account* (the box's username/password). LocalSystem has no
+   usable Python profile and no NAS credentials.
+2. **Map the NAS inside the service session** —
+   `copy config\drive-map.example.bat config\drive-map.bat` and edit the UNC.
+   Services never inherit your logged-in drive letters; the wrapper
+   (`scripts\svc-run.bat`) runs this before each service starts. **Easier still:** build the customer installer — see
 [[StudioFire/installer/README|installer/README]] — which bundles Python, mpv,
 NSSM, and a station-setup wizard into one setup.exe.
 
