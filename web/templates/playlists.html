@@ -15,9 +15,15 @@
 {% block content %}
 <div class="card">
   <h1>Playlists</h1>
-  <p class="muted">Build the lists of songs your station plays. Start a new
-    one or open one you already have — you'll add, remove, and reorder songs
-    on the next screen, and every change saves itself.</p>
+  <p class="muted">Playlists are ZaraRadio-style <code>.lst</code> files.
+    Open one, change it on the next screen, and every change saves straight
+    back to the same file.</p>
+
+  <h2>📂 Open a playlist</h2>
+  <div class="row">
+    <button class="btn btn-green btn-big" onclick="openBrowse()">
+      Open a playlist (.lst)…</button>
+  </div>
 
   <h2>➕ Start a new playlist</h2>
   <div class="row">
@@ -25,24 +31,7 @@
            onkeydown="if (event.key === 'Enter') createPl()">
     <button class="btn btn-green" onclick="createPl()">Create</button>
   </div>
-
-  <h2>📂 Open a playlist</h2>
-  <div class="row">
-    <select id="open-pl" style="flex:1" {% if not playlists %}disabled{% endif %}>
-    {% for p in playlists %}
-      <option value="{{ p.id }}">{{ p.name }} — {{ p.item_count }} song{{ '' if p.item_count == 1 else 's' }}</option>
-    {% else %}
-      <option value="">No playlists yet — create one above</option>
-    {% endfor %}
-    </select>
-    <button class="btn btn-green" onclick="openPl()"
-            {% if not playlists %}disabled{% endif %}>Open</button>
-  </div>
-  <div class="row">
-    <span class="muted">…or open one from ZaraRadio:</span>
-    <input type="file" id="lst-file" accept=".lst">
-    <button class="btn" onclick="importLst()">Import .lst</button>
-  </div>
+  <p class="muted" id="lst-dir-hint"></p>
 </div>
 <div class="card">
   <h2>Fix broken file paths</h2>
@@ -54,11 +43,85 @@
     all playlists</button>
   <div id="relink-result" style="margin-top:.7rem"></div>
 </div>
+
+<!-- file explorer (same picker as the On Air page) -->
+<div id="fp-modal" class="fp-modal" hidden>
+  <div class="fp-box card">
+    <div class="row" style="justify-content:space-between;margin-top:0">
+      <strong id="fp-title">Open a playlist (.lst)</strong>
+      <button class="btn btn-sm" onclick="fpClose()">✕ Close</button>
+    </div>
+    <div class="row">
+      <button class="btn btn-sm" onclick="fpGo('')">💻 Drives</button>
+      <button class="btn btn-sm" id="fp-up" onclick="fpUp()">⬆ Up</button>
+      <span id="fp-path" class="muted"></span>
+    </div>
+    <div id="fp-list" class="picker"></div>
+  </div>
+</div>
+
 <script>
-function openPl() {
-  const id = document.getElementById("open-pl").value;
-  if (id) location = "/playlists/" + id;
+let lstDir = "";
+(async () => {
+  try {
+    const d = await (await fetch("/api/playlists/lst_dir")).json();
+    lstDir = d.effective || d.path || "";
+    document.getElementById("lst-dir-hint").textContent =
+      "New playlists are saved as .lst files in: " + (lstDir || "…") +
+      "  (change it in Settings → Playlists folder)";
+  } catch (e) {}
+})();
+
+// ---- file explorer (browse the server's disks/NAS for a .lst)
+let fpPath = "", fpParent = null;
+function joinPath(base, name) {
+  return base ? base.replace(/[\\/]$/, "") + "\\" + name : name;
 }
+function openBrowse() {
+  document.getElementById("fp-modal").hidden = false;
+  fpGo(lstDir || "");
+}
+function fpClose() { document.getElementById("fp-modal").hidden = true; }
+function fpUp() { if (fpParent !== null) fpGo(fpParent); }
+async function fpGo(path) {
+  let d;
+  try {
+    d = await (await fetch("/api/fs/list?files=lst&path=" +
+      encodeURIComponent(path))).json();
+  } catch (e) {
+    if (path) return fpGo("");   // start folder unreachable -> drive list
+    alert("Can't open that folder"); return;
+  }
+  fpPath = d.path; fpParent = d.parent;
+  document.getElementById("fp-path").textContent = d.path || "Choose a drive";
+  document.getElementById("fp-up").disabled = d.parent === null;
+  const list = document.getElementById("fp-list");
+  list.innerHTML = "";
+  for (const name of d.dirs) {
+    const b = document.createElement("button");
+    b.className = "pickdir"; b.textContent = "📁 " + name;
+    b.onclick = () => fpGo(joinPath(d.path, name));
+    list.appendChild(b);
+  }
+  for (const name of (d.files || [])) {
+    const b = document.createElement("button");
+    b.className = "pickdir pickfile"; b.textContent = "📻 " + name;
+    b.onclick = () => openLst(joinPath(d.path, name));
+    list.appendChild(b);
+  }
+  if (!d.dirs.length && !(d.files || []).length)
+    list.innerHTML = "<div class='muted'>Nothing here</div>";
+}
+async function openLst(path) {
+  fpClose();
+  const r = await fetch("/api/playlists/open", {method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({path})});
+  const b = await r.json();
+  if (r.ok) location = "/playlists/" + b.id;
+  else alert(b.detail || "Could not open that playlist");
+}
+
 async function createPl() {
   const inp = document.getElementById("new-name");
   const name = inp.value.trim();
@@ -68,24 +131,6 @@ async function createPl() {
     body: JSON.stringify({name})});
   if (r.status === 201) location = "/playlists/" + (await r.json()).id;
   else alert((await r.json()).detail || "Could not create playlist");
-}
-async function importLst() {
-  const inp = document.getElementById("lst-file");
-  if (!inp.files.length) { alert("Choose a .lst file first."); return; }
-  const f = inp.files[0];
-  const name = prompt("Name for the imported playlist:",
-                      f.name.replace(/\.lst$/i, "").trim());
-  if (!name) return;
-  const fd = new FormData();
-  fd.append("file", f);
-  fd.append("name", name);
-  const r = await fetch("/api/playlists/import_lst",
-                        {method: "POST", body: fd});
-  const body = await r.json();
-  if (r.status === 201) {
-    alert("Imported " + body.imported + " tracks.");
-    location = "/playlists/" + body.id;
-  } else alert(body.detail || "Import failed");
 }
 function esc(s) {
   return (s || "").replace(/[&<>]/g,

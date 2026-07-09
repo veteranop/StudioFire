@@ -16,6 +16,10 @@
 <div class="grid2">
   <div class="card">
     <h1>{{ playlist.name }}</h1>
+    {% if playlist.source_path %}
+    <p class="muted" title="Every change on this page saves straight back to this file.">
+      💾 {{ playlist.source_path }}</p>
+    {% endif %}
     <ol id="items" class="editlist">
     {% for it in items %}
       <li data-id="{{ it.id }}">

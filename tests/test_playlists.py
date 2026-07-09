@@ -278,15 +278,20 @@ def main():
           == [r"Z:\G\Artist\Album\01 Song One.mp3",
               r"Z:\G\Artist\Album\02 Song Two.mp3"])
 
+    check("write_lst is a no-op with no folder and no linked file",
+          pl.write_lst(lc, "", lpid) is None
+          and pl.write_lst(lc, os.path.join(td, "nope"), lpid) is None)
     lst_dir = os.path.join(td, "lst_out")
     os.makedirs(lst_dir)
     written = pl.write_lst(lc, lst_dir, lpid)
     check("write_lst creates <name>.lst",
           written == os.path.join(lst_dir, "Drive Time.lst")
           and os.path.isfile(written))
-    check("write_lst is a no-op when the folder is unset/missing",
-          pl.write_lst(lc, "", lpid) is None
-          and pl.write_lst(lc, os.path.join(td, "nope"), lpid) is None)
+    check("write_lst remembers its file (source_path)",
+          lc.execute("SELECT source_path FROM playlists WHERE id = ?",
+                     (lpid,)).fetchone()[0] == written)
+    check("a homed playlist saves to its own file, folder or not",
+          pl.write_lst(lc, "", lpid) == written)
 
     # rename mirrors to the new name and removes the old file
     pl.rename_playlist(lc, lpid, "Evening Show")
@@ -311,7 +316,73 @@ def main():
     pl.remove_lst(lst_dir, "Evening Show")
     check("remove_lst deletes the file",
           not os.path.isfile(os.path.join(lst_dir, "Evening Show.lst")))
+
+    # ---- playlists ARE .lst files: open / save-back / external edits
+    zara = os.path.join(td, "zara")
+    os.makedirs(zara)
+    src = os.path.join(zara, "Road Trip.lst")
+    with open(src, "w", encoding="cp1252", newline="") as f:
+        f.write("2\r\n1000\tZ:\\G\\one.mp3\r\n2000\tZ:\\G\\two.mp3\r\n")
+    opened = pl.open_lst(lc, src, {})
+    opid = opened["id"]
+    check("open_lst creates a playlist named after the file",
+          opened["created"]
+          and lc.execute("SELECT name FROM playlists WHERE id = ?",
+                         (opid,)).fetchone()[0] == "Road Trip")
+    check("open_lst imports the tracks",
+          [i["path"] for i in pl.get_items(lc, opid)]
+          == ["Z:\\G\\one.mp3", "Z:\\G\\two.mp3"])
+    check("open_lst links the exact file",
+          lc.execute("SELECT source_path FROM playlists WHERE id = ?",
+                     (opid,)).fetchone()[0] == os.path.abspath(src))
+    # an edit saves straight back to the SAME file
+    pl.add_item(lc, opid, "file", r"Z:\G\three.mp3", "Three")
+    pl.write_lst(lc, "", opid)  # no folder needed — it has a home
+    with open(src, "rb") as f:
+        reread = pl.parse_lst(f.read())
+    check("edits save back to the same .lst",
+          [e["path"] for e in reread]
+          == ["Z:\\G\\one.mp3", "Z:\\G\\two.mp3", "Z:\\G\\three.mp3"])
+    # reopening our own save changes nothing
+    again = pl.open_lst(lc, src, {})
+    check("reopen returns the same playlist untouched",
+          not again["created"] and again["id"] == opid
+          and len(pl.get_items(lc, opid)) == 3)
+    # a file edited OUTSIDE StudioFire (e.g. by Zara) wins on the next open
+    with open(src, "w", encoding="cp1252", newline="") as f:
+        f.write("1\r\n500\tZ:\\G\\only.mp3\r\n")
+    late = time.time() + 100
+    os.utime(src, (late, late))
+    pl.open_lst(lc, src, {})
+    check("externally edited file wins on reopen",
+          [i["path"] for i in pl.get_items(lc, opid)] == ["Z:\\G\\only.mp3"])
+    # the same filename in a different folder is a different playlist
+    zara2 = os.path.join(td, "zara2")
+    os.makedirs(zara2)
+    src2 = os.path.join(zara2, "Road Trip.lst")
+    with open(src2, "w", encoding="cp1252", newline="") as f:
+        f.write("1\r\n0\tZ:\\G\\other.mp3\r\n")
+    o2 = pl.open_lst(lc, src2, {})
+    check("same name in another folder gets a suffixed playlist",
+          o2["created"] and o2["id"] != opid
+          and lc.execute("SELECT name FROM playlists WHERE id = ?",
+                         (o2["id"],)).fetchone()[0] == "Road Trip (2)")
+    try:
+        pl.open_lst(lc, os.path.join(td, "nope.txt"), {})
+        rejected = False
+    except ValueError:
+        rejected = True
+    check("open_lst rejects non-.lst paths", rejected)
     lc.close()
+
+    # API: open via the file explorer + Zara-style delete (file goes too)
+    r = client.post("/api/playlists/open", json={"path": src2})
+    check("API open creates from a .lst path",
+          r.status_code == 200 and r.json()["created"])
+    wpid = r.json()["id"]
+    r = client.delete(f"/api/playlists/{wpid}")
+    check("API delete removes the playlist's .lst file",
+          r.status_code == 200 and not os.path.exists(src2))
 
     print(f"PLAYLISTS OK ({passed} checks)")
     return 0

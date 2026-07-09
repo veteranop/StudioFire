@@ -73,7 +73,8 @@ def main():
     # ---- pages render
     check("dashboard renders", b"Now Playing" in client.get("/").content)
     r = client.get("/playlists")
-    check("playlists page lists playlist", b"Test List" in r.content)
+    check("playlists page offers the file-explorer Open",
+          b"Open a playlist (.lst)" in r.content)
     r = client.get(f"/playlists/{pid}")
     check("builder renders items", b"Highway Song" in r.content)
     check("builder 404 for unknown", client.get("/playlists/999")

@@ -42,11 +42,17 @@ plain English a non-technical operator can understand.
   feed cycle now and then) is gone.
 
 ### Changed
-- The Playlists page is now just three simple actions: start a new playlist,
-  open one you have, or import a ZaraRadio .lst — no more busy table of
-  buttons. Duplicate, Delete, and PUT ON AIR live inside the playlist editor,
-  where you can see exactly what you're acting on. The full playlist
-  export/restore moved to Settings (admins only).
+- Playlists now work exactly like ZaraRadio: every playlist IS a .lst file on
+  disk. "Open a playlist" is a file explorer — browse to any .lst (including
+  your old Zara ones) and open it; every change you make saves straight back
+  to that same file, so Zara and StudioFire can share the very same playlists.
+  If a file was edited outside StudioFire, opening it picks up those changes.
+  Deleting a playlist deletes its file. New playlists are saved into the
+  "Playlists folder" (Settings). The editor shows which file it's saving to.
+- The Playlists page is now just two simple actions: open a playlist (file
+  explorer) or start a new one. Duplicate, Delete, and PUT ON AIR live inside
+  the playlist editor, where you can see exactly what you're acting on. The
+  full playlist export/restore moved to Settings (admins only).
 - On Air controls are simpler and clearer. The 🚨 EMERGENCY button is gone;
   the three buttons are now GO / STOP — On Air (one master switch: STOP takes
   you off air immediately, GO puts you back), Skip Song, and Stop after

@@ -252,6 +252,12 @@ CREATE TABLE devices (
 ALTER TABLE spot_rules ADD COLUMN folder_path TEXT;
 ALTER TABLE spot_rules ADD COLUMN pick_mode TEXT;   -- 'rotate' | 'random'
 """),
+    (10, """
+-- Playlists are ZaraRadio-style .lst files on disk: source_path is the exact
+-- file a playlist was opened from (or first saved to) and every edit writes
+-- straight back to it. The DB rows are the editor's working copy.
+ALTER TABLE playlists ADD COLUMN source_path TEXT;
+"""),
 ]
 
 SCHEMA_VERSION = MIGRATIONS[-1][0]

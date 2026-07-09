@@ -185,18 +185,32 @@ def remove_lst(lst_dir: str, name: str) -> None:
 
 def write_lst(conn: sqlite3.Connection, lst_dir: str, pid: int,
               old_name: str | None = None) -> str | None:
-    """Mirror a playlist to <lst_dir>/<name>.lst (atomic). On a rename, pass the
-    previous name to delete the stale file. No-op if lst_dir isn't set/usable.
-    Best-effort: a mirror failure must never break the playlist edit itself."""
-    if not lst_dir or not os.path.isdir(lst_dir):
-        return None
-    row = conn.execute("SELECT name FROM playlists WHERE id = ?",
+    """Save a playlist to its .lst file (atomic), Zara-style: the file IS the
+    playlist. A playlist saves to its own source_path (the file it was opened
+    from / first saved to); one without a source_path gets
+    <lst_dir>/<name>.lst and remembers it. A rename renames the file too.
+    Best-effort: a save failure must never break the edit itself."""
+    row = conn.execute("SELECT name, source_path FROM playlists WHERE id = ?",
                        (pid,)).fetchone()
     if row is None:
         return None
-    if old_name and old_name != row["name"]:
-        remove_lst(lst_dir, old_name)
-    target = os.path.join(lst_dir, lst_filename(row["name"]))
+    target = row["source_path"] or ""
+    if target and old_name and old_name != row["name"]:
+        # renamed -> the file follows (same folder, new name)
+        new_target = os.path.join(os.path.dirname(target),
+                                  lst_filename(row["name"]))
+        if os.path.normcase(new_target) != os.path.normcase(target):
+            try:
+                os.remove(target)
+            except OSError:
+                pass
+            target = new_target
+    if not target:
+        if not lst_dir or not os.path.isdir(lst_dir):
+            return None
+        if old_name and old_name != row["name"]:
+            remove_lst(lst_dir, old_name)
+        target = os.path.join(lst_dir, lst_filename(row["name"]))
     tmp = target + ".tmp"
     try:
         # cp1252 (Windows ANSI) is what Zara reads/writes; our own parser tries
@@ -206,9 +220,75 @@ def write_lst(conn: sqlite3.Connection, lst_dir: str, pid: int,
             f.write(export_lst_text(conn, pid))
         os.replace(tmp, target)
     except OSError as exc:
-        log.warning("could not mirror playlist %d to .lst: %s", pid, exc)
+        log.warning("could not save playlist %d to .lst: %s", pid, exc)
         return None
+    if target != (row["source_path"] or ""):
+        with conn:
+            conn.execute("UPDATE playlists SET source_path = ? WHERE id = ?",
+                         (target, pid))
     return target
+
+
+def apply_aliases(entries: list[dict], aliases: dict) -> list[dict]:
+    """Rewrite path prefixes ({'\\\\SERVER\\share': 'Z:'}) so a .lst written
+    on another machine resolves locally."""
+    for e in entries:
+        for prefix, repl in (aliases or {}).items():
+            if e["path"].lower().startswith(prefix.lower()):
+                e["path"] = repl + e["path"][len(prefix):]
+                break
+    return entries
+
+
+def open_lst(conn: sqlite3.Connection, path: str, aliases: dict) -> dict:
+    """Open a .lst file as a playlist, Zara-style: the file is the source of
+    truth. Already linked -> reuse that playlist (reloading its items from
+    the file if something else, e.g. Zara, edited it since our last save).
+    New -> create a playlist named after the file and link it."""
+    norm = os.path.abspath(path)
+    if os.path.splitext(norm)[1].lower() != ".lst":
+        raise ValueError("not a .lst file")
+    if not os.path.isfile(norm):
+        raise ValueError("file not found: " + norm)
+    row = conn.execute(
+        "SELECT id, updated_at FROM playlists "
+        "WHERE source_path = ? COLLATE NOCASE", (norm,)).fetchone()
+    if row is not None:
+        pid = row["id"]
+        try:
+            mtime = os.path.getmtime(norm)
+        except OSError:
+            mtime = 0.0
+        # our own save lands within ~1s of updated_at; anything clearly newer
+        # means an outside edit -> the file wins, reload from it
+        if mtime > (row["updated_at"] or 0) + 5:
+            with open(norm, "rb") as f:
+                entries = apply_aliases(parse_lst(f.read()), aliases)
+            with conn:
+                conn.execute("DELETE FROM playlist_items "
+                             "WHERE playlist_id = ?", (pid,))
+            add_items_bulk(conn, pid, entries)
+            log.info("playlist %d reloaded from externally edited %s",
+                     pid, norm)
+        return {"id": pid, "created": False}
+    with open(norm, "rb") as f:
+        entries = apply_aliases(parse_lst(f.read()), aliases)
+    base = os.path.splitext(os.path.basename(norm))[0].strip() or "Playlist"
+    name = base
+    for i in range(2, 100):  # same name opened from another folder
+        try:
+            pid = create_playlist(conn, name)
+            break
+        except sqlite3.IntegrityError:
+            name = f"{base} ({i})"
+    else:
+        raise ValueError("could not find a free playlist name")
+    with conn:
+        conn.execute("UPDATE playlists SET source_path = ? WHERE id = ?",
+                     (norm, pid))
+    if entries:
+        add_items_bulk(conn, pid, entries)
+    return {"id": pid, "created": True}
 
 
 def sync_all_lst(conn: sqlite3.Connection, lst_dir: str) -> int:
@@ -390,6 +470,10 @@ class OrderIn(BaseModel):
     item_ids: list[int]
 
 
+class OpenIn(BaseModel):
+    path: str
+
+
 def register(app: FastAPI) -> None:
     get_conn = app.state.get_conn
     api_user = app.state.api_user
@@ -401,14 +485,24 @@ def register(app: FastAPI) -> None:
             raise HTTPException(404, "playlist not found")
         return row
 
+    def _lst_dir(conn) -> str:
+        """The playlists folder: where NEW playlists are saved as .lst.
+        The operator-set folder wins; the fallback (<data>/playlists) exists
+        so a playlist is ALWAYS a real file, even before any setup."""
+        d = coredb.get_setting(conn, LST_DIR_KEY) or ""
+        if d and os.path.isdir(d):
+            return d
+        d = os.path.join(app.state.cfg["data_dir"], "playlists")
+        os.makedirs(d, exist_ok=True)
+        return d
+
     def _sync(conn, pid, old_name=None):
-        """Mirror a playlist to its .lst after a change. Best-effort — a mirror
-        failure must never fail the edit the operator just made."""
+        """Save a playlist to its .lst file after a change. Best-effort — a
+        save failure must never fail the edit the operator just made."""
         try:
-            write_lst(conn, coredb.get_setting(conn, LST_DIR_KEY) or "", pid,
-                      old_name)
-        except Exception:  # noqa: BLE001 — mirroring is never critical
-            log.exception("playlist .lst mirror failed (pid %s)", pid)
+            write_lst(conn, _lst_dir(conn), pid, old_name)
+        except Exception:  # noqa: BLE001 — saving the file is never critical
+            log.exception("playlist .lst save failed (pid %s)", pid)
 
     @app.get("/api/playlists")
     def api_list(conn=Depends(get_conn), _=Depends(api_user)):
@@ -427,19 +521,27 @@ def register(app: FastAPI) -> None:
         _sync(conn, pid)
         return {"id": pid, "name": name}
 
+    @app.post("/api/playlists/open", status_code=200)
+    def api_open(body: OpenIn, conn=Depends(get_conn), _=Depends(api_user)):
+        """Open a .lst file as a playlist (creating/linking as needed) —
+        the file-explorer 'Open a playlist' flow."""
+        try:
+            return open_lst(conn, body.path,
+                            app.state.cfg.get("path_aliases") or {})
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+        except OSError as exc:
+            raise HTTPException(400, f"cannot read that file: {exc}")
+
     @app.post("/api/playlists/import_lst", status_code=201)
     def api_import_lst(file: UploadFile, name: str = Form(...),
                        conn=Depends(get_conn), _=Depends(api_user)):
-        """Import a ZaraRadio .lst playlist as a new playlist."""
-        entries = parse_lst(file.file.read())
+        """Upload a .lst from the operator's own computer (the file-explorer
+        Open flow covers files the SERVER can see; this covers the rest)."""
+        entries = apply_aliases(parse_lst(file.file.read()),
+                                app.state.cfg.get("path_aliases") or {})
         if not entries:
             raise HTTPException(400, "no playable tracks found in that file")
-        aliases = app.state.cfg.get("path_aliases") or {}
-        for e in entries:
-            for prefix, repl in aliases.items():
-                if e["path"].lower().startswith(prefix.lower()):
-                    e["path"] = repl + e["path"][len(prefix):]
-                    break
         try:
             pid = create_playlist(conn, name.strip() or "Imported playlist")
         except sqlite3.IntegrityError:
@@ -478,9 +580,18 @@ def register(app: FastAPI) -> None:
 
     @app.delete("/api/playlists/{pid}")
     def api_delete(pid: int, conn=Depends(get_conn), _=Depends(api_user)):
-        name = _playlist_or_404(conn, pid)["name"]
+        row = _playlist_or_404(conn, pid)
         delete_playlist(conn, pid)
-        remove_lst(coredb.get_setting(conn, LST_DIR_KEY) or "", name)
+        # Zara-style: deleting the playlist deletes its .lst file
+        src = row["source_path"] if "source_path" in row.keys() else None
+        if src:
+            try:
+                os.remove(src)
+            except OSError:
+                pass
+        else:
+            remove_lst(coredb.get_setting(conn, LST_DIR_KEY) or "",
+                       row["name"])
         return {"ok": True}
 
     @app.post("/api/playlists/{pid}/items", status_code=201)
@@ -536,7 +647,9 @@ def register(app: FastAPI) -> None:
     @app.get("/api/playlists/lst_dir")
     def api_lst_dir_get(conn=Depends(get_conn), _=Depends(api_user)):
         path = coredb.get_setting(conn, LST_DIR_KEY) or ""
-        return {"path": path, "exists": bool(path) and os.path.isdir(path)}
+        return {"path": path, "exists": bool(path) and os.path.isdir(path),
+                # where new playlists actually land / where Open starts
+                "effective": _lst_dir(conn)}
 
     @app.post("/api/playlists/lst_dir")
     def api_lst_dir_set(body: PlaylistIn, conn=Depends(get_conn),
