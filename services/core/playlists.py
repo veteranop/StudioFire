@@ -550,6 +550,16 @@ def register(app: FastAPI) -> None:
         _sync(conn, pid)
         return {"id": pid, "name": name.strip(), "imported": n}
 
+    # NOTE: fixed paths must be declared BEFORE /{pid} — FastAPI matches in
+    # declaration order, so /api/playlists/lst_dir after /{pid} would try to
+    # parse "lst_dir" as a playlist id (422).
+    @app.get("/api/playlists/lst_dir")
+    def api_lst_dir_get(conn=Depends(get_conn), _=Depends(api_user)):
+        path = coredb.get_setting(conn, LST_DIR_KEY) or ""
+        return {"path": path, "exists": bool(path) and os.path.isdir(path),
+                # where new playlists actually land / where Open starts
+                "effective": _lst_dir(conn)}
+
     @app.get("/api/playlists/{pid}")
     def api_get(pid: int, conn=Depends(get_conn), _=Depends(api_user)):
         row = _playlist_or_404(conn, pid)
@@ -643,13 +653,6 @@ def register(app: FastAPI) -> None:
         result = relink_broken(conn, _music_root(), pid)
         _sync(conn, pid)
         return result
-
-    @app.get("/api/playlists/lst_dir")
-    def api_lst_dir_get(conn=Depends(get_conn), _=Depends(api_user)):
-        path = coredb.get_setting(conn, LST_DIR_KEY) or ""
-        return {"path": path, "exists": bool(path) and os.path.isdir(path),
-                # where new playlists actually land / where Open starts
-                "effective": _lst_dir(conn)}
 
     @app.post("/api/playlists/lst_dir")
     def api_lst_dir_set(body: PlaylistIn, conn=Depends(get_conn),
