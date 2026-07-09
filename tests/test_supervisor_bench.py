@@ -192,6 +192,25 @@ def main():
     finally:
         sup3.stop()
 
+    # ---- 7b. empty emergency folder + cached music -> precache is the filler
+    td3b = tempfile.mkdtemp(prefix="sf-bench3b-")
+    emdir3b = os.path.join(td3b, "emergency-empty")
+    os.makedirs(emdir3b)
+    pcdir3b = os.path.join(td3b, "precache")
+    os.makedirs(pcdir3b)
+    make_wav(os.path.join(pcdir3b, "cached-song.wav"), seconds=1.5, freq=660)
+    cfg3b = build_config(td3b, emdir3b)
+    cfg3b["pipe_name"] += "-t3b"
+    cfg3b["precache_dir"] = pcdir3b
+    sup3b = EngineSupervisor(cfg3b)
+    sup3b.start()
+    try:
+        check("precache music as filler on empty emergency folder", wait_for(
+            lambda: (sup3b.status()["now_playing"] or "")
+            .endswith("cached-song.wav"), 10, "precache filler"))
+    finally:
+        sup3b.stop()
+
     # ---- 8. operator force-emergency (big red button)
     td4 = tempfile.mkdtemp(prefix="sf-bench4-")
     emdir4 = os.path.join(td4, "emergency")

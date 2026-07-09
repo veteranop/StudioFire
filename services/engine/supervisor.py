@@ -11,8 +11,12 @@ Threading model (keeps §10.2's single-writer guarantee):
 - mpv I/O thread (inside MpvClient) posts mpv events as actions.
 
 Failover chain (single rule, §10.1): any condition where the next track
-cannot start -> emergency folder loop -> baked-in last-resort source.
+cannot start -> emergency folder loop -> cached music (precache dir,
+scanned fresh — its contents churn) -> baked-in last-resort source.
 Exit emergency as soon as a playable queue item exists again.
+
+The emergency folder is optional: stations that ship no filler assets get
+real rotation music from the precache as their emergency audio instead.
 
 The baked-in tier defaults to an ffmpeg-generated tone (av://lavfi) so it
 exists even if every file on disk is gone; a real station-ID file can be
@@ -35,6 +39,8 @@ from .queue_store import QueueStore, QueueState, apply_mutation
 log = logging.getLogger("engine.supervisor")
 
 BAKED_IN_DEFAULT = "av://lavfi:sine=frequency=600:sample_rate=48000"
+AUDIO_EXTS = {".mp3", ".wav", ".flac", ".m4a", ".aac", ".ogg", ".opus",
+              ".wma", ".aiff", ".aif"}
 STALL_TICKS = 2          # position frozen for N watchdog ticks -> restart mpv
 RESTART_BACKOFF = 1.0    # seconds between consecutive mpv restarts
 MAX_QUEUE_HISTORY = 20   # played entries kept in the runtime queue (journal is
@@ -76,6 +82,7 @@ class EngineSupervisor:
         self._pipe_name = c.get("pipe_name", "studiofire-engine")
         self._audio_device = c.get("audio_device") or None
         self._emergency_dir = c["emergency_dir"]
+        self._precache_dir = c.get("precache_dir") or ""
         self._baked_in = c.get("baked_in_asset") or BAKED_IN_DEFAULT
         self._extra_mpv_args = list(c.get("extra_mpv_args", []))
         self._watchdog_interval = float(c.get("watchdog_interval", 1.0))
@@ -363,6 +370,8 @@ class EngineSupervisor:
             p = os.path.join(self._emergency_dir, n)
             if not os.path.isfile(p):
                 continue
+            if os.path.splitext(n)[1].lower() not in AUDIO_EXTS:
+                continue  # .gitkeep and friends are not bad assets
             if probe_decodable(self._mpv_path, p):
                 files.append(p)
             else:
@@ -372,9 +381,31 @@ class EngineSupervisor:
         if not files:
             self._journal.append("emergency_folder_empty",
                                  dir=self._emergency_dir)
-            log.critical("EMERGENCY FOLDER EMPTY/INVALID (%s) — only the "
-                         "baked-in source stands between us and dead air",
-                         self._emergency_dir)
+            log.warning("emergency folder empty/invalid (%s) — cached music "
+                        "(%s) is the filler tier; baked-in source is the "
+                        "last resort", self._emergency_dir,
+                        self._precache_dir or "no precache dir configured")
+
+    def _emergency_candidates(self) -> list[str]:
+        """Playable filler, best tier first: curated emergency-folder assets,
+        else real music from the precache dir (scanned fresh each time — the
+        feeder adds/evicts files constantly, so the startup snapshot model
+        used for the emergency folder doesn't apply)."""
+        files = [p for p in self._emergency_files if playable(p)]
+        if files:
+            return files
+        if self._precache_dir:
+            try:
+                names = sorted(os.listdir(self._precache_dir))
+            except OSError:
+                names = []
+            for n in names:
+                if os.path.splitext(n)[1].lower() not in AUDIO_EXTS:
+                    continue
+                p = os.path.join(self._precache_dir, n)
+                if playable(p):
+                    files.append(p)
+        return files
 
     def _enter_emergency(self, why: str) -> None:
         if not self._state.emergency_mode:
@@ -395,7 +426,7 @@ class EngineSupervisor:
             if nxt is not None and playable(nxt["path"]):
                 self._client.command("loadfile", nxt["path"], "replace")
                 return  # start-file handler will exit emergency mode
-        candidates = [p for p in self._emergency_files if playable(p)]
+        candidates = self._emergency_candidates()
         if candidates:
             p = candidates[self._emergency_idx % len(candidates)]
             self._emergency_idx += 1

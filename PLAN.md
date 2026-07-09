@@ -1,3 +1,5 @@
+[[01-Active-Revenue]]
+
 # StudioFire — Project Plan v0.3
 **Author:** Veteranop, LLC | **Date:** 2026-07-03 | **Status:** Planning complete — ready to scaffold
 **v0.2:** Revised after external technical review. Phases restructured engine-first; fallback/failover moved to Phase 0; poller split into its own service; missing radio-staple features added to roadmap.
@@ -185,11 +187,14 @@ Rules below are requirements, not suggestions. They exist because each one close
 silence/race hole identified in adversarial review.
 
 ### 10.1 P1 failover — closing the silence gaps
-- **Guaranteed-good last resort:** ship a known-good filler asset (short station ID / tone bed)
-  inside the app install dir, separate from the user-managed emergency folder. Failover chain:
-  next cached track → emergency folder → baked-in asset. Silence requires THREE failures.
-- **Emergency folder validated at P1 startup** (probe-decode each file; quarantine failures,
-  alert). An empty/corrupt emergency folder is an alarm, not a discovery at 3 AM.
+- **Guaranteed-good last resort:** a baked-in source (ffmpeg-generated tone, or a configured
+  station-ID file) that exists even if every file on disk is gone. Failover chain:
+  next cached track → emergency folder → **cached music (precache dir, scanned fresh)** →
+  baked-in asset. Silence requires FOUR failures.
+- **Emergency folder validated at P1 startup** (probe-decode each audio file; quarantine
+  failures, alert). The folder is OPTIONAL: when it's empty (the default install), real
+  rotation music from the local precache is the filler tier — listeners hear music, not a
+  loop. Curated filler (IDs/sweepers) still takes priority if a station adds some.
 - **Pre-prime next track:** next queue item is loaded/primed in mpv (playlist preload) before
   the current track ends — a decode failure surfaces while audio is still playing, not after.
 - **Watchdog at 1s cadence, two checks:** (a) IPC responsive, (b) position advancing when state

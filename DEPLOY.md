@@ -1,3 +1,5 @@
+[[01-Active-Revenue]]
+
 # StudioFire — Deploy & Dry-Run Guide
 
 StudioFire is a **web app**. Only the machine that *runs* it needs Python; DJs
@@ -37,7 +39,9 @@ local disk.
 6. **Config:** `copy config\config.example.json config\config.json` and edit —
    `station_name`, `paths.nas_music_root` (`Z:/G`), `paths.path_aliases`
    (`{"\\\\KDPI-Media\\music": "Z:"}`), ports.
-7. **(Optional)** drop a couple of `.mp3` filler files in `assets\emergency\`.
+7. **(Optional)** drop a couple of `.mp3` filler files (station IDs / sweepers)
+   in `assets\emergency\`. If you skip this, the engine uses cached rotation
+   music from `precache\` as its emergency audio — listeners hear real songs.
 8. **Run:** `start-all.bat` (three console windows open). Stop with
    `stop-all.bat`.
 9. **Open** `http://<this-box>:8080` — first visit creates the admin account.
@@ -60,7 +64,7 @@ runnable* copy — code **plus** the gitignored runtime bits (`bin\mpv.exe`,
 `config` template, `assets\emergency`), but **not** `data\ precache\ logs\`.
 Use robocopy (adjust the source path):
 ```
-robocopy "C:\Users\<you>\Desktop\StudioFire" "\\KDPI-Media\music\StudioFire" /MIR /XD .git data precache logs .playwright-mcp __pycache__ /XF *.db *.db-wal *.db-shm queue_state.json heartbeat.txt
+robocopy "C:\Users\<you>\Desktop\Projects\StudioFire" "\\KDPI-Media\music\StudioFire" /MIR /XD .git data precache logs installer .playwright-mcp __pycache__ /XF *.db *.db-wal *.db-shm queue_state.json heartbeat.txt
 ```
 
 **On the dry-run / on-air box, to update:**
@@ -73,13 +77,16 @@ robocopy "C:\Users\<you>\Desktop\StudioFire" "\\KDPI-Media\music\StudioFire" /MI
 ## Production (on-air PC) — later
 
 Same layout, but run each service as an **auto-restarting Windows service via
-NSSM** (so a crash or reboot self-heals; P1 must always come back):
+NSSM** (so a crash or reboot self-heals; P1 must always come back). With
+`bin\nssm.exe` in place, run as Administrator:
 ```
-nssm install StudioFireEngine  "C:\...\python.exe" "-m services.engine.main C:\StudioFire\config\config.json"
-nssm install StudioFireWeb     "C:\...\python.exe" "-m services.core.main   C:\StudioFire\config\config.json"
-nssm install StudioFireWorker  "C:\...\python.exe" "-m services.worker.main C:\StudioFire\config\config.json"
+scripts\install-services.bat
 ```
-Set each to auto-start and set the working directory to the StudioFire folder.
+It registers all three (auto-start, restart-on-crash, rotated service logs)
+with the working directory set correctly. `scripts\remove-services.bat` undoes
+it. **Easier still:** build the customer installer — see
+[[StudioFire/installer/README|installer/README]] — which bundles Python, mpv,
+NSSM, and a station-setup wizard into one setup.exe.
 
 ---
 

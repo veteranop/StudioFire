@@ -55,6 +55,10 @@ def load_config(path: str | None) -> dict:
         "ipc_port": int(engine.get("ipc_port", 7701)),
         "emergency_dir": paths.get("emergency_dir",
                                    os.path.join(ROOT, "assets", "emergency")),
+        # filler fallback when the emergency folder is empty: real music
+        # from the local precache (must match P2's precache_dir)
+        "precache_dir": paths.get("precache_dir",
+                                  os.path.join(ROOT, "precache")),
         "baked_in_asset": engine.get("baked_in_asset"),
         "state_path": os.path.join(data_dir, "queue_state.json"),
         "journal_path": os.path.join(logs_dir, "play_journal.jsonl"),

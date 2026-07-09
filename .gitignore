@@ -30,6 +30,10 @@ desktop.ini
 # demo/test emergency content stays local
 assets/emergency/*.mp3
 
+# Installer build outputs (build_payload.py + ISCC downloads/produces these)
+installer/payload/
+installer/Output/
+
 # Local artifacts
 .playwright-mcp/
 *.lst
@@ -40,3 +44,6 @@ assets/emergency/*.mp3
 
 # Obsidian vault config (per-user; not part of the project)
 .obsidian/
+
+# Claude Code per-user settings
+.claude/settings.local.json

@@ -1,3 +1,5 @@
+[[01-Active-Revenue]]
+
 # Changelog
 
 All notable changes to StudioFire are documented here.
@@ -8,6 +10,16 @@ plain English a non-technical operator can understand.
 ## [Unreleased]
 
 ### Added
+- A Windows installer (installer\StudioFire.iss + build_payload.py): one
+  setup.exe that bundles Python, mpv, and NSSM — nothing to pre-install on a
+  customer PC. The wizard asks for the station name and music folder, can
+  register the auto-restarting Windows services, and opens the firewall for
+  the web GUI. Upgrades keep the existing config and data.
+- Emergency audio no longer needs hand-picked filler files. If the emergency
+  folder is empty, the engine plays real music from its local song cache
+  instead — listeners hear normal songs, not a repeating clip. (Adding files
+  to `assets\emergency\` still works and takes priority — useful for station
+  IDs or "technical difficulties" messages.)
 - A ⟳ "restart everything" button next to the ON AIR light (and restart-all.bat)
   to manually cycle all services during testing. Guarded by a config flag
   (allow_gui_restart) so it can be turned off on the on-air PC.

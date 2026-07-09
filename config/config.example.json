@@ -3,10 +3,7 @@
   "station_name": "STATION NAME",
   "paths": {
     "nas_music_root": "//SYNOLOGY/music",
-    "precache_dir": "C:/StudioFire/precache",
-    "emergency_dir": "C:/StudioFire/emergency",
-    "data_dir": "C:/StudioFire/data",
-    "logs_dir": "C:/StudioFire/logs"
+    "path_aliases": {}
   },
   "engine": {
     "audio_device_guid": "",
