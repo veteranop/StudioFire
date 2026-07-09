@@ -42,6 +42,11 @@ plain English a non-technical operator can understand.
   feed cycle now and then) is gone.
 
 ### Changed
+- The Playlists page is now just three simple actions: start a new playlist,
+  open one you have, or import a ZaraRadio .lst — no more busy table of
+  buttons. Duplicate, Delete, and PUT ON AIR live inside the playlist editor,
+  where you can see exactly what you're acting on. The full playlist
+  export/restore moved to Settings (admins only).
 - On Air controls are simpler and clearer. The 🚨 EMERGENCY button is gone;
   the three buttons are now GO / STOP — On Air (one master switch: STOP takes
   you off air immediately, GO puts you back), Skip Song, and Stop after

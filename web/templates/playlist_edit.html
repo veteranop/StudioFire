@@ -42,6 +42,8 @@
     <div class="row">
       <button class="btn btn-green btn-big" onclick="activateThis()">
         ▶ PUT ON AIR</button>
+      <button class="btn" onclick="duplicateThis()">Duplicate</button>
+      <button class="btn btn-red" onclick="deleteThis()">Delete playlist</button>
     </div>
     <details class="advanced">
       <summary>Advanced: add a folder item</summary>
@@ -70,6 +72,7 @@
 
 <script>
 const PID = {{ playlist.id }};
+const PNAME = {{ playlist.name|tojson }};
 
 function ids() {
   return [...document.querySelectorAll("#items li[data-id]")]
@@ -114,6 +117,21 @@ async function activateThis() {
   const r = await fetch(`/api/playlists/${PID}/activate`, {method: "POST"});
   if (r.ok) location = "/";
   else alert((await r.json()).detail || "Engine did not accept the playlist");
+}
+async function duplicateThis() {
+  const copy = prompt("Name for the copy:", PNAME + " (copy)");
+  if (!copy) return;
+  const r = await fetch(`/api/playlists/${PID}/duplicate`, {method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({name: copy})});
+  if (r.status === 201) location = "/playlists/" + (await r.json()).id;
+  else alert((await r.json()).detail || "Could not duplicate");
+}
+async function deleteThis() {
+  if (!confirm('Delete playlist "' + PNAME + '"? This cannot be undone.'))
+    return;
+  await fetch(`/api/playlists/${PID}`, {method: "DELETE"});
+  location = "/playlists";
 }
 
 let searchTimer = null;

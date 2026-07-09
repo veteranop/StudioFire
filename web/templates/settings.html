@@ -81,6 +81,18 @@
     <div id="user-msg" class="muted" style="margin-top:.4rem"></div>
   </details>
 </div>
+
+<div class="card">
+  <h1>Full playlist export &amp; restore</h1>
+  <p class="muted">One file containing every playlist — download it now and
+    then, keep it somewhere safe (USB stick, email it to yourself), and
+    restore from it if anything ever goes wrong.</p>
+  <div class="row">
+    <a class="btn" href="/api/backup">⬇ Download backup</a>
+    <input type="file" id="restore-file" accept=".json,application/json">
+    <button class="btn" onclick="restoreBackup()">⬆ Restore from backup</button>
+  </div>
+</div>
 {% endif %}
 
 <div class="card" style="background: #fff5f5; border-color: #ffcccc;">
@@ -354,6 +366,21 @@ async function delDevice(id, name) {
   if (!confirm("Remove " + name + "?")) return;
   await fetch("/api/devices/" + id, {method: "DELETE"});
   loadDevices();
+}
+
+// ---- playlist backup & restore (admin)
+async function restoreBackup() {
+  const inp = document.getElementById("restore-file");
+  if (!inp.files.length) { alert("Choose a backup file first."); return; }
+  if (!confirm("Restore playlists from this backup?\n\nExisting playlists " +
+               "are kept; restored ones with the same name get a " +
+               "'(restored)' suffix.")) return;
+  const fd = new FormData();
+  fd.append("file", inp.files[0]);
+  const r = await fetch("/api/restore", {method: "POST", body: fd});
+  const body = await r.json();
+  if (r.ok) alert("Restored " + body.imported + " playlist(s).");
+  else alert(body.detail || "Restore failed");
 }
 
 // ---- system: quit all services

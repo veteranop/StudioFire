@@ -15,39 +15,34 @@
 {% block content %}
 <div class="card">
   <h1>Playlists</h1>
+  <p class="muted">Build the lists of songs your station plays. Start a new
+    one or open one you already have — you'll add, remove, and reorder songs
+    on the next screen, and every change saves itself.</p>
+
+  <h2>➕ Start a new playlist</h2>
   <div class="row">
-    <input id="new-name" placeholder="New playlist name…"
+    <input id="new-name" placeholder="Name it… e.g. Saturday Night Mix"
            onkeydown="if (event.key === 'Enter') createPl()">
-    <button class="btn btn-green" onclick="createPl()">+ Create</button>
+    <button class="btn btn-green" onclick="createPl()">Create</button>
+  </div>
+
+  <h2>📂 Open a playlist</h2>
+  <div class="row">
+    <select id="open-pl" style="flex:1" {% if not playlists %}disabled{% endif %}>
+    {% for p in playlists %}
+      <option value="{{ p.id }}">{{ p.name }} — {{ p.item_count }} song{{ '' if p.item_count == 1 else 's' }}</option>
+    {% else %}
+      <option value="">No playlists yet — create one above</option>
+    {% endfor %}
+    </select>
+    <button class="btn btn-green" onclick="openPl()"
+            {% if not playlists %}disabled{% endif %}>Open</button>
   </div>
   <div class="row">
+    <span class="muted">…or open one from ZaraRadio:</span>
     <input type="file" id="lst-file" accept=".lst">
-    <button class="btn" onclick="importLst()">⬆ Import ZaraRadio playlist
-      (.lst)</button>
+    <button class="btn" onclick="importLst()">Import .lst</button>
   </div>
-  <table class="table">
-    <thead><tr><th>Name</th><th>Items</th><th></th></tr></thead>
-    <tbody>
-    {% for p in playlists %}
-      <tr>
-        <td><a class="biglink" href="/playlists/{{ p.id }}">{{ p.name }}</a></td>
-        <td>{{ p.item_count }}</td>
-        <td class="right">
-          <button class="btn btn-green"
-                  onclick="activatePl({{ p.id }}, '{{ p.name }}')">
-            ▶ PUT ON AIR</button>
-          <button class="btn" onclick="duplicatePl({{ p.id }}, '{{ p.name }}')">
-            Duplicate</button>
-          <button class="btn btn-red"
-                  onclick="deletePl({{ p.id }}, '{{ p.name }}')">Delete</button>
-        </td>
-      </tr>
-    {% else %}
-      <tr><td colspan="3" class="muted">No playlists yet — create one
-        above.</td></tr>
-    {% endfor %}
-    </tbody>
-  </table>
 </div>
 <div class="card">
   <h2>Fix broken file paths</h2>
@@ -59,19 +54,11 @@
     all playlists</button>
   <div id="relink-result" style="margin-top:.7rem"></div>
 </div>
-{% if role == "admin" %}
-<div class="card">
-  <h2>Backup &amp; restore</h2>
-  <p class="muted">The backup file contains every playlist. Keep a copy
-    somewhere safe (USB stick, email it to yourself).</p>
-  <div class="row">
-    <a class="btn" href="/api/backup">⬇ Download backup</a>
-    <input type="file" id="restore-file" accept=".json,application/json">
-    <button class="btn" onclick="restoreBackup()">⬆ Restore from backup</button>
-  </div>
-</div>
-{% endif %}
 <script>
+function openPl() {
+  const id = document.getElementById("open-pl").value;
+  if (id) location = "/playlists/" + id;
+}
 async function createPl() {
   const inp = document.getElementById("new-name");
   const name = inp.value.trim();
@@ -100,35 +87,6 @@ async function importLst() {
     location = "/playlists/" + body.id;
   } else alert(body.detail || "Import failed");
 }
-async function activatePl(id, name) {
-  if (!confirm('Put "' + name + '" on air now? This replaces the current queue.'))
-    return;
-  const r = await fetch("/api/playlists/" + id + "/activate", {method: "POST"});
-  if (r.ok) location = "/";
-  else alert((await r.json()).detail || "Engine did not accept the playlist");
-}
-async function duplicatePl(id, name) {
-  const copy = prompt("Name for the copy:", name + " (copy)");
-  if (!copy) return;
-  const r = await fetch("/api/playlists/" + id + "/duplicate", {method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({name: copy})});
-  if (r.status === 201) location.reload();
-  else alert((await r.json()).detail || "Could not duplicate");
-}
-async function restoreBackup() {
-  const inp = document.getElementById("restore-file");
-  if (!inp.files.length) { alert("Choose a backup file first."); return; }
-  if (!confirm("Restore playlists from this backup?\n\nExisting playlists " +
-               "are kept; restored ones with the same name get a " +
-               "'(restored)' suffix.")) return;
-  const fd = new FormData();
-  fd.append("file", inp.files[0]);
-  const r = await fetch("/api/restore", {method: "POST", body: fd});
-  const body = await r.json();
-  if (r.ok) { alert("Restored " + body.imported + " playlist(s)."); location.reload(); }
-  else alert(body.detail || "Restore failed");
-}
 function esc(s) {
   return (s || "").replace(/[&<>]/g,
     c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;"}[c]));
@@ -148,12 +106,6 @@ async function relinkAll() {
     (b.unmatched_examples && b.unmatched_examples.length
       ? "<br><small class='muted'>Not found (examples): " +
         b.unmatched_examples.slice(0, 10).map(esc).join(", ") + "</small>" : "");
-}
-async function deletePl(id, name) {
-  if (!confirm('Delete playlist "' + name + '"? This cannot be undone.'))
-    return;
-  await fetch("/api/playlists/" + id, {method: "DELETE"});
-  location.reload();
 }
 </script>
 {% endblock %}
