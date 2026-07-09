@@ -47,3 +47,6 @@ installer/Output/
 
 # Claude Code per-user settings
 .claude/settings.local.json
+
+# per-station service drive mapping (copy from drive-map.example.bat)
+config/drive-map.bat

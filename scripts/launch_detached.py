@@ -23,7 +23,12 @@ for mod, delay in [("services.engine.main", 2.0),
     name = mod.split(".")[1]
     if want and name not in want:
         continue
-    logf = open(os.path.join("logs", name + "_console.log"), "ab")
+    try:
+        logf = open(os.path.join("logs", name + "_console.log"), "ab")
+    except OSError as exc:  # a stale console window may hold the log open —
+        print(f"[!] {name}_console.log locked ({exc}); output discarded")
+        logf = subprocess.DEVNULL  # launching beats logging
+
     p = subprocess.Popen([PY, "-m", mod, CFG], stdout=logf, stderr=logf,
                          stdin=subprocess.DEVNULL, creationflags=FLAGS,
                          close_fds=True)

@@ -33,12 +33,18 @@ call :one StudioFireWorker services.worker.main
 echo.
 echo Services installed and started. Manage with:  services.msc
 echo   or:  bin\nssm.exe status StudioFireEngine
+echo.
+echo [!] If your music lives on a mapped drive (Z:), do BOTH of these:
+echo     1. copy config\drive-map.example.bat config\drive-map.bat  (edit UNC)
+echo     2. services.msc: set each StudioFire* service Log On to YOUR account
+echo        (services get their own session - no drive letters, no NAS creds)
 exit /b 0
 
 :one
 "%NSSM%" stop   %1 >nul 2>&1
 "%NSSM%" remove %1 confirm >nul 2>&1
-"%NSSM%" install %1 "%PYTHON%" -u -m %2 "%APP%\config\config.json"
+REM run through the wrapper so config\drive-map.bat can map the NAS first
+"%NSSM%" install %1 "%APP%\scripts\svc-run.bat" %2
 "%NSSM%" set %1 AppDirectory "%APP%"
 "%NSSM%" set %1 DisplayName "%1"
 "%NSSM%" set %1 Description "StudioFire radio automation (%2)"
