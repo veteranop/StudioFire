@@ -1,3 +1,5 @@
+[[01-Active-Revenue]]
+
 # Gotchas
 
 Hard-won lessons. Read before touching the audio path or the indexer.

@@ -83,6 +83,13 @@
 </div>
 {% endif %}
 
+<div class="card" style="background: #fff5f5; border-color: #ffcccc;">
+  <h1>System</h1>
+  <p class="muted">Stop all services and exit.</p>
+  <button class="btn btn-red" onclick="quitStudioFire()">Quit StudioFire</button>
+  <div id="quit-msg" class="muted" style="margin-top:.5rem"></div>
+</div>
+
 <div class="card" id="picker-card" hidden>
   <h2 id="picker-title">Choose a folder</h2>
   <div class="row">
@@ -347,6 +354,20 @@ async function delDevice(id, name) {
   if (!confirm("Remove " + name + "?")) return;
   await fetch("/api/devices/" + id, {method: "DELETE"});
   loadDevices();
+}
+
+// ---- system: quit all services
+async function quitStudioFire() {
+  if (!confirm("Stop all StudioFire services and quit?\nThe system will go silent.")) return;
+  const msg = document.getElementById("quit-msg");
+  msg.textContent = "Stopping…";
+  const r = await fetch("/api/system/quit", {method: "POST"});
+  if (r.ok) {
+    msg.textContent = "Services stopped. You may close this window.";
+  } else {
+    const j = await r.json().catch(() => ({}));
+    msg.textContent = "Error: " + (j.detail || "Could not quit");
+  }
 }
 
 loadDirs();

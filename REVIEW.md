@@ -1,3 +1,5 @@
+[[01-Active-Revenue]]
+
 # StudioFire — Architecture & Status Review (for external review)
 
 *Snapshot for a second-opinion review. Self-contained: you don't have the code.

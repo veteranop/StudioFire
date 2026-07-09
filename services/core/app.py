@@ -197,6 +197,21 @@ def create_app(cfg: dict) -> FastAPI:
         log.warning("GUI-triggered full restart via %s", helper)
         return {"ok": True}
 
+    @app.post("/api/system/quit")
+    def api_system_quit(_=Depends(api_user)):
+        """Quit all StudioFire services (stop without restarting) via a
+        console-independent Python helper launched detached. Requires user login."""
+        import subprocess
+        helper = os.path.join(ROOT, "scripts", "quit_all.py")
+        if not os.path.exists(helper):
+            raise HTTPException(400, "scripts/quit_all.py not found")
+        flags = (getattr(subprocess, "DETACHED_PROCESS", 0)
+                 | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
+        subprocess.Popen([sys.executable, helper], cwd=ROOT, close_fds=True,
+                         stdin=subprocess.DEVNULL, creationflags=flags)
+        log.warning("GUI-triggered quit via %s", helper)
+        return {"ok": True}
+
     @app.get("/playlists", response_class=HTMLResponse)
     def playlists_page(request: Request, sess: dict = Depends(page_user),
                        conn=Depends(get_conn)):

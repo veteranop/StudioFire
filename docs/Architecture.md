@@ -1,3 +1,5 @@
+[[01-Active-Revenue]]
+
 # Architecture
 
 Mandate: **segmented — "audio on is everything."** Four isolated Windows
