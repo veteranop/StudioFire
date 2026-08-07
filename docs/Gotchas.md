@@ -1,3 +1,11 @@
+---
+tags: [reference, studiofire]
+status: active
+created: 2026-07-15
+up: "[[PROJECTS-INDEX]]"
+---
+
+
 [[01-Active-Revenue]]
 
 # Gotchas
@@ -31,8 +39,9 @@ Hard-won lessons. Read before touching the audio path or the indexer.
 ## Network / paths
 - **VPN latency, not a slow NAS.** ~30 ms/op over OpenVPN made a folder listing
   take ~176 s; on-site LAN it's instant. Don't chase SMB tuning for it.
-- **Store portable paths.** `Z:` is home-only; the on-air PC uses
-  `\\KDPI-Media\music\…`. Don't rewrite playlist paths to `Z:` (relink would).
+- **Store portable paths.** Prefer a UNC root like `//KDPI-Media/music/G` in
+  `paths.nas_music_root`; the on-air PC should not depend on a home-only `Z:`.
+  Don't rewrite playlist paths to `Z:` (relink would).
 - **Bash heredocs mangle backslashes** — write Python to a file, never inline a
   heredoc with Windows paths.
 
@@ -40,3 +49,6 @@ Hard-won lessons. Read before touching the audio path or the indexer.
 - **GUI restart button** uses `scripts/restart_all.py` (detached Python), NOT
   the `.bat` — `start cmd /k` can't spawn windows from P2's no-console process.
   See [[StudioFire/docs/Operations|Operations]].
+
+## Related
+- [[PROJECTS-INDEX]]

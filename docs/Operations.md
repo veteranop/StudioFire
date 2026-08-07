@@ -1,3 +1,11 @@
+---
+tags: [reference, studiofire]
+status: active
+created: 2026-07-15
+up: "[[PROJECTS-INDEX]]"
+---
+
+
 [[01-Active-Revenue]]
 
 # Operations
@@ -40,3 +48,6 @@ Running, restarting, deploying, and soak-testing. Deploy details in [[StudioFire
 `python tests/<name>.py`. Key ones: `test_supervisor_bench` (real mpv, fault
 matrix), `test_engine_bridge` (P1+feeder e2e), `test_gui_smoke`, `test_schedule`,
 `test_spots`, `test_playlists`, `test_queue_store`, `test_indexer`.
+
+## Related
+- [[PROJECTS-INDEX]]

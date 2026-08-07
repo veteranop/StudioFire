@@ -1,3 +1,11 @@
+---
+tags: [moc, studiofire]
+status: active
+created: 2026-07-15
+up: "[[PROJECTS-INDEX]]"
+---
+
+
 [[01-Active-Revenue]]
 
 # StudioFire — Home
@@ -28,3 +36,6 @@ persisted queue, 3-tier failover, never touches the DB), **P2 core/GUI**
 (FastAPI + the feeder that pre-caches NAS files locally), **P3 indexer** (walks
 the NAS into SQLite), **P4 monitor** (not built yet). DJs just browse to P2's
 web GUI. See [[StudioFire/docs/Architecture|Architecture]].
+
+## Related
+- [[PROJECTS-INDEX]]

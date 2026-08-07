@@ -1,3 +1,11 @@
+---
+tags: [reference, studiofire]
+status: active
+created: 2026-07-15
+up: "[[PROJECTS-INDEX]]"
+---
+
+
 [[01-Active-Revenue]]
 
 # StudioFire — Deploy & Dry-Run Guide
@@ -28,17 +36,18 @@ local disk.
 ## First-time setup on a fresh box (dry-run PC)
 
 1. **Anaconda** (Python 3.11+). Same as dev for consistency. Have `python` on PATH.
-2. **Map the NAS** the same way playlists expect it: `Z:` → `\\KDPI-Media\music`
-   (so `Z:\G\...` resolves). If you must use a different letter/UNC, set it in
-   `config.json` instead (see below).
+2. **Use a UNC NAS root if possible:** set `paths.nas_music_root` in
+   `config.json` to `//KDPI-Media/music/G`. Only use a mapped drive like `Z:`
+   if you need compatibility with legacy playlists that still contain
+   `Z:\G\...` paths.
 3. **Get the code** — either:
    - `git clone https://github.com/veteranop/StudioFire` , **or**
    - copy `\\KDPI-Media\music\StudioFire` to a local folder.
 4. **Install deps:** `pip install -r requirements.txt`
 5. **mpv:** copy `bin\mpv.exe` from the deploy kit into `bin\`.
 6. **Config:** `copy config\config.example.json config\config.json` and edit —
-   `station_name`, `paths.nas_music_root` (`Z:/G`), `paths.path_aliases`
-   (`{"\\\\KDPI-Media\\music": "Z:"}`), ports.
+   `station_name`, `paths.nas_music_root` (`//KDPI-Media/music/G`), leave
+   `paths.path_aliases` empty if you are using UNC paths, and set ports.
 7. **(Optional)** drop a couple of `.mp3` filler files (station IDs / sweepers)
    in `assets\emergency\`. If you skip this, the engine uses cached rotation
    music from `precache\` as its emergency audio — listeners hear real songs.
@@ -104,3 +113,6 @@ NSSM, and a station-setup wizard into one setup.exe.
 The pre-Synology playlists point at old paths. Once the library has finished
 indexing (**Studio health → Library index**), go to **Playlists → 🔧 Fix broken
 file paths** to repoint every moved track to its real file in `Z:\G`.
+
+## Related
+- [[PROJECTS-INDEX]]

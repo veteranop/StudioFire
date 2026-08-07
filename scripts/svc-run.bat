@@ -5,7 +5,8 @@ REM    svc-run.bat services.engine.main
 REM  A Windows service session has NO user drive mappings, so if
 REM  config\drive-map.bat exists it runs first to map the NAS
 REM  (e.g.  net use Z: \\KDPI-Media\music /persistent:no ).
-REM  Copy config\drive-map.example.bat and edit. The service must
+REM  Copy config\drive-map.example.bat and edit only for legacy mapped-drive use.
+REM  Prefer UNC paths in config\config.json when possible.
 REM  log on as a real user (services.msc -> Log On) so the NAS
 REM  accepts its credentials.
 REM ============================================================

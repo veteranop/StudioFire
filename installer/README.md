@@ -1,3 +1,11 @@
+---
+tags: [reference, studiofire]
+status: active
+created: 2026-07-15
+up: "[[PROJECTS-INDEX]]"
+---
+
+
 [[01-Active-Revenue]]
 
 # StudioFire — Building the Windows Installer
@@ -12,9 +20,10 @@ embedded Python runtime with all dependencies pre-installed.
   to `config\config.json` (upgrades keep the existing config, no re-ask).
 - Optional task: register the three services with NSSM (auto-start at boot,
   auto-restart on crash) — check it on the production on-air PC. **After
-  installing**, set each service's Log On to a real user account and create
-  `config\drive-map.bat` if the music is on a NAS (service sessions have no
-  drive letters and LocalSystem has no NAS credentials — see DEPLOY.md).
+  installing**, set each service's Log On to a real user account. If the music
+  is on a NAS, use a UNC root in `config\config.json` like
+  `//KDPI-Media/music/G`; only create `config\drive-map.bat` when you must
+  support legacy mapped-drive paths in a service session.
   The bundled `runtime\` means Python itself works under any account.
 - Optional task: open firewall port 8080 for the LAN web GUI.
 - Start-menu entries: Start / Stop / Health check / Web GUI.

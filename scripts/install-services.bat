@@ -37,6 +37,7 @@ echo.
 echo [!] If your music lives on a mapped drive (Z:), do BOTH of these:
 echo     1. copy config\drive-map.example.bat config\drive-map.bat  (edit UNC)
 echo     2. services.msc: set each StudioFire* service Log On to YOUR account
+echo     Prefer using UNC directly in config\config.json instead of drive letters.
 echo        (services get their own session - no drive letters, no NAS creds)
 exit /b 0
 

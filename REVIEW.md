@@ -1,3 +1,11 @@
+---
+tags: [reference, studiofire]
+status: active
+created: 2026-07-15
+up: "[[PROJECTS-INDEX]]"
+---
+
+
 [[01-Active-Revenue]]
 
 # StudioFire — Architecture & Status Review (for external review)
@@ -137,10 +145,11 @@ correctness, not just "not silent."
 3. **Torture gate not re-run** after all the feeder changes. The "zero silence
    over 72 h" bench predates shows/spots/resync/metadata. Highest-priority thing
    to re-validate before go-live?
-4. **Path/index model.** Playlists store `Z:\...` paths; the index walks `Z:/G`;
-   pre-Synology playlists point elsewhere. I side-stepped metadata path-matching
-   by reading tags from cached files, and added relink for playback. Is that the
-   right call, or should paths be normalized/canonicalized in the DB?
+4. **Path/index model.** Playlists should store portable UNC paths like
+   `\\KDPI-Media\music\...` and the index should walk the local NAS root set in
+   `paths.nas_music_root` (`//KDPI-Media/music/G`). Legacy `Z:` playlists are
+   still supported for playback compatibility, but new deployments should avoid
+   mapped-drive paths where possible.
 5. **Legal top-of-hour ID** is currently "a spot rule with a clock trigger,"
    boundary-aware (so it airs a few min *after* :00). Good enough for FCC, or
    does it need a hard guarantee/window?
@@ -169,3 +178,6 @@ correctness, not just "not silent."
 `services.core.main` (P2, GUI on :8080) and `services.worker.main` (P3). Web app
 → DJs browse to `http://<box>:8080`. Full history in `CHANGELOG.md`; binding
 spec in `PLAN.md §10`; deploy steps in `DEPLOY.md`.
+
+## Related
+- [[PROJECTS-INDEX]]

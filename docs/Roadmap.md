@@ -1,3 +1,11 @@
+---
+tags: [reference, studiofire]
+status: active
+created: 2026-07-15
+up: "[[PROJECTS-INDEX]]"
+---
+
+
 [[01-Active-Revenue]]
 
 # Roadmap
@@ -40,3 +48,6 @@ slice of the [[StudioFire/docs/Architecture|P4]] monitor.
   re-scan fills them in).
 - Canonicalize playlist paths to UNC for on-air portability (deliberate,
   backed-up pass — see [[StudioFire/docs/Gotchas|Gotchas]]).
+
+## Related
+- [[PROJECTS-INDEX]]

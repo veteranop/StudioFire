@@ -1,3 +1,11 @@
+---
+tags: [reference, studiofire]
+status: active
+created: 2026-07-15
+up: "[[PROJECTS-INDEX]]"
+---
+
+
 [[01-Active-Revenue]]
 
 # StudioFire — Project Plan v0.3
@@ -246,3 +254,6 @@ with queue mutations during track advance · system clock jump forward/back · u
 audio device mid-play · Windows Update reboot · NSSM rapid-restart loop · NAS offline for
 hours (cache exhaustion → emergency → recovery) · P1 restart while in emergency mode.
 Pass = zero silence >2s across all scenarios over 72h.
+
+## Related
+- [[PROJECTS-INDEX]]

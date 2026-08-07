@@ -2,7 +2,7 @@
   "schema_version": 1,
   "station_name": "STATION NAME",
   "paths": {
-    "nas_music_root": "//SYNOLOGY/music",
+    "nas_music_root": "//KDPI-Media/music/G",
     "path_aliases": {}
   },
   "engine": {

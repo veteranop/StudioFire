@@ -1,3 +1,11 @@
+---
+tags: [reference, studiofire]
+status: active
+created: 2026-07-15
+up: "[[PROJECTS-INDEX]]"
+---
+
+
 [[01-Active-Revenue]]
 
 # Architecture
@@ -29,10 +37,14 @@ services so nothing outside the audio path can ever cause dead air. Full spec in
 - **Show overlay** — a scheduled show interrupts the base rotation, plays once
   through, then hands back (`active_playlist_id`). Items are snapshot into the
   feeder overlay so they're [[StudioFire/docs/Roadmap|editable live]].
-- **Path aliases** — playlists store `\\KDPI-Media\music\…`; each box aliases it
-  to its local mount (`Z:` at home). See [[StudioFire/docs/Gotchas|Gotchas]].
+- **Path aliases** — playlists store `\\KDPI-Media\music\…`; each box should
+  prefer a local UNC root such as `//KDPI-Media/music/G` in `paths.nas_music_root`.
+  Legacy mapped-drive aliases like `Z:` are only for compatibility. See [[StudioFire/docs/Gotchas|Gotchas]].
 
 ## Data
 SQLite schema is versioned ([[StudioFire/docs/Operations|migrations]] run at startup). P1 never
 touches it. The library index (`tracks`), playlists, schedule, spots, devices,
 and settings all live here.
+
+## Related
+- [[PROJECTS-INDEX]]
