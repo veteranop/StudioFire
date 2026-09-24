@@ -115,7 +115,13 @@ def main():
               pc.ensure(os.path.join(nas, "ghost.wav")) is None)
         check("no .part litter", not [n for n in os.listdir(precache_dir)
                                       if n.endswith(".part")])
+        # eviction grace age (feeder hardening §2e): a freshly-cached file
+        # survives an eviction pass for min_age_sec even if not in keep —
+        # closes the window between a feeder snapshot and this call
         pc.evict_except(set())
+        check("fresh cache survives an eviction pass (grace age)",
+              os.path.exists(cached))
+        pc.evict_except(set(), min_age_sec=0)
         check("evict clears file + manifest",
               not os.path.exists(cached)
               and json.load(open(os.path.join(
