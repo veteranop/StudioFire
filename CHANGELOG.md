@@ -7,6 +7,29 @@ plain English a non-technical operator can understand.
 
 ## [Unreleased]
 
+### Fixed
+- Closed a race in the web control room's feeder (P2) where an operator
+  cueing a song ("Play Next"), firing a station ID/ad, or editing the live
+  rotation at the same moment the system was pulling fresh songs from the NAS
+  could silently vanish: the cued item would be dropped from bookkeeping and
+  its just-copied local file deleted while it was still queued to play. The
+  song would just never air, with nothing showing an error. All feeder
+  bookkeeping is now serialized so this can't happen. A newly-cached file
+  also can't be deleted for at least 10 minutes no matter what, as a second
+  safety net.
+- A failed ad/station-ID insert (e.g. a brief network hiccup) no longer
+  silently gives up that spot's time slot — it now retries for up to 10
+  minutes before finally logging it as missed, so a real network blip
+  doesn't quietly cost a sponsor their ad play.
+
+### Changed
+- The system now only queues a few songs ahead in the live player (was ~45
+  minutes' worth) — the 45-minute local cache is unchanged and still fully
+  protects against a NAS/network outage (the player's own emergency filler
+  reads straight from that cache), but now the on-air queue reflects reality
+  almost immediately instead of lagging up to 45 minutes behind edits.
+  Configurable via `core.feed_ahead_tracks` in config.json (default 3).
+
 ## [1.0.0] - 2026-07-30
 
 First public release. StudioFire has been on air 24/7 at KDPI since July 2026 —

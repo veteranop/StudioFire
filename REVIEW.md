@@ -179,5 +179,105 @@ correctness, not just "not silent."
 → DJs browse to `http://<box>:8080`. Full history in `CHANGELOG.md`; binding
 spec in `PLAN.md §10`; deploy steps in `DEPLOY.md`.
 
+## 8. Feeder hardening — 2026-09-23 (TimeTrax #634, branch `feeder-hardening`)
+
+Follow-up on §4/§6 above. Architecture review (Claude Fable 5) found the
+feeder's `tick()` was a genuine lost-update race, not just a "too complex"
+concern: `feeder_state` (SQLite settings) was read-modify-written with no
+lock, and the background feeder loop held its in-memory copy across slow NAS
+copies inside `tick()` while FastAPI request threads (`insert_spot`,
+`/api/engine/play_next`, show/rotation edits) concurrently loaded-mutated-
+saved the same state. The stale save could win, silently dropping an
+operator's cued track/spot from `st["fed"]`, after which `_evict()` would
+delete its just-cached file while it was still pending in P1's queue — P1
+skips it at prefetch ("unplayable at prefetch") and it never airs, with no
+error surfaced anywhere. Execution spec: `.claude/upgrade-instructions.md`
+(run by Claude Sonnet).
+
+**Changes (`services/core/engine_bridge.py` unless noted):**
+- `Feeder._lock` (RLock): every method that reads-modifies-writes
+  `feeder_state` now holds it for the full critical section — `activate`,
+  `tick`, `insert_spot`, the new `insert_manual`, `fire_due_spots` (via
+  `insert_spot`), `stop_show`, `start_show_now`, `resync_rotation`,
+  `reorder_show`, `remove_show_item`, `_resync_show`. `insert_spot`/
+  `insert_manual` do their NAS resolve+copy *before* taking the lock (a slow
+  copy must never block another operator or the feeder loop) and only hold
+  it for the queue push + bookkeeping. Read-only endpoints (`/api/queue`,
+  `/api/rotation`) take the lock too, for a consistent snapshot.
+- Moved `/api/engine/play_next`'s inline state surgery into
+  `Feeder.insert_manual` — no more feeder-state mutation living outside the
+  class.
+- **Feed depth decoupled from cache depth.** `tick()` now feeds P1's queue
+  only `feed_ahead_tracks` tracks deep (config `core.feed_ahead_tracks`,
+  default 3) instead of `precache_target_minutes` (45 min) worth. The
+  45-minute *disk* cache is unchanged and still the real NAS-outage
+  protection — a new `_cache_lookahead()` keeps it warm from a lock-free
+  snapshot, run *after* releasing `self._lock` (NAS I/O must never happen
+  inside it). This is intentional: if P2 dies, P1 now drains to only a few
+  queued tracks, enters emergency mode, and its filler tier plays real
+  rotation music straight from the still-full precache dir — don't "fix"
+  this back to a deep P1 queue.
+- `Precache.evict_except()` gained `min_age_sec` (default 600s): a file
+  cached more recently always survives eviction regardless of the keep set —
+  closes the residual window between a feeder snapshot and the eviction call
+  itself.
+- `fire_due_spots`: a failed spot insert no longer immediately calls
+  `mark_fired` (which would burn the rule's only chance to fire). It retries
+  for up to 10 minutes (throttled warning log), then finally marks fired
+  with a `log.error` so a genuinely missed ad/legal-ID is findable in the
+  affidavit trail.
+- `.claude/CLAUDE.md`: corrected the `python main.py` / `--dry-run` /
+  "KDPI protocol" inaccuracies flagged in the original spec.
+
+**Tests:**
+- New `tests/test_feeder_concurrency.py` (stub P1, no real mpv — isolates
+  Feeder's own locking): two threads hammer `tick()` and `insert_spot`/
+  `insert_manual` concurrently against a `Precache.ensure` monkeypatched to
+  sleep (simulated slow SMB), then assert every successful insert survived
+  in `feeder_state` and its cache file wasn't evicted while still queued.
+  **Confirmed it actually catches the bug**: with `tick()`'s
+  `with self._lock:` temporarily replaced by `contextlib.nullcontext()`
+  (and `feed_ahead_tracks`/`MAX_FEED_BATCH` tuned so `tick()` never takes
+  the fast "topped up" shortcut, to keep its unprotected critical section
+  wide enough to collide), the test failed reliably across 3 runs
+  (`FAIL: every inserted entry is still in feeder_state`); reverting the
+  lock passed reliably across 3 more runs. Also covers the eviction grace
+  age directly.
+- `tests/test_engine_bridge.py`: updated the one assertion that depended on
+  old eviction-on-first-call behavior (now needs `min_age_sec=0` to force
+  immediate eviction — added a companion assertion that a fresh file
+  survives the default grace window). No other existing assertions needed
+  changes — the duration-based top-up condition was already migrated to the
+  track-count model as part of this change without breaking any assertion,
+  since the tests check `queue_len >=`/wrap behavior, not raw durations.
+- Full suite green: `test_control` (13), `test_core_foundation` (23),
+  `test_indexer` (24), `test_journal` (9), `test_playlists` (67),
+  `test_queue_store` (23), `test_schedule` (30), `test_spots` (37),
+  `test_gui_smoke` (59), `test_feeder_concurrency` (9, new),
+  `test_engine_bridge` (109, real mpv) — 403 checks total, 0 failures.
+  `torture.py` / `test_supervisor_bench.py` intentionally not run (human-run
+  bench gate, out of scope here).
+
+**Deviation from the execution spec:** the spec assumed a "stub-engine
+pattern" already existed in `tests/test_engine_bridge.py` to model the new
+test on. It doesn't — that suite drives a real P1 (mpv + `ControlServer`)
+end-to-end. Wrote a small thread-safe `StubEngine` from scratch in the new
+test file instead (accepts mutations, tracks pending ids, enforces the
+`queue_version` protocol) so the concurrency test doesn't pay real-mpv
+startup cost and isolates exactly the thing under test — Feeder's locking,
+not P1's.
+
+**Not done here (explicitly out of scope per the spec):**
+- Nothing in `services/engine/` (P1) touched.
+- P4 monitor poller untouched.
+- **The 72-hour torture/soak gate has NOT been re-run.** It predates
+  shows/spots/resync/metadata even before this change, and this change adds
+  new locking behavior on top. This is a human decision, not something to
+  run unattended — **re-run it on the bench, with operator-action chaos
+  (hammering Insert Next / spot play-now / reorder while the feeder is
+  mid-fill on a slow/throttled NAS path) added to the existing matrix,
+  before this branch goes anywhere near the on-air PC.**
+- No deploy, no push, no service restarts, `config/config.json` untouched.
+
 ## Related
 - [[PROJECTS-INDEX]]
