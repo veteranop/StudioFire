@@ -15,7 +15,8 @@
   "core": {
     "bind_host": "0.0.0.0",
     "bind_port": 8080,
-    "precache_target_minutes": 45
+    "precache_target_minutes": 45,
+    "feed_ahead_tracks": 3
   },
   "poller": {
     "interval_sec": 60,
