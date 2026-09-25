@@ -362,6 +362,17 @@ select {
 .dirrow > div:first-child { flex: 0 0 220px; }
 .dirval { flex: 1; word-break: break-all; }
 .tile-red-text { color: #e05555; }
+.upd-notes { margin: .6rem 0; }
+.upd-notes pre {
+  white-space: pre-wrap; font: inherit; font-size: .9rem; margin: .3rem 0 0;
+  padding: .6rem .8rem; background: var(--bg); border: 1px solid var(--border);
+  border-radius: 8px; max-height: 18rem; overflow-y: auto;
+}
+.upd-pill {
+  font-size: .85rem; font-weight: 700; color: #0b0f14; background: #7ee2a8;
+  padding: .35rem .7rem; border-radius: 999px; text-decoration: none;
+  white-space: nowrap;
+}
 .tile-green-text { color: #4ccf7f; }
 .picker { max-height: 320px; overflow-y: auto; margin: 10px 0;
           border: 1px solid var(--border, #333); border-radius: 6px;

@@ -31,6 +31,16 @@ These came from John after the first live show on the new system.
   "Add all songs in this folder" button. It reopens the last folder you used.
   Adding songs no longer reloads the page, so you can add several in a row.
 
+- **StudioFire can update itself from GitHub.** Settings → **Software
+  updates** shows your version and whether a newer one has been published,
+  with its release notes, and a green **⬆ Update** pill appears on the On
+  Air page when one is available. An admin presses **Install update**
+  (StudioFire never installs anything by itself). It backs up first,
+  restarts only what the update changed (most updates don't interrupt the
+  music at all), and if the new version doesn't start properly it puts the
+  old one back by itself. You can also run **Update StudioFire from GitHub**
+  from the Start menu.
+
 ### Changed
 - **The On-Air schedule's "Up next" list is in true air order.** Each entry
   now starts with when it will actually air next (e.g. "▶ Tomorrow 6:00 AM").

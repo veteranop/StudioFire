@@ -42,6 +42,7 @@ Source: "..\start-all.bat"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\stop-all.bat"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\restart-all.bat"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\healthcheck.bat"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\update.bat"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\requirements.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\VERSION"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\CHANGELOG.md"; DestDir: "{app}"; Flags: ignoreversion
@@ -51,6 +52,11 @@ Source: "payload\nssm.exe"; DestDir: "{app}\bin"; Flags: ignoreversion
 Source: "payload\runtime\*"; DestDir: "{app}\runtime"; Flags: recursesubdirs ignoreversion
 
 [Dirs]
+; the install folder must be writable by the (non-admin) account the services
+; run as: the self-updater (Settings -> Software updates, update.bat) replaces
+; code here, and data\ / logs\ live here too. Keep the file list in [Files]
+; in sync with MANAGED_* in services\updater.py.
+Name: "{app}"; Permissions: users-modify
 ; runtime state stays LOCAL to the box (never the NAS) — created up front so
 ; the services can write from second zero
 Name: "{app}\assets\emergency"
@@ -62,6 +68,7 @@ Name: "{app}\precache"
 Name: "{autoprograms}\{#AppName}\Start {#AppName}"; Filename: "{app}\start-all.bat"; WorkingDir: "{app}"
 Name: "{autoprograms}\{#AppName}\Stop {#AppName}"; Filename: "{app}\stop-all.bat"; WorkingDir: "{app}"
 Name: "{autoprograms}\{#AppName}\Health check"; Filename: "{app}\healthcheck.bat"; WorkingDir: "{app}"
+Name: "{autoprograms}\{#AppName}\Update {#AppName} from GitHub"; Filename: "{app}\update.bat"; WorkingDir: "{app}"
 Name: "{autoprograms}\{#AppName}\{#AppName} web GUI"; Filename: "http://localhost:8080"
 
 [Run]

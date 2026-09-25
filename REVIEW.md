@@ -379,5 +379,76 @@ This is the only P1 change, and the one to review hardest.
 - The on-air PC is on the stress-tested build: neither this branch nor
   `feeder-hardening` is live.
 
+## 10. Self-update from GitHub Releases — 2026-09-25 (TimeTrax #644, same branch)
+
+Goal: GitHub is the only source; any deployed station can pull a patch.
+
+**Design.**
+- **Channel:** published GitHub Releases on the public repo (no tokens on
+  boxes). A box downloads the tag's `zipball`.
+- **Release process:** `scripts/release.py` is the one way to publish.
+  It keeps `VERSION` == tag, uses the `[Unreleased]` changelog section as
+  the release notes, and runs the whole test suite first.
+- **Updater:** `services/updater.py`, stdlib-only. The steps, in order:
+  1. Verify before touching anything: VERSION == tag, required files
+     present, every `.py` compiles, `requirements.txt` unchanged.
+  2. Back up the code and the DB (sqlite online backup).
+  3. Mirror-install `MANAGED_*`. This must stay in sync with
+     `installer/StudioFire.iss [Files]`.
+  4. Restart only what changed (engine only for `services/engine/**`).
+  5. Health-check each service. P2 `/health` now reports the version it
+     was started with.
+  6. Auto-rollback on any failure, including unexpected exceptions and a
+     half-finished copy.
+- **GUI install:** spawns the helper through WMI (`Win32_Process.Create`),
+  so it lives outside P2's process tree and any NSSM job. P2 is one of the
+  things it restarts. NSSM boxes: kill the python process and NSSM revives
+  it with the new code. Plain boxes: relaunch detached, like
+  `restart_all.py`.
+- **Checking vs installing:** P2 checks every 6h (`core.update_check`,
+  default on via `load_config`, off in bare test apps). Install is admin
+  only, and nothing ever auto-installs on a live station.
+
+**Tested.**
+- `tests/test_updater.py` (27 checks), run against a fake GitHub with
+  faked restarts. It covers: a good update, a web-only change leaving the
+  engine alone, mirror-deletes, config/DB untouched, the backup contents,
+  4 pre-install rejections, rollback, a double failure flagged "call
+  support", the lock, git refusal, and `--tag --force`.
+- **Real end-to-end run (not in the suite, needs free ports and no running
+  StudioFire):** a throwaway station on 8094/7794 (mpv `--ao=null`) plus a
+  fake GitHub. The update was triggered through `/api/update/install`, so
+  the helper really was created via WMI.
+  - Update 1.1.0 → 1.2.0 (engine + web): about 6s end to end, all three
+    services came back with new PIDs on the new version.
+  - A release whose `app.py` crashes on import was detected as "crashed on
+    startup: core" about 14s after restart and rolled back to 1.2.0, with
+    the engine playing throughout.
+- Found and fixed along the way:
+  - The cp1252 console crashed the updater on printing "→", *after*
+    installing, and unexpected exceptions skipped rollback.
+  - `installed`/`restarted` were set after the step, so a half-done copy
+    or restart wouldn't have rolled back.
+  - Backup folder names were second-resolution, so a retry in the same
+    second failed. Found by a flaky full-suite run and now covered by a
+    regression check.
+
+**Gaps / decisions for Mark.**
+- **Existing 1.0.x boxes need one manual installer upgrade** to get the
+  updater (bootstrapping).
+- **Install-folder permission:** the service account must be able to
+  modify the install folder. New installers grant `users-modify` on
+  `{app}`; old installs need it granted once.
+- **New Python packages → full installer,** by design.
+- **`v1.0.1` on GitHub has VERSION 1.0.0 inside,** so stations refuse it
+  (correctly). The next scripted release supersedes it.
+- **NSSM crash-loop:** in NSSM mode a crash-looping service keeps
+  reappearing, so fail-fast doesn't trigger and rollback waits the full
+  120s timeout. The web GUI is down during that window; audio is
+  unaffected unless the engine itself is the thing crashing.
+- **NSSM path not exercised live here** (no NSSM on the dev box). The logic
+  is "kill → NSSM revives", which is what `AppExit Restart` does. Verify on
+  the bench PC with services installed before the first real release.
+
 ## Related
 - [[PROJECTS-INDEX]]

@@ -9,6 +9,8 @@
   <a href="/reports">Reports</a>
 </nav>
 <div class="nav-right topbar-right">
+  <a id="upd-pill" class="upd-pill" href="/settings#updates" hidden
+     title="A new StudioFire version is available — see Settings">⬆ Update</a>
   <div class="onair" id="onair">OFF AIR</div>
   {% if allow_restart %}
   <button id="btn-restart" class="restart-btn" onclick="restartSystem()"
@@ -1068,6 +1070,14 @@ rotListEl.addEventListener("dragover", (ev) => {
 });
 rotListEl.addEventListener("scroll", () => { rotScrolledAt = Date.now(); });
 
+async function refreshUpdatePill() {
+  try {
+    const u = await (await fetch("/api/update")).json();
+    document.getElementById("upd-pill").hidden =
+      !(u.update_available && !u.dev_checkout);
+  } catch (e) { /* next poll */ }
+}
+refreshUpdatePill(); setInterval(refreshUpdatePill, 60000);
 refresh(); refreshTiles(); refreshSchedule();
 refreshSpots(); refreshRotation(); refreshHistory();
 setInterval(refresh, 2000);
