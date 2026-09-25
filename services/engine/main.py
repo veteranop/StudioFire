@@ -65,10 +65,12 @@ def load_config(path: str | None) -> dict:
         "heartbeat_path": os.path.join(data_dir, "engine_heartbeat.txt"),
         "logs_dir": logs_dir,
         "extra_mpv_args": engine.get("extra_mpv_args", []),
-        # song-to-song fades (seconds; 0 = off). Songs only — spots/IDs/PSAs
-        # and emergency filler always play at full volume start to finish.
-        "fade_out_sec": engine.get("fade_out_sec", 4.0),
-        "fade_in_sec": engine.get("fade_in_sec", 1.5),
+        # song crossfade length (seconds; 0 = back to back, no fades). The
+        # next item starts under the last N seconds of a song: a song rises
+        # while the old one falls; spots/IDs/PSAs start at full volume and
+        # are never faded. (fade_out_sec is the pre-two-deck name.)
+        "crossfade_sec": engine.get("crossfade_sec",
+                                    engine.get("fade_out_sec", 4.0)),
     }
 
 

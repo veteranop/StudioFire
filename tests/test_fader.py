@@ -1,14 +1,18 @@
-"""Song fade-in / fade-out tests (John's feedback: fade between songs, but
-spots/IDs/PSAs play at full volume the whole way through).
+"""Two-deck crossfade tests (John's feedback: the next song must start
+rising the moment the old one starts falling — no dip; spots/IDs/PSAs are
+never faded).
 
-  1. fade_volume() curve: ramps in, holds full, ramps out; never guesses
-     toward silence when position/duration are unknown.
-  2. Real mpv (null audio): song -> spot -> song. Samples mpv's actual volume
-     property while it plays and checks the song fades in/out, the spot is
-     at full volume from its first instant to its last, and the station ends
-     on full volume after the queue drains to emergency filler.
+  1. fade_volume() curve.
+  2. Real mpv (null audio), both decks sampled every ~50ms:
+     song -> song   overlap: both audible at once, old falls, new rises
+     song -> spot   spot starts under the fade at FULL volume, stays full
+     spot -> song   song starts when the spot ends, at full (no dip)
+     filler         full volume
+  3. crossfade_sec = 0: back to back, never two decks at once, all full.
+  4. Operator: skip mid-crossfade is a hard cut; stop-after suppresses the
+     crossfade and holds the next song paused.
 
-Run: python -m tests.test_fader   (silent; takes ~30s)
+Run: python -m tests.test_fader   (silent; ~60s)
 """
 import os
 import sys
@@ -25,6 +29,7 @@ from tests.test_supervisor_bench import (build_config, make_wav,  # noqa: E402
                                          wait_for)
 
 passed = 0
+XF = 2.0     # crossfade seconds used by the real-mpv checks
 
 
 def check(name, cond):
@@ -41,113 +46,216 @@ def curve_checks():
           fade_volume(0.0, 200, 2, 4) == 0)
     check("curve: halfway through the fade-in",
           fade_volume(1.0, 200, 2, 4) == 50)
-    check("curve: full volume mid-song",
-          fade_volume(100, 200, 2, 4) == 100)
+    check("curve: full volume mid-song", fade_volume(100, 200, 2, 4) == 100)
     check("curve: halfway through the fade-out",
           fade_volume(198, 200, 2, 4) == 50)
-    check("curve: silent at the very end",
-          fade_volume(200, 200, 2, 4) == 0)
+    check("curve: silent at the very end", fade_volume(200, 200, 2, 4) == 0)
     check("curve: unknown position -> full (never guess toward silence)",
           fade_volume(None, 200, 2, 4) == 100)
     check("curve: unknown duration -> no fade-out",
           fade_volume(100, None, 2, 4) == 100)
-    check("curve: fades off -> always full",
-          fade_volume(0.0, 200, 0, 0) == 100
-          and fade_volume(199.9, 200, 0, 0) == 100)
-    check("curve: a song shorter than both fades peaks below full, no error",
-          0 < fade_volume(1.0, 2.5, 2, 4) < 100)
 
 
 def sample(sup, stop, out):
-    """(now_source, path, time-pos, volume) every ~50ms from real mpv. The
-    file is taken from MPV ITSELF (read before and after the other reads,
-    sample dropped if it changed): the engine's status lags mpv by a moment
-    at every track change, which would pin the next file's first instant on
-    the previous file."""
+    """Per tick: [(deck, path, pos, volume, paused)] for every deck that has
+    a file, read from MPV ITSELF (path re-read after; changed = dropped)."""
     while not stop.is_set():
-        c = sup._client
-        try:
-            st = sup.status()
-            path = c.get_property("path", timeout=0.5)
-            pos = c.get_property("time-pos", timeout=0.5)
-            vol = c.get_property("volume", timeout=0.5)
-            if c.get_property("path", timeout=0.5) == path:
-                out.append((st["now_source"], path, pos, vol))
-        except Exception:
-            pass
+        tick = []
+        for d in list(sup._decks):
+            c = d.client
+            if c is None:
+                continue
+            try:
+                path = c.get_property("path", timeout=0.5)
+                pos = c.get_property("time-pos", timeout=0.5)
+                vol = c.get_property("volume", timeout=0.5)
+                paused = c.get_property("pause", timeout=0.5)
+                if path and c.get_property("path", timeout=0.5) == path:
+                    tick.append((d.name, path, pos, vol, paused))
+            except Exception:
+                pass
+        out.append((time.monotonic(), tick))
         time.sleep(0.05)
 
 
-def real_mpv_checks():
-    td = tempfile.mkdtemp(prefix="sf-fade-")
-    song1 = os.path.join(td, "song1.wav")
-    spot = os.path.join(td, "spot.wav")
-    song2 = os.path.join(td, "song2.wav")
-    make_wav(song1, seconds=6.0, freq=440)
-    make_wav(spot, seconds=4.0, freq=660)
-    make_wav(song2, seconds=6.0, freq=550)
-    emdir = os.path.join(td, "emergency")
-    os.makedirs(emdir)
-    make_wav(os.path.join(emdir, "filler.wav"), seconds=3.0, freq=880)
+def audible(tick, name):
+    """(pos, vol) of file `name` if it's playing (not paused) in this tick."""
+    for _d, path, pos, vol, paused in tick:
+        if path and path.endswith(name) and not paused and pos is not None:
+            return pos, vol
+    return None
 
+
+def run(cfg_extra, entries_spec, td, until, secs=60, during=None):
+    """Play `entries_spec` [(filename, source)] on a fresh engine and return
+    the sample log. `until(sup)` = done; `during(sup)` runs in parallel."""
+    emdir = os.path.join(td, "emergency")
+    os.makedirs(emdir, exist_ok=True)
     cfg = build_config(td, emdir)
-    cfg["pipe_name"] += "-fade"
-    cfg["fade_in_sec"] = 1.0
-    cfg["fade_out_sec"] = 1.5
+    cfg["pipe_name"] += "-xf" + str(abs(hash(td)) % 10000)
+    cfg.update(cfg_extra)
     sup = EngineSupervisor(cfg)
     sup.start()
     samples, stop = [], threading.Event()
-    sampler = threading.Thread(target=sample, args=(sup, stop, samples),
-                               daemon=True)
+    t = threading.Thread(target=sample, args=(sup, stop, samples), daemon=True)
     try:
-        sampler.start()
+        t.start()
+        entries = [{"id": f"e{i}", "path": os.path.join(td, n),
+                    "title": n, "source": src}
+                   for i, (n, src) in enumerate(entries_spec)]
         ok, _ = sup.submit_mutation({"op": "replace", "queue_version": 1,
-                                     "entries": [
-            {"id": "s1", "path": song1, "title": "Song 1", "source": "playlist"},
-            {"id": "sp", "path": spot, "title": "Spot", "source": "spot"},
-            {"id": "s2", "path": song2, "title": "Song 2", "source": "manual"},
-        ]})
+                                     "entries": entries})
         check("queue accepted", ok)
-        # (the engine sits in emergency until its first queue arrives, so
-        # wait for the LAST song before waiting for filler)
-        check("reaches the last song", wait_for(
-            lambda: sup.status()["now_playing"] == song2, 30, "song2"))
-        check("plays through to emergency filler", wait_for(
-            lambda: sup.status()["emergency_mode"], 30, "queue drained"))
-        time.sleep(1.0)
+        if during:
+            during(sup)
+        wait_for(lambda: until(sup), secs, "scenario end")
+        time.sleep(0.5)
     finally:
         stop.set()
-        sampler.join(2)
+        t.join(2)
         sup.stop()
+    return samples, sup
 
-    def of(path):
-        return [(pos, vol) for _, p, pos, vol in samples
-                if p == path and pos is not None and vol is not None]
 
-    s1, sp, s2 = of(song1), of(spot), of(song2)
-    check("sampled all three files", len(s1) > 20 and len(sp) > 20
-          and len(s2) > 20)
-    # timing slack: one fader tick (0.1s) + IPC round trips
-    check("song fades in (quiet in its first 0.3s)",
-          all(v <= 60 for pos, v in s1 if pos < 0.3))
-    check("song is at full volume mid-song",
-          all(v == 100 for pos, v in s1 if 1.5 < pos < 4.0))
-    check("song fades out (quiet in its last 0.4s)",
-          all(v <= 45 for pos, v in s1 if pos > 5.6))
-    check("SPOT is at full volume from start to finish",
-          all(v == 100 for _, v in sp))
-    check("a manual 'play next' song fades too",
-          any(v < 100 for pos, v in s2 if pos < 0.5)
-          and all(v == 100 for pos, v in s2 if 1.5 < pos < 4.0))
-    filler = [v for src, _, _, v in samples
-              if src == "emergency" and v is not None]
-    check("emergency filler is at full volume", filler
-          and all(v == 100 for v in filler[3:]))
+def crossfade_checks():
+    td = tempfile.mkdtemp(prefix="sf-xf-")
+    for name, secs, f in (("song1.wav", 7.0, 440), ("song2.wav", 7.0, 550),
+                          ("spot.wav", 4.0, 660), ("song3.wav", 6.0, 330)):
+        make_wav(os.path.join(td, name), seconds=secs, freq=f)
+    make_wav(os.path.join(td, "emergency", "filler.wav"), 3.0, 880) \
+        if os.makedirs(os.path.join(td, "emergency"), exist_ok=True) is None \
+        else None
+    samples, _ = run(
+        {"crossfade_sec": XF},
+        [("song1.wav", "playlist"), ("song2.wav", "playlist"),
+         ("spot.wav", "spot"), ("song3.wav", "manual")], td,
+        until=lambda s: s.status()["emergency_mode"]
+        and s.status()["now_playing"] and "filler" in s.status()["now_playing"])
+
+    both_12 = [(audible(t, "song1.wav"), audible(t, "song2.wav"))
+               for _, t in samples]
+    overlap = [(a, b) for a, b in both_12 if a and b]
+    check("song -> song OVERLAPS: both songs audible at the same time",
+          len(overlap) >= 10)
+    # compare the first and last THIRD of the overlap rather than single end
+    # samples: under load a sample read can fail and drop a deck from a tick
+    third = max(1, len(overlap) // 3)
+
+    def avg(xs):
+        return sum(xs) / len(xs)
+    old_early = avg([a[1] for a, _ in overlap[:third]])
+    old_late = avg([a[1] for a, _ in overlap[-third:]])
+    new_early = avg([b[1] for _, b in overlap[:third]])
+    new_late = avg([b[1] for _, b in overlap[-third:]])
+    check("...the old song falls through the overlap",
+          old_late < old_early - 25 and min(a[1] for a, _ in overlap) <= 40)
+    check("...while the new song rises from low",
+          new_early < new_late - 25 and min(b[1] for _, b in overlap) <= 40)
+    check("...and there's no dip: the louder of the two stays up",
+          min(max(a[1], b[1]) for a, b in overlap) >= 45)
+    s2 = [audible(t, "song2.wav") for _, t in samples]
+    check("new song reaches full volume after the crossfade",
+          all(v == 100 for pos, v in (x for x in s2 if x) if XF + 0.4 < pos < 4.5))
+
+    spot = [audible(t, "spot.wav") for _, t in samples]
+    spot = [x for x in spot if x]
+    check("song -> spot: the spot is at FULL volume start to finish",
+          len(spot) > 20 and all(v == 100 for _, v in spot))
+    under = [(audible(t, "song2.wav"), audible(t, "spot.wav"))
+             for _, t in samples]
+    check("...starting under the song's fade-out (they overlap)",
+          any(a and b for a, b in under))
+
+    s3 = [(audible(t, "song3.wav"), audible(t, "spot.wav"))
+          for _, t in samples]
+    check("spot -> song: the song waits for the spot to finish",
+          not any(a and b for a, b in s3))
+    s3v = [a for a, _ in s3 if a]
+    check("...and starts at FULL volume (no fade-in dip after a spot)",
+          s3v and all(v == 100 for pos, v in s3v if pos < 4.0))
+    fil = [audible(t, "filler.wav") for _, t in samples]
+    fil = [x for x in fil if x]
+    check("emergency filler at full volume", fil
+          and all(v == 100 for _, v in fil))
+
+
+def no_crossfade_checks():
+    td = tempfile.mkdtemp(prefix="sf-xf0-")
+    os.makedirs(os.path.join(td, "emergency"))
+    make_wav(os.path.join(td, "a.wav"), 3.0, 440)
+    make_wav(os.path.join(td, "b.wav"), 3.0, 550)
+    samples, _ = run({"crossfade_sec": 0},
+                     [("a.wav", "playlist"), ("b.wav", "playlist")], td,
+                     until=lambda s: s.status()["emergency_mode"]
+                     and s.status()["now_id"] is None
+                     and s.status()["current_index"] >= 1, secs=30)
+    ticks = [t for _, t in samples]
+    # a sample reads the decks one after another (ms apart), so the exact
+    # hand-off instant can show both once; a real overlap lasts many samples
+    both = sum(1 for t in ticks if audible(t, "a.wav") and audible(t, "b.wav"))
+    check("crossfade 0: no overlap (at most the one hand-off sample)",
+          both <= 1)
+    check("crossfade 0: everything at full volume",
+          all(v == 100 for t in ticks for _d, p, pos, v, paused in t
+              if not paused and p and p.endswith(("a.wav", "b.wav"))))
+    check("crossfade 0: both played",
+          any(audible(t, "a.wav") for t in ticks)
+          and any(audible(t, "b.wav") for t in ticks))
+
+
+def operator_checks():
+    td = tempfile.mkdtemp(prefix="sf-xfop-")
+    os.makedirs(os.path.join(td, "emergency"))
+    for n in ("s1.wav", "s2.wav", "s3.wav"):
+        make_wav(os.path.join(td, n), 6.0, 440)
+
+    def skip_mid_crossfade(sup):
+        wait_for(lambda: sum(1 for d in sup._decks if d.role == "fading"),
+                 20, "crossfade starts")
+        ok, _ = sup.submit_command("skip")
+        check("skip accepted mid-crossfade", ok)
+
+    samples, sup = run({"crossfade_sec": XF},
+                       [("s1.wav", "playlist"), ("s2.wav", "playlist"),
+                        ("s3.wav", "playlist")], td,
+                       until=lambda s: s.status()["now_playing"]
+                       and s.status()["now_playing"].endswith("s3.wav"),
+                       secs=30, during=skip_mid_crossfade)
+    time.sleep(0)
+    last = samples[-1][1]
+    check("skip mid-crossfade is a hard cut: only the next song is left",
+          audible(last, "s3.wav") and not audible(last, "s1.wav")
+          and not audible(last, "s2.wav"))
+    s3 = [audible(t, "s3.wav") for _, t in samples]
+    check("...and it starts at full volume",
+          all(v == 100 for pos, v in (x for x in s3 if x)))
+
+    td2 = tempfile.mkdtemp(prefix="sf-xfsa-")
+    os.makedirs(os.path.join(td2, "emergency"))
+    for n in ("s1.wav", "s2.wav"):
+        make_wav(os.path.join(td2, n), 5.0, 440)
+
+    def arm_stop_after(sup):
+        ok, _ = sup.submit_command("stop_after")
+        check("stop-after armed", ok)
+
+    samples, sup = run({"crossfade_sec": XF},
+                       [("s1.wav", "playlist"), ("s2.wav", "playlist")], td2,
+                       until=lambda s: s.status()["paused"]
+                       and (s.status()["now_playing"] or "").endswith("s2.wav"),
+                       secs=20, during=arm_stop_after)
+    ticks = [t for _, t in samples]
+    check("stop-after: no crossfade (s2 never audible while s1 plays)",
+          not any(audible(t, "s1.wav") and audible(t, "s2.wav") for t in ticks))
+    check("stop-after: next song held paused, not playing",
+          not any(audible(t, "s2.wav") for t in ticks))
 
 
 def main():
     curve_checks()
-    real_mpv_checks()
+    crossfade_checks()
+    no_crossfade_checks()
+    operator_checks()
     print(f"FADER OK ({passed} checks)")
     return 0
 

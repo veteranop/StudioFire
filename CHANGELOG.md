@@ -9,12 +9,15 @@ plain English a non-technical operator can understand.
 
 ### Added (operator feedback from KDPI, 2026-09-25, TimeTrax #644)
 These came from John after the first live show on the new system.
-- **Songs fade into each other.** Each song fades out over its last 4
-  seconds, and the next song fades in over its first 1.5 seconds. PSAs, ads
-  and station IDs never fade: they play at full volume from start to finish.
-  So does emergency filler. The fade lengths can be changed (or turned off
-  by setting them to 0) in `config.json` under `engine` → `fade_out_sec` /
-  `fade_in_sec`.
+- **Songs crossfade.** In the last 4 seconds of a song, the next song
+  starts underneath it and rises while the old one falls, with no gap and no
+  dip in the middle. PSAs, ads and station IDs are never faded. One can start
+  over a song's fade-out, but it plays at full volume from start to finish,
+  and the song after it starts the moment it ends, at full volume.
+  Emergency filler is never faded either. Skip is still an instant cut, and
+  "Stop after current song" lets the song finish fully before it stops. The
+  crossfade length is set in `config.json` under `engine` → `crossfade_sec`
+  (0 turns crossfading off, so items play back to back).
 - **Search spots by name.** Type in the new search box above Upcoming Spots
   to find a spot by its name, schedule, or file/folder.
 - **Date next to the clock** at the top of every page (e.g. "Fri, Sep 25").

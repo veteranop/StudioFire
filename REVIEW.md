@@ -450,5 +450,86 @@ Goal: GitHub is the only source; any deployed station can pull a patch.
   is "kill → NSSM revives", which is what `AppExit Restart` does. Verify on
   the bench PC with services installed before the first real release.
 
+## 11. Two-deck engine: true crossfade — 2026-09-25 (TimeTrax #644)
+
+The §9 fader (a fade-out, then a fade-in, on ONE mpv) produced exactly the
+dip Mark heard on the dev PC ("fades out, stops, then silently fades in").
+John asked for a real crossfade, which needs two players sounding at once.
+Mark chose the two-deck design over a bolt-on "tail helper" player.
+
+**Design (`services/engine/supervisor.py`, rewritten).**
+- **Decks:** two mpv players (pipes `<pipe>-a` / `<pipe>-b`). Each item
+  plays start to finish on one deck, and the decks alternate. Deck roles
+  are `idle`, `preloaded`, `onair` and `fading`. The next queue item is
+  loaded PAUSED on the free deck; this replaces mpv's playlist prefetch
+  and gapless playback.
+- **Mixer thread** (100ms): ramps the volume of fading decks based on
+  position (`fade_volume`, so ramps survive pause), and posts `xfade_due`
+  when an on-air song reaches `crossfade_sec` from its end. It only ever
+  touches volume, never what's playing.
+- **Crossfade rules:**
+  - song → song: the new song rises from 0 while the old one falls, overlapping.
+  - song → spot: the spot starts at 100 under the fade.
+  - spot → anything: the next item starts at end-of-file at 100.
+  - No crossfade for: files shorter than 2×crossfade, stop-after armed,
+    paused, or emergency.
+  - `crossfade_sec` 0 = back to back.
+- **Owner thread is still the single writer.** "Now playing" bookkeeping
+  (journal `track_start`, `current_index`, status) now happens when WE put
+  a deck on air, not on mpv's start-file. Because of that, P2 sees the next
+  song as now playing from the moment the crossfade starts.
+- **Stale-event safety:** events carry the client identity AND mpv's
+  `playlist_entry_id`. An end-file from a replaced player or an earlier file
+  on the same deck is ignored. Only `eof`/`error` count; `stop` is ours.
+- **Watchdog:**
+  - Both decks: liveness → `deck_dead` → restart that deck. If it was on
+    air, kick to the next item, same as before.
+  - On-air deck: stall detection.
+  - New: nothing on air while not paused for 2 ticks → kick (replaces
+    mpv's `idle` event safety net).
+- **Unchanged:** P2 protocol, queue/version protocol, journal events,
+  status fields, control API, and the failover tiers. `sup._client` is kept
+  as the on-air deck's client for test harnesses.
+- **Config:** `engine.crossfade_sec`, default 4; an old `fade_out_sec` is
+  honoured as the length. `fade_in_sec` is gone.
+- **Audio device:** both decks open the same output, which is fine in
+  WASAPI shared mode. **Exclusive mode would break this** (the second deck
+  couldn't open the device). No station config sets it today.
+
+**Tests.**
+- `tests/test_fader.py` was rewritten (30 checks, real mpv, both decks
+  sampled). It covers:
+  - song→song overlap, old falling and new rising;
+  - no dip: the louder deck never drops below 45%;
+  - song→spot: the spot at 100 throughout, starting under the fade;
+  - spot→song: waits, then starts at 100;
+  - filler at 100;
+  - `crossfade_sec` 0: no overlap, everything at 100;
+  - skip mid-crossfade is a hard cut;
+  - stop-after: no crossfade, and the next song is held.
+- Green 6× in a row after replacing single-sample end checks with
+  first-third vs last-third averages (sampler reads can drop under load).
+- The full suite is green, including the unchanged
+  `test_supervisor_bench` (35: failover, killed mpv, restarts, forced
+  emergency), `test_engine_bridge` (113, real engine end-to-end) and
+  `test_stale_mpv`.
+
+- **`tests/torture.py` matrix (T1–T5, dead-air gate 2.0s):** 5 of 5 passes.
+  Longest silence was 1.04–1.78s, down from 1.53s before these fixes. It
+  found two real problems, both fixed:
+  - `mpv_alive` only became true on the watchdog's first tick. The
+    two-deck engine goes on air faster than that, so status briefly
+    reported dead players. It's now set once both decks have started.
+  - **A command sent to a just-killed mpv waited the full 2s IPC timeout,
+    and that was 3.09s of dead air** in the restart storm. The old engine
+    had the same latent bug. `MpvClient.command` now polls the process
+    every 100ms and fails in about 0.1s. The owner's MpvDead handler now
+    restarts the deck that actually died, not "the on-air one".
+
+**Gate:** this rewrites the transmitter path. Run the 72h
+`torture.py soak` on the bench PC before the on-air PC, and do listening
+tests of song→song, song→spot, spot→song and skip mid-crossfade on the
+real sound card (WASAPI shared mode).
+
 ## Related
 - [[PROJECTS-INDEX]]

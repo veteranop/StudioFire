@@ -203,9 +203,19 @@ class MpvClient:
         payload = json.dumps({"command": list(args), "request_id": request_id})
         self._outbox.put(payload.encode("utf-8") + b"\n")
 
-        if not waiter["event"].wait(timeout):
-            self._forget(request_id)
-            raise MpvTimeout(f"no reply in {timeout}s: {args[0]}")
+        # wait in short slices, checking the process is still there: a killed
+        # mpv must fail the caller in ~0.1s, not after the full timeout (the
+        # pipe-break can take a moment to surface; those seconds were dead air)
+        deadline = time.monotonic() + timeout
+        while not waiter["event"].wait(min(0.1, max(0.0, deadline
+                                                    - time.monotonic()))):
+            if self._proc is not None and self._proc.poll() is not None:
+                self._forget(request_id)
+                raise MpvDead(f"mpv exited (code {self._proc.returncode}) "
+                              f"awaiting {args[0]}")
+            if time.monotonic() >= deadline:
+                self._forget(request_id)
+                raise MpvTimeout(f"no reply in {timeout}s: {args[0]}")
 
         resp = waiter["resp"]
         if resp is None:  # I/O thread shut down while we waited

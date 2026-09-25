@@ -11,8 +11,7 @@
     "watchdog_interval_sec": 1,
     "ipc_host": "127.0.0.1",
     "ipc_port": 7701,
-    "fade_out_sec": 4,
-    "fade_in_sec": 1.5
+    "crossfade_sec": 4
   },
   "core": {
     "bind_host": "0.0.0.0",
