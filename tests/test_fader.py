@@ -59,14 +59,20 @@ def curve_checks():
 
 
 def sample(sup, stop, out):
-    """(now_source, now_playing, time-pos, volume) every ~50ms from real mpv."""
+    """(now_source, path, time-pos, volume) every ~50ms from real mpv. The
+    file is taken from MPV ITSELF (read before and after the other reads,
+    sample dropped if it changed): the engine's status lags mpv by a moment
+    at every track change, which would pin the next file's first instant on
+    the previous file."""
     while not stop.is_set():
         c = sup._client
         try:
             st = sup.status()
+            path = c.get_property("path", timeout=0.5)
             pos = c.get_property("time-pos", timeout=0.5)
             vol = c.get_property("volume", timeout=0.5)
-            out.append((st["now_source"], st["now_playing"], pos, vol))
+            if c.get_property("path", timeout=0.5) == path:
+                out.append((st["now_source"], path, pos, vol))
         except Exception:
             pass
         time.sleep(0.05)

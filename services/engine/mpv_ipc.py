@@ -29,6 +29,7 @@ import ctypes.wintypes
 import json
 import logging
 import msvcrt
+import os
 import queue
 import subprocess
 import threading
@@ -54,6 +55,44 @@ def _bytes_available(pipe_file) -> int:
         raise OSError("PeekNamedPipe failed (pipe broken), winerr=%d"
                       % ctypes.GetLastError())
     return avail.value
+
+
+def kill_stale_mpv(pipe_name: str) -> list[int]:
+    """Kill leftover mpv processes still serving OUR IPC pipe.
+
+    If the engine dies without taking mpv with it (Ctrl+C in its console, a
+    crash, a kill without /T), mpv keeps playing on its own. Windows lets the
+    next mpv create another instance of the same pipe name, and the new
+    engine's client may then connect to the ORPHAN — driving the wrong
+    player while its own sits idle (seen 2026-09-25). Called at engine
+    startup, before our own mpv exists. Matches the exact pipe argument, so
+    another station/test using a different pipe name is never touched.
+    Returns the killed pids. Never raises."""
+    arg = "--input-ipc-server=" + PIPE_PREFIX + pipe_name
+    # exact argument match: the pipe name must END there (space, quote or
+    # end of line) — 'studiofire-engine' must not match 'studiofire-engine2'
+    pattern = "[regex]::Escape('" + arg.replace("'", "''") + "') + " \
+              "'(\\s|\"|$)'"
+    ps = ("$p = " + pattern + "; "
+          "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine "
+          "-and $_.CommandLine -match $p "
+          "-and $_.ProcessId -ne " + str(os.getpid()) + " } | "
+          "ForEach-Object { Stop-Process -Id $_.ProcessId -Force "
+          "-ErrorAction SilentlyContinue; $_.ProcessId }")
+    try:
+        out = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", ps], capture_output=True,
+            text=True, timeout=20, stdin=subprocess.DEVNULL,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        log.warning("stale-mpv sweep skipped: %s", exc)
+        return []
+    pids = [int(x) for x in out.split() if x.isdigit()]
+    if pids:
+        log.warning("killed %d stale mpv process(es) still on %s: %s",
+                    len(pids), arg, pids)
+        time.sleep(0.5)   # let Windows release the pipe instances
+    return pids
 
 
 class MpvError(Exception):

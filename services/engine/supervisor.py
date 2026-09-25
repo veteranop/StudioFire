@@ -33,7 +33,7 @@ import threading
 import time
 
 from .journal import Journal
-from .mpv_ipc import MpvClient, MpvDead, MpvError
+from .mpv_ipc import MpvClient, MpvDead, MpvError, kill_stale_mpv
 from .queue_store import QueueStore, QueueState, apply_mutation
 
 log = logging.getLogger("engine.supervisor")
@@ -69,6 +69,13 @@ def fade_volume(pos, dur, fade_in: float, fade_out: float,
         if left < fade_out:
             vol = min(vol, full * max(left, 0.0) / fade_out)
     return vol
+
+
+def _same_path(a, b) -> bool:
+    if not a or not b:
+        return False
+    return os.path.normcase(os.path.normpath(a)) == \
+        os.path.normcase(os.path.normpath(b))
 
 
 def playable(path: str) -> bool:
@@ -131,6 +138,7 @@ class EngineSupervisor:
         self._fade_on = False
         self._fade_gen = 0
         self._fade_sent: int | None = None   # last volume we told mpv
+        self._fade_path: str | None = None   # file the policy applies to
 
         self._emergency_files: list[str] = []
         self._emergency_idx = 0
@@ -161,6 +169,12 @@ class EngineSupervisor:
                          emergency_mode=self._state.emergency_mode,
                          forced_emergency=self._state.forced_emergency)
         self._validate_emergency_folder()
+        # a previous engine that died without its mpv leaves that player
+        # running on our pipe name; clear it BEFORE starting ours, or we may
+        # end up driving the orphan (see mpv_ipc.kill_stale_mpv)
+        stale = kill_stale_mpv(self._pipe_name)
+        if stale:
+            self._journal.append("stale_mpv_killed", pids=stale)
         self._start_mpv()
         self._owner = threading.Thread(target=self._owner_loop,
                                        name="engine-owner", daemon=True)
@@ -293,12 +307,12 @@ class EngineSupervisor:
             self._ensure_next_appended()
             self._set_status(now_title=e.get("title"),
                              now_source=e.get("source"), now_id=e.get("id"))
-            self._set_fade_policy(e.get("source") in FADE_SOURCES)
+            self._set_fade_policy(e.get("source") in FADE_SOURCES, path)
         else:
             source = "emergency" if path != self._baked_in else "baked_in"
             self._journal.append("track_start", path=path, source=source)
             self._set_status(now_title=None, now_source=source, now_id=None)
-            self._set_fade_policy(False)
+            self._set_fade_policy(False, path)
         self._set_status(now_playing=path, duration=None)
         # "Stop after current song": the previous song has ended and this one
         # just loaded — hold it at the start until the operator goes on air.
@@ -323,19 +337,41 @@ class EngineSupervisor:
 
     # ----------------------------------------------------------------- fades
 
-    def _set_fade_policy(self, fadeable: bool) -> None:
+    def _set_fade_policy(self, fadeable: bool, path: str | None) -> None:
         """Owner thread, at every track start: decide whether this file fades
         and set its STARTING volume right now (not on the fader's next tick,
         so a spot never blips in quiet and a song never blips in loud).
         Non-fading files always start at full volume — this is also what
-        guarantees a fade can never leave the station stuck quiet."""
+        guarantees a fade can never leave the station stuck quiet.
+        Policy + starting volume are applied under the fade lock so the
+        fader can never slip a stale value in between."""
         if not (self._fade_in or self._fade_out):
             return               # fades off: never touch volume (old behavior)
         start = 0 if (fadeable and self._fade_in) else FULL_VOLUME
         with self._fade_lock:
             self._fade_on = fadeable
+            self._fade_path = path
             self._fade_gen += 1
-        self._send_volume(start)
+            self._send_volume(start)
+
+    def _loadfile(self, path: str, mode: str, entry: dict | None) -> None:
+        """loadfile with the file's STARTING volume as a per-file option, so
+        mpv applies it in step with decoding. Setting it from start-file is
+        a few ms too late: mpv starts decoding the next file before we hear
+        about it, and a spot's first instant would go out at the previous
+        song's faded-out level. Songs start at 0 (fade-in), everything else
+        (spots, filler) at full. Older mpv without the 4-arg loadfile form
+        falls back to a plain loadfile (start-file still sets the volume)."""
+        if not (self._fade_in or self._fade_out):
+            self._client.command("loadfile", path, mode)  # fades off: as before
+            return
+        fades = bool(entry) and entry.get("source") in FADE_SOURCES
+        start = 0 if (fades and self._fade_in) else FULL_VOLUME
+        try:
+            self._client.command("loadfile", path, mode, -1,
+                                 f"volume={start}")
+        except MpvError:
+            self._client.command("loadfile", path, mode)
 
     def _send_volume(self, vol: int) -> None:
         client = self._client
@@ -359,6 +395,7 @@ class EngineSupervisor:
                 continue
             with self._fade_lock:
                 gen, fading = self._fade_gen, self._fade_on
+                policy_path = self._fade_path
             try:
                 if time.monotonic() - last_verify >= FADE_VERIFY_SEC:
                     last_verify = time.monotonic()
@@ -371,16 +408,23 @@ class EngineSupervisor:
                 elif client.get_property("pause", timeout=0.5):
                     continue                    # held (stop-after / off air)
                 else:
+                    # mpv switches files a moment BEFORE the owner thread
+                    # handles start-file; in that gap time-pos belongs to the
+                    # NEW file (maybe a spot) while the policy is still the
+                    # old song's. Only act when mpv is on the policy's file.
+                    playing = client.get_property("path", timeout=0.5)
                     pos = client.get_property("time-pos", timeout=0.5)
                     dur = client.get_property("duration", timeout=0.5)
+                    if not _same_path(playing, policy_path):
+                        continue
                     target = round(fade_volume(pos, dur, self._fade_in,
                                                self._fade_out))
-                with self._fade_lock:
+                with self._fade_lock:           # check + send as one step
                     if gen != self._fade_gen:
                         continue                # track changed mid-read
-                if target != self._fade_sent:
-                    client.set_property("volume", target, timeout=0.5)
-                    self._fade_sent = target
+                    if target != self._fade_sent:
+                        client.set_property("volume", target, timeout=0.5)
+                        self._fade_sent = target
             except MpvError:
                 continue    # e.g. time-pos unavailable while a file loads
             except MpvDead:
@@ -438,7 +482,7 @@ class EngineSupervisor:
                 self._client.command("playlist-remove", i)
             for i in range(pos - 1, -1, -1):        # played files BEFORE current
                 self._client.command("playlist-remove", i)
-        self._client.command("loadfile", nxt["path"], "append")
+        self._loadfile(nxt["path"], "append", nxt)
         self._expected_next_path = nxt["path"]
 
     def _advance_or_fail(self, why: str) -> None:
@@ -454,7 +498,7 @@ class EngineSupervisor:
                 self._state.current_index = idx - 1  # start-file will bump it
                 self._store.save(self._state)
                 self._expected_next_path = None
-                self._client.command("loadfile", e["path"], "replace")
+                self._loadfile(e["path"], "replace", e)
                 return
             self._journal.append("track_skip", path=e["path"],
                                  reason="unplayable at advance")
@@ -534,16 +578,16 @@ class EngineSupervisor:
         if not self._state.forced_emergency:
             nxt = self._state.next_entry()
             if nxt is not None and playable(nxt["path"]):
-                self._client.command("loadfile", nxt["path"], "replace")
+                self._loadfile(nxt["path"], "replace", nxt)
                 return  # start-file handler will exit emergency mode
         candidates = self._emergency_candidates()
         if candidates:
             p = candidates[self._emergency_idx % len(candidates)]
             self._emergency_idx += 1
-            self._client.command("loadfile", p, "replace")
+            self._loadfile(p, "replace", None)
         else:
             # tier 3: baked-in source, looped — the last line of defense
-            self._client.command("loadfile", self._baked_in, "replace")
+            self._loadfile(self._baked_in, "replace", None)
             self._client.set_property("loop-file", "inf")
 
     def _exit_emergency(self, reason: str) -> None:
