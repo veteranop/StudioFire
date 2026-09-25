@@ -7,7 +7,53 @@ plain English a non-technical operator can understand.
 
 ## [Unreleased]
 
+### Added (operator feedback from KDPI, 2026-09-25, TimeTrax #644)
+These came from John after the first live show on the new system.
+- **Songs fade into each other.** Each song fades out over its last 4
+  seconds, and the next song fades in over its first 1.5 seconds. PSAs, ads
+  and station IDs never fade: they play at full volume from start to finish.
+  So does emergency filler. The fade lengths can be changed (or turned off
+  by setting them to 0) in `config.json` under `engine` → `fade_out_sec` /
+  `fade_in_sec`.
+- **Search spots by name.** Type in the new search box above Upcoming Spots
+  to find a spot by its name, schedule, or file/folder.
+- **Date next to the clock** at the top of every page (e.g. "Fri, Sep 25").
+- **Now Playing shows the playlist.** The card now shows which playlist or
+  show is on air, how many songs are left, how much time is left, and roughly
+  when it will end.
+- **Song count and run time for playlists.** The playlist page shows how many
+  songs it has and how long it plays, and each song shows its length. Songs
+  whose length isn't known yet are counted separately; their length fills in
+  automatically the first time they're readied for air.
+- **File browser on the playlist page.** Open any folder the studio PC can
+  see (NAS included) and use **+ Add** to add a song to the playlist or
+  **▶ Next** to play it right after the current song. There's also an
+  "Add all songs in this folder" button. It reopens the last folder you used.
+  Adding songs no longer reloads the page, so you can add several in a row.
+
+### Changed
+- **The On-Air schedule's "Up next" list is in true air order.** Each entry
+  now starts with when it will actually air next (e.g. "▶ Tomorrow 6:00 AM").
+  Before, every one-time show was listed ahead of every repeating one, so a
+  daily 6 AM show could appear below something scheduled for next week.
+- **Better on smaller monitors.** The On-Air schedule and Upcoming Spots
+  lists wrap long names, and their buttons move under the text instead of
+  getting cut off. The Now Playing buttons shrink to fit, and the History/Log
+  column moves below the main area on screens narrower than 1440 pixels. The
+  clock no longer overlaps the menu.
+- **Calendar names stay in their box.** Long show names wrap inside the day
+  box instead of spilling into the next day or getting cut off.
+- After an update, the page picks up the new layout by itself. Before, the
+  browser could keep showing the old layout until you did a hard refresh.
+
 ### Fixed
+- Saving a playlist from StudioFire no longer blanks out the song lengths
+  stored in its .lst file.
+- A playlist containing a file name with an unusual character (e.g. "√")
+  no longer breaks when saved. The character used to be turned into "?", and
+  that song would then never play again.
+- A malformed length in a .lst file (e.g. "-2") no longer causes that line's
+  song to be skipped.
 - Closed a race in the web control room's feeder (P2) where an operator
   cueing a song ("Play Next"), firing a station ID/ad, or editing the live
   rotation at the same moment the system was pulling fresh songs from the NAS

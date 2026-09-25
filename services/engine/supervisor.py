@@ -45,6 +45,30 @@ STALL_TICKS = 2          # position frozen for N watchdog ticks -> restart mpv
 RESTART_BACKOFF = 1.0    # seconds between consecutive mpv restarts
 MAX_QUEUE_HISTORY = 20   # played entries kept in the runtime queue (journal is
                          # the permanent record); older ones are trimmed
+FULL_VOLUME = 100
+FADE_TICK = 0.1          # fader resolution (seconds)
+FADE_VERIFY_SEC = 5.0    # re-read mpv's real volume this often (drift guard)
+# queue sources that fade in/out. Spots (IDs, ads, PSAs) are deliberately NOT
+# here — they play at full volume start to finish. Emergency/baked-in filler
+# isn't a queue entry, so it never fades either.
+FADE_SOURCES = {"playlist", "show", "manual"}
+
+
+def fade_volume(pos, dur, fade_in: float, fade_out: float,
+                full: float = FULL_VOLUME) -> float:
+    """Volume for a fading song at position `pos` of `dur` seconds: ramps up
+    over the first `fade_in` seconds, down over the last `fade_out`. Unknown
+    pos/dur -> full volume (never guess toward silence)."""
+    if pos is None:
+        return full
+    vol = full
+    if fade_in > 0 and pos < fade_in:
+        vol = min(vol, full * max(pos, 0.0) / fade_in)
+    if fade_out > 0 and dur:
+        left = dur - pos
+        if left < fade_out:
+            vol = min(vol, full * max(left, 0.0) / fade_out)
+    return vol
 
 
 def playable(path: str) -> bool:
@@ -87,6 +111,8 @@ class EngineSupervisor:
         self._extra_mpv_args = list(c.get("extra_mpv_args", []))
         self._watchdog_interval = float(c.get("watchdog_interval", 1.0))
         self._heartbeat_path = c["heartbeat_path"]
+        self._fade_out = max(0.0, float(c.get("fade_out_sec", 0) or 0))
+        self._fade_in = max(0.0, float(c.get("fade_in_sec", 0) or 0))
 
         self._store = QueueStore(c["state_path"])
         self._journal = Journal(c["journal_path"])
@@ -96,7 +122,15 @@ class EngineSupervisor:
         self._client: MpvClient | None = None
         self._owner: threading.Thread | None = None
         self._watchdog: threading.Thread | None = None
+        self._fader: threading.Thread | None = None
         self._stopping = threading.Event()
+        # fade policy for the file now playing, set by the owner thread at
+        # start-file and read by the fader thread. _fade_gen bumps on every
+        # track change so the fader never applies a stale track's volume.
+        self._fade_lock = threading.Lock()
+        self._fade_on = False
+        self._fade_gen = 0
+        self._fade_sent: int | None = None   # last volume we told mpv
 
         self._emergency_files: list[str] = []
         self._emergency_idx = 0
@@ -134,6 +168,10 @@ class EngineSupervisor:
         self._watchdog = threading.Thread(target=self._watchdog_loop,
                                           name="engine-watchdog", daemon=True)
         self._watchdog.start()
+        if self._fade_in or self._fade_out:
+            self._fader = threading.Thread(target=self._fader_loop,
+                                           name="engine-fader", daemon=True)
+            self._fader.start()
         # resume where we left off (or re-enter emergency per persisted flag)
         self._post({"kind": "kick", "why": "startup"})
 
@@ -144,6 +182,8 @@ class EngineSupervisor:
             self._owner.join(5)
         if self._watchdog:
             self._watchdog.join(2)
+        if self._fader:
+            self._fader.join(2)
         if self._client:
             self._client.stop()
         self._journal.append("engine_stop")
@@ -253,10 +293,12 @@ class EngineSupervisor:
             self._ensure_next_appended()
             self._set_status(now_title=e.get("title"),
                              now_source=e.get("source"), now_id=e.get("id"))
+            self._set_fade_policy(e.get("source") in FADE_SOURCES)
         else:
             source = "emergency" if path != self._baked_in else "baked_in"
             self._journal.append("track_start", path=path, source=source)
             self._set_status(now_title=None, now_source=source, now_id=None)
+            self._set_fade_policy(False)
         self._set_status(now_playing=path, duration=None)
         # "Stop after current song": the previous song has ended and this one
         # just loaded — hold it at the start until the operator goes on air.
@@ -278,6 +320,74 @@ class EngineSupervisor:
             log.error("decode/play error on %s: %s", path, file_error)
         # eof/error with a prefetched next -> mpv auto-advances and start-file
         # will arrive. If nothing follows, the 'idle' event triggers failover.
+
+    # ----------------------------------------------------------------- fades
+
+    def _set_fade_policy(self, fadeable: bool) -> None:
+        """Owner thread, at every track start: decide whether this file fades
+        and set its STARTING volume right now (not on the fader's next tick,
+        so a spot never blips in quiet and a song never blips in loud).
+        Non-fading files always start at full volume — this is also what
+        guarantees a fade can never leave the station stuck quiet."""
+        if not (self._fade_in or self._fade_out):
+            return               # fades off: never touch volume (old behavior)
+        start = 0 if (fadeable and self._fade_in) else FULL_VOLUME
+        with self._fade_lock:
+            self._fade_on = fadeable
+            self._fade_gen += 1
+        self._send_volume(start)
+
+    def _send_volume(self, vol: int) -> None:
+        client = self._client
+        if client is None:
+            return
+        try:
+            client.set_property("volume", vol, timeout=1.0)
+            self._fade_sent = vol
+        except (MpvDead, MpvError):
+            self._fade_sent = None    # unknown — the fader will re-send
+
+    def _fader_loop(self) -> None:
+        """Ramp mpv's volume for song fade-in/fade-out. Separate thread so a
+        slow IPC reply never delays track changes. Only ever lowers volume
+        inside a song's first/last seconds; anywhere else it holds full.
+        Every error path falls back to 'send full volume again'."""
+        last_verify = time.monotonic()
+        while not self._stopping.wait(FADE_TICK):
+            client = self._client
+            if client is None:
+                continue
+            with self._fade_lock:
+                gen, fading = self._fade_gen, self._fade_on
+            try:
+                if time.monotonic() - last_verify >= FADE_VERIFY_SEC:
+                    last_verify = time.monotonic()
+                    actual = client.get_property("volume", timeout=0.5)
+                    if self._fade_sent is None or \
+                            round(actual) != self._fade_sent:
+                        self._fade_sent = None  # drifted (mpv restart etc.)
+                if not fading:
+                    target = FULL_VOLUME
+                elif client.get_property("pause", timeout=0.5):
+                    continue                    # held (stop-after / off air)
+                else:
+                    pos = client.get_property("time-pos", timeout=0.5)
+                    dur = client.get_property("duration", timeout=0.5)
+                    target = round(fade_volume(pos, dur, self._fade_in,
+                                               self._fade_out))
+                with self._fade_lock:
+                    if gen != self._fade_gen:
+                        continue                # track changed mid-read
+                if target != self._fade_sent:
+                    client.set_property("volume", target, timeout=0.5)
+                    self._fade_sent = target
+            except MpvError:
+                continue    # e.g. time-pos unavailable while a file loads
+            except MpvDead:
+                self._fade_sent = None          # watchdog restarts mpv
+            except Exception:
+                log.exception("fader error — restoring full volume")
+                self._send_volume(FULL_VOLUME)
 
     # ------------------------------------------------------- queue mechanics
 
@@ -590,6 +700,7 @@ class EngineSupervisor:
         )
         self._client.start()
         self._expected_next_path = None
+        self._fade_sent = None   # fresh mpv starts at --volume; re-assert
 
     def _restart_mpv(self, why: str) -> None:
         now = time.monotonic()

@@ -25,6 +25,21 @@ body {
   position: absolute; left: 50%; transform: translateX(-50%);
   font-size: 1.9rem; font-weight: 700; letter-spacing: 1px;
   font-variant-numeric: tabular-nums; color: var(--text);
+  white-space: nowrap;
+}
+.clock-date {
+  font-size: 1.05rem; font-weight: 600; color: var(--muted);
+  letter-spacing: .3px; margin-right: .5rem; vertical-align: middle;
+}
+/* narrower screens: the centered clock would sit on top of the nav links —
+   put it in the bar's normal flow instead, between the nav and the buttons */
+@media (max-width: 1600px) {
+  .clock {
+    position: static; transform: none; order: 1;
+    margin-left: auto; font-size: 1.3rem;
+  }
+  .clock-date { font-size: .9rem; }
+  .topbar > .nav-right { order: 2; margin-left: 0; }
 }
 @media (max-width: 900px) { .clock { display: none; } }
 .page { max-width: 1600px; margin: 2rem auto; padding: 0 1.5rem; }
@@ -85,8 +100,20 @@ input {
 .np-artist { font-size: 1.25rem; color: #b9c6d6; margin-top: .15rem; }
 .np-artist:empty { display: none; }
 .np-pos { font-size: 1.3rem; }
-.controls { display: flex; gap: 1rem; }
+.np-title, .np-artist { overflow-wrap: anywhere; }
+.nowplaying > div:first-child { flex: 1 1 22rem; min-width: 0; }
+.np-playlist { margin-top: .45rem; font-size: 1.05rem; line-height: 1.45; }
+.np-playlist:empty { display: none; }
+.np-pl-kind {
+  font-size: .7rem; font-weight: 800; letter-spacing: .6px; color: #0b0f14;
+  background: #7fb2ff; border-radius: 5px; padding: .1rem .4rem;
+  vertical-align: middle;
+}
+.controls { display: flex; flex-wrap: wrap; gap: 1rem; }
 .controls .btn-big { width: auto; min-width: 220px; margin-top: 0; }
+@media (max-width: 1400px) {
+  .controls .btn-big { min-width: 0; flex: 1 1 12rem; font-size: 1.1rem; }
+}
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
 @media (max-width: 900px) { .grid2 { grid-template-columns: 1fr; } }
 .grid3 {
@@ -95,12 +122,17 @@ input {
   gap: 1.5rem; align-items: start;
 }
 @media (max-width: 1080px) { .grid3 { grid-template-columns: 1fr; } }
+/* mid-size monitors: tighter cards so three columns still fit */
+@media (max-width: 1600px) {
+  .grid3 { gap: 1rem; }
+  .grid3 .card { padding: 1rem 1.1rem; }
+}
 
 /* On Air two-zone layout: work area on the left, History/Log rail on right */
 .onair-wrap { display: flex; gap: 1.5rem; align-items: flex-start; }
 .onair-left { flex: 1 1 auto; min-width: 0; }
 .onair-right { flex: 0 0 clamp(320px, 22vw, 420px); }
-@media (max-width: 1200px) {
+@media (max-width: 1440px) {   /* small monitors: log rail drops below */
   .onair-wrap { flex-direction: column; }
   .onair-right { flex: 1 1 auto; width: 100%; }
 }
@@ -139,6 +171,8 @@ input {
 .qrow:hover { background: #202a36; border-radius: 8px; }
 .qgrip { color: var(--muted); cursor: grab; font-size: 1rem; width: 1rem; }
 .qtitle { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.qdur { color: var(--muted); font-size: .85rem; flex: 0 0 auto;
+        font-variant-numeric: tabular-nums; }
 .qacts {
   display: flex; gap: .5rem; flex-wrap: wrap;
   padding: 0 .7rem .6rem 2.1rem;
@@ -197,16 +231,26 @@ input {
 .sched-h { margin: 1.2rem 0 .4rem; font-size: 1rem; color: var(--muted);
            text-transform: uppercase; letter-spacing: .6px; }
 .schedlist { list-style: none; padding: 0; margin: 0; }
+/* entries wrap instead of clipping on smaller monitors: long names break,
+   and the buttons drop under the text when the column gets narrow */
 .schedlist li {
-  display: flex; justify-content: space-between; align-items: center;
+  display: flex; flex-wrap: wrap; justify-content: space-between;
+  align-items: center;
   gap: .6rem; padding: .6rem .75rem; margin: .45rem 0;
   background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
 }
-.schedlist li > div:first-child { flex: 1 1 auto; min-width: 0; }
+.schedlist li > div:first-child {
+  flex: 1 1 11rem; min-width: 0; overflow-wrap: anywhere;
+}
 .schedlist li strong { font-weight: 700; }
 .schedlist small { display: inline-block; margin-top: .15rem; }
-.schedlist .item-btns { display: flex; gap: .3rem; flex: 0 0 auto; }
+.schedlist .item-btns {
+  display: flex; flex-wrap: wrap; gap: .3rem; flex: 0 1 auto;
+  white-space: normal;
+}
 .spot-when { color: #7fb2ff; font-weight: 700; }
+.next-when { color: #7ee2a8; font-weight: 700; }
+#sched-now { overflow-wrap: anywhere; }
 #sched-now { line-height: 1.5; }
 .onair-txt { color: #ff7676; font-weight: 800; letter-spacing: .5px; }
 #sched-time, #spot-clock { max-width: 100%; }
@@ -290,6 +334,14 @@ input {
   background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
 }
 .item-btns { white-space: nowrap; }
+.item-label { min-width: 0; overflow-wrap: anywhere; }
+.item-dur { font-variant-numeric: tabular-nums; margin-left: .3rem; }
+.pl-stats { margin: -.4rem 0 .8rem; font-weight: 600; color: #b9c6d6; }
+.fb-hint { font-size: .9rem; margin: 0 0 .4rem; }
+.fb-bar { margin: .6rem 0 .3rem; flex-wrap: wrap; }
+.fb-path { font-size: .85rem; overflow-wrap: anywhere; margin-bottom: .3rem; }
+.fb-list li { justify-content: flex-start; }
+.fb-list .pickdir { padding: 4px 6px; }
 .results { list-style: none; padding: 0; margin: .3rem 0 0;
            max-height: 22rem; overflow-y: auto; }
 .results li { display: flex; gap: .7rem; align-items: center;
@@ -338,7 +390,10 @@ select {
 .cal-base { margin-bottom: 1rem; }
 .cal-foot { margin-top: 1rem; font-size: .85rem; }
 .cal { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
-.cal-dowrow, .cal-week { display: grid; grid-template-columns: repeat(7, 1fr); }
+/* minmax(0, 1fr): a long show name can't stretch its day column */
+.cal-dowrow, .cal-week {
+  display: grid; grid-template-columns: repeat(7, minmax(0, 1fr));
+}
 .cal-dowrow > div {
   text-align: center; font-weight: 700; color: var(--muted);
   padding: .5rem 0; background: #151b24; border-bottom: 1px solid var(--border);
@@ -346,8 +401,9 @@ select {
 .cal-week { border-bottom: 1px solid var(--border); }
 .cal-week:last-child { border-bottom: none; }
 .cal-cell {
-  min-height: 118px; padding: .4rem; border-right: 1px solid var(--border);
-  background: var(--panel);
+  min-height: 118px; min-width: 0; padding: .4rem;
+  border-right: 1px solid var(--border); background: var(--panel);
+  overflow: hidden;
 }
 .cal-cell:last-child { border-right: none; }
 .cal-blank { background: #12161d; }
@@ -367,7 +423,8 @@ select {
 }
 .cal-time { display: block; font-weight: 700; color: #7ee2a8; font-size: .72rem; }
 .cal-time:empty { display: none; }
+/* wrap long show names inside the day box instead of spilling/cutting off */
 .cal-name {
   display: block; color: #dbe6ee;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  white-space: normal; overflow-wrap: anywhere; line-height: 1.25;
 }

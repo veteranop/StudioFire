@@ -397,7 +397,8 @@ class Feeder:
                     p = repl + p[len(prefix):]
                     break
             out.append({"id": f"l{i}", "item_type": "file", "path": p,
-                        "title": e["title"]})
+                        "title": e["title"],
+                        "duration_sec": e.get("duration")})
         return out
 
     def _clear_pending(self, conn, st: dict, status: dict) -> dict:
@@ -863,6 +864,12 @@ class Feeder:
                     song = meta["title"] or title       # tag title, else file
                     artist, album = meta["artist"], meta["album"]
                     duration = meta["duration"] or self._duration_of(conn, src)
+                    # remember the real length on the playlist item (feeds the
+                    # song count / run time + time-left displays). Int ids are
+                    # playlist_items rows; .lst/folder show items use string ids
+                    if isinstance(item_id, int) and meta["duration"]:
+                        pl.set_duration_if_unknown(conn, item_id,
+                                                   meta["duration"])
                     disp = f"{artist} - {song}" if artist else song
                     eid = uuid.uuid4().hex
                     batch.append({"id": eid, "path": cached, "title": disp,
@@ -1217,11 +1224,44 @@ def register(app: FastAPI) -> None:
             now_item_id = feeder._now_item_id(st, now_eid,
                                               estatus.get("now_playing"))
 
-            def _fmt(items):
-                return [{"id": it["id"], "item_type": it["item_type"],
-                         "title": it["title"] or os.path.splitext(
-                             os.path.basename(it["path"]))[0]}
-                        for it in items]
+            def _fmt(items, durs=None):
+                """durs: {item_id: sec} for a base playlist; show items carry
+                their own duration_sec (or fall back to the music index)."""
+                out = []
+                for it in items:
+                    dur = (durs or {}).get(it["id"]) or it.get("duration_sec")
+                    if not dur and it["item_type"] == "file" and durs is None:
+                        row = conn.execute(
+                            "SELECT duration_sec FROM tracks WHERE path = ?",
+                            (it["path"],)).fetchone()
+                        dur = row["duration_sec"] if row else None
+                    out.append({"id": it["id"], "item_type": it["item_type"],
+                                "title": it["title"] or os.path.splitext(
+                                    os.path.basename(it["path"]))[0],
+                                "duration": dur or None})
+                return out
+
+            def _timing(items):
+                """Song count, total run time, and how much is left AFTER the
+                on-air song (the page adds the on-air song's own time left).
+                A rotation loops forever, so 'left' means left in this pass.
+                `*_unknown` = songs with no known length (not in the sums)."""
+                songs = [i for i in items if i["item_type"] != "insert"]
+                at = next((k for k, i in enumerate(songs)
+                           if i["id"] == now_item_id), None)
+                after = songs[at + 1:] if at is not None else []
+                return {"count": len(songs),
+                        "total_sec": round(sum(i["duration"] or 0
+                                               for i in songs), 1),
+                        "total_unknown": sum(1 for i in songs
+                                             if not i["duration"]),
+                        "left_after_now_sec": (round(sum(
+                            i["duration"] or 0 for i in after), 1)
+                            if at is not None else None),
+                        "left_unknown": sum(1 for i in after
+                                            if not i["duration"]),
+                        "songs_after_now": len(after)
+                        if at is not None else None}
 
             def _with_inserts(items):
                 """Splice cued one-offs (library 'Insert Next' + spots) into
@@ -1246,20 +1286,23 @@ def register(app: FastAPI) -> None:
             if st.get("show"):  # a show is on air — follow it
                 cur = sched.playing(conn)
                 name = (cur.get("name") if cur else None) or "Show on air"
+                items = _fmt(feeder._show_items(conn, st))
                 return {"playlist": {"id": None, "name": name},
                         "is_show": True, "now_item_id": now_item_id,
-                        "items": _with_inserts(
-                            _fmt(feeder._show_items(conn, st)))}
+                        "timing": _timing(items),
+                        "items": _with_inserts(items)}
             base = coredb.get_setting(conn, "active_playlist_id")
             row = conn.execute("SELECT id, name FROM playlists WHERE id = ?",
                                (int(base),)).fetchone() if base else None
             if row is None:
                 return {"playlist": None, "items": [], "now_item_id": None,
-                        "is_show": False}
+                        "is_show": False, "timing": None}
+            items = _fmt(pl.get_items(conn, row["id"]),
+                         pl.item_durations(conn, row["id"]))
             return {"playlist": {"id": row["id"], "name": row["name"]},
                     "is_show": False, "now_item_id": now_item_id,
-                    "items": _with_inserts(_fmt(pl.get_items(conn,
-                                                             row["id"])))}
+                    "timing": _timing(items),
+                    "items": _with_inserts(items)}
 
     @app.get("/api/history")
     def api_history(limit: int = 40, conn=Depends(get_conn),
@@ -1351,7 +1394,9 @@ def register(app: FastAPI) -> None:
                           "start_at": e["start_at"],
                           "recurrence": e.get("recurrence") or "once",
                           "end_date": e.get("end_date"),
-                          "when": e["when"]}
+                          "when": e["when"],
+                          "next_at": e["next_at"],
+                          "next_label": e["next_label"]}
                          for e in sched.list_waiting(conn)],
         }
 

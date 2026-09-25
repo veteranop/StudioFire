@@ -279,5 +279,105 @@ not P1's.
   before this branch goes anywhere near the on-air PC.**
 - No deploy, no push, no service restarts, `config/config.json` untouched.
 
+## 9. John (KDPI) feedback batch — 2026-09-25 (TimeTrax #644, branch `john-feedback-batch`)
+
+Branched off `feeder-hardening` so both ship together. John's nine requests
+after the first live show, plus two latent bugs found along the way.
+
+**P1 engine — song fades (`services/engine/supervisor.py`, `main.py`).**
+This is the only P1 change, and the one to review hardest.
+- Approach: a new `engine-fader` thread ramps mpv's `volume` property every
+  100ms. It does NOT use per-file `af`/`afade` filters: those depend on the
+  mpv version's `loadfile` syntax, rebuild the filter graph, and need the
+  duration up front. Pure `fade_volume(pos, dur, fade_in, fade_out)` is
+  unit-tested.
+- It is sequential fade-out → fade-in, not an overlapping crossfade. One
+  mpv instance can't overlap two files, and a second instance on the live
+  path is not a risk worth taking. It matches what John asked for ("fade out
+  and new song fade in").
+- Which files fade: `FADE_SOURCES = {"playlist", "show", "manual"}`. Spots
+  never fade, and emergency/baked-in filler never fades.
+- Safety design (the fader must never cause quiet/dead air):
+  - The owner thread sets each file's STARTING volume synchronously at
+    start-file (0 for a fading song, 100 for everything else), so a spot
+    can't inherit a faded-out volume even for one tick.
+  - `_fade_gen` bumps on every track change, and the fader discards a
+    reading taken across a change.
+  - Unknown pos/duration → full volume. The fader never guesses toward
+    silence.
+  - Every 5s the fader re-reads mpv's real volume and re-asserts it on
+    drift (e.g. after an mpv restart, which also resets `_fade_sent`).
+  - Any unexpected fader exception → send full volume.
+  - Fades off (both 0) → no fader thread, and start-file never touches
+    volume: exactly the old behavior.
+- Defaults: `engine.fade_out_sec` 4, `engine.fade_in_sec` 1.5, set in
+  `main.py`. The supervisor's own default is off, so the existing bench runs
+  un-faded.
+- Known limits:
+  - Operator Skip cuts without a fade-out.
+  - With gapless audio, the last ~0.2s of a spot that is followed by a song
+    may be cut to the song's fade-in start (0). Spots normally end on
+    silence.
+  - A VBR file with a wrong duration estimate fades early or late.
+
+**P2 changes.**
+- Migration 11: `playlist_items.duration_sec`.
+  - `parse_lst` now keeps Zara's per-line ms. It also treats a negative or
+    garbage duration (a real `-2` was in JB Playlist 4) as unknown; before,
+    that swallowed the whole line into the path.
+  - Stored on import, duplicate, and add. The add API probes the length:
+    index first, else a mutagen header read, for single adds only.
+  - The feeder backfills it from the cached copy's real length the first
+    time a song is fed (file items only, never folder items).
+- `export_lst_text` writes the item's own duration. Before, it used
+  index-only durations, which blanked every duration outside the music root
+  on any GUI save.
+- `write_lst` falls back to UTF-8 + BOM when a path isn't cp1252-encodable.
+  Before, `errors="replace"` turned `√` into `?` and silently broke that
+  path forever. Plain playlists stay cp1252 for Zara.
+- `/api/rotation` items carry `duration`, plus a `timing` block: count,
+  total, time left after the on-air song, and unknown-length counts. It
+  drives the Now Playing card's playlist line.
+- New endpoint: `GET /api/playlists/{pid}/stats`.
+- `schedule.next_occurrence()` / `next_label()`: `list_waiting` now sorts by
+  the real next airing, interleaving one-time and recurring shows (it used to
+  sort all one-shots first). Each row gets `next_at`/`next_label`. Only the
+  UI uses this order; firing still goes through `due()` and is unchanged.
+- `asset_v` cache-buster on `style.css`. Found during the visual check: a
+  stale cached stylesheet would have hidden every layout fix after deploy.
+
+**UI.**
+- Spot search box.
+- Date beside the clock. Below 1600px the clock moves into the bar's normal
+  flow; it used to overlap the nav at 1366.
+- Schedule/spot lists wrap, and their buttons drop under the text.
+- The log rail moves below the main area at ≤1440px.
+- Calendar cells use `minmax(0,1fr)` and names wrap.
+- Playlist page: stats line, per-song lengths, and a file browser card
+  (+ Add / ▶ Next / Add all, remembers the last folder). Adds no longer
+  reload the page.
+
+**Tests.** The full suite is green: 484 checks across 13 suites, 0 failures.
+- New: `tests/test_fader.py` (19 checks). It samples real mpv's volume
+  while playing song → spot → manual song → filler, and asserts:
+  - the song fades in and out;
+  - the spot is at 100 in every sample from its first instant;
+  - filler is at 100.
+  Ran 4× with no flakes.
+- `test_playlists` +15, `test_schedule` +8, `test_engine_bridge` +4.
+- `test_supervisor_bench` (35) also re-run and green.
+- Visual check: the real P2 pages were rendered at 1366×768 and 1920×1080
+  against a temp DB copy with a fake engine. The file-browser add was
+  verified end to end, including the `.lst` save (duration + cp1252).
+
+**Not done / gates:**
+- The torture/soak gate from §8 still applies, and now also covers the
+  fader. Bench-listen to the fades before anything goes on the on-air PC.
+- No deploy, no push, `config/config.json` untouched. Fades turn on by
+  default once the new `main.py` runs; to disable, set
+  `engine.fade_out_sec`/`fade_in_sec` to 0 in the station config.
+- The on-air PC is on the stress-tested build: neither this branch nor
+  `feeder-hardening` is live.
+
 ## Related
 - [[PROJECTS-INDEX]]

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}{{ station }}{% endblock %}</title>
-  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/style.css?v={{ asset_v }}">
   {% if ga_id %}
   <!-- GA4 product telemetry (see core/config.py); async + fail-silent, so an
        offline studio LAN never notices it -->
@@ -24,7 +24,8 @@
       <img src="/static/sf_logo.png" alt="{{ station }}" class="brand-logo">
     </a>
     {% block nav %}{% endblock %}
-    <div class="clock" id="topclock">--:--:--</div>
+    <div class="clock"><span class="clock-date" id="topdate"></span>
+      <span id="topclock">--:--:--</span></div>
   </header>
   <main class="page">
     {% block content %}{% endblock %}
@@ -32,9 +33,13 @@
   <script>
     (function () {
       const el = document.getElementById("topclock");
+      const dateEl = document.getElementById("topdate");
       function tick() {
         const d = new Date();
         el.textContent = d.toLocaleTimeString([], {hour12: false});
+        // e.g. "Thu, Sep 25" — the date next to the time
+        dateEl.textContent = d.toLocaleDateString([],
+          {weekday: "short", month: "short", day: "numeric"});
       }
       tick(); setInterval(tick, 1000);
     })();

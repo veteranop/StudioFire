@@ -70,6 +70,13 @@ def create_app(cfg: dict) -> FastAPI:
     # threading extra ctx through each handler
     templates.env.globals["ga_id"] = cfg.get("ga_measurement_id") or ""
     templates.env.globals["ga_station"] = cfg["station_name"]
+    # cache-buster for /static/style.css: after an update the browser fetches
+    # the new stylesheet instead of showing the old layout until a hard refresh
+    try:
+        templates.env.globals["asset_v"] = int(os.path.getmtime(
+            os.path.join(WEB, "static", "style.css")))
+    except OSError:
+        templates.env.globals["asset_v"] = 0
     app = FastAPI(title="StudioFire", docs_url=None, redoc_url=None)
     app.state.cfg = cfg
     app.state.sessions = sessions

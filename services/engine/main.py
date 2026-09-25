@@ -65,6 +65,10 @@ def load_config(path: str | None) -> dict:
         "heartbeat_path": os.path.join(data_dir, "engine_heartbeat.txt"),
         "logs_dir": logs_dir,
         "extra_mpv_args": engine.get("extra_mpv_args", []),
+        # song-to-song fades (seconds; 0 = off). Songs only — spots/IDs/PSAs
+        # and emergency filler always play at full volume start to finish.
+        "fade_out_sec": engine.get("fade_out_sec", 4.0),
+        "fade_in_sec": engine.get("fade_in_sec", 1.5),
     }
 
 

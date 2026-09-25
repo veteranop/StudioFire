@@ -52,7 +52,9 @@ def parse_lst(data: bytes) -> list[dict]:
     line as '<duration_ms>\\t<path>'. Zara also writes special non-file
     tokens (time events etc.) — anything without an audio extension is
     skipped. Zara is a Windows app, so non-UTF8 files are read as cp1252.
-    Returns [{"path": ..., "title": ...}].
+    A negative/garbage duration (seen in the wild: '-2') is treated as
+    unknown rather than swallowing the whole line into the path.
+    Returns [{"path": ..., "title": ..., "duration": seconds or None}].
     """
     try:
         text = data.decode("utf-8-sig")
@@ -63,15 +65,22 @@ def parse_lst(data: bytes) -> list[dict]:
         line = line.strip()
         if not line or line.isdigit():
             continue  # blank line or the count header
+        duration = None
         if "\t" in line:
             first, rest = line.split("\t", 1)
-            path = rest.strip() if first.strip().isdigit() else line
+            if re.fullmatch(r"-?\d+", first.strip()):
+                path = rest.strip()
+                ms = int(first)
+                duration = ms / 1000.0 if ms > 0 else None
+            else:
+                path = line
         else:
             path = line
         if os.path.splitext(path)[1].lower() not in AUDIO_EXTS:
             continue
         out.append({"path": path,
-                    "title": os.path.splitext(os.path.basename(path))[0]})
+                    "title": os.path.splitext(os.path.basename(path))[0],
+                    "duration": duration})
     return out
 
 
@@ -84,9 +93,9 @@ def add_items_bulk(conn: sqlite3.Connection, pid: int,
             "WHERE playlist_id = ?", (pid,)).fetchone()[0]
         conn.executemany(
             "INSERT INTO playlist_items "
-            "  (playlist_id, position, item_type, path, title) "
-            "VALUES (?, ?, 'file', ?, ?)",
-            [(pid, pos + i, e["path"], e["title"])
+            "  (playlist_id, position, item_type, path, title, duration_sec) "
+            "VALUES (?, ?, 'file', ?, ?, ?)",
+            [(pid, pos + i, e["path"], e["title"], e.get("duration"))
              for i, e in enumerate(entries)])
         conn.execute("UPDATE playlists SET updated_at = ? WHERE id = ?",
                      (time.time(), pid))
@@ -113,8 +122,8 @@ def duplicate_playlist(conn: sqlite3.Connection, pid: int, name: str) -> int:
         new_id = cur.lastrowid
         conn.execute(
             "INSERT INTO playlist_items "
-            "  (playlist_id, position, item_type, path, title) "
-            "SELECT ?, position, item_type, path, title "
+            "  (playlist_id, position, item_type, path, title, duration_sec) "
+            "SELECT ?, position, item_type, path, title, duration_sec "
             "FROM playlist_items WHERE playlist_id = ? ORDER BY position",
             (new_id, pid))
     return new_id
@@ -133,6 +142,43 @@ def get_items(conn: sqlite3.Connection, pid: int) -> list[dict]:
         "SELECT * FROM playlist_items WHERE playlist_id = ? "
         "ORDER BY position", (pid,)).fetchall()
     return [dict(r) for r in rows]
+
+
+def item_durations(conn: sqlite3.Connection, pid: int) -> dict[int, float]:
+    """{item_id: seconds} for the playlist's file items whose length is known:
+    the item's own stored length first, else the music index's. Folder items
+    resolve to a different file each airing, so they have no fixed length."""
+    rows = conn.execute(
+        "SELECT i.id, COALESCE(i.duration_sec, t.duration_sec) AS dur "
+        "FROM playlist_items i LEFT JOIN tracks t ON t.path = i.path "
+        "WHERE i.playlist_id = ? AND i.item_type = 'file'", (pid,)).fetchall()
+    return {r["id"]: float(r["dur"]) for r in rows if r["dur"]}
+
+
+def playlist_stats(conn: sqlite3.Connection, pid: int) -> dict:
+    """Song count + total run time for a playlist ("how long will this go").
+    `unknown` = songs with no known length yet (not counted in total_sec);
+    `folders` = folder items (a different file each airing — no fixed length)."""
+    items = get_items(conn, pid)
+    durs = item_durations(conn, pid)
+    songs = sum(1 for i in items if i["item_type"] == "file")
+    return {"songs": songs,
+            "folders": len(items) - songs,
+            "total_sec": round(sum(durs.values()), 1),
+            "unknown": songs - len(durs)}
+
+
+def set_duration_if_unknown(conn: sqlite3.Connection, item_id: int,
+                            seconds: float | None) -> None:
+    """Remember a file item's real length the first time we learn it (the
+    feeder reads it from the cached copy when the song is readied for air)."""
+    if not seconds or seconds <= 0:
+        return
+    with conn:
+        conn.execute("UPDATE playlist_items SET duration_sec = ? "
+                     "WHERE id = ? AND duration_sec IS NULL "
+                     "AND item_type = 'file'",
+                     (round(float(seconds), 2), item_id))
 
 
 # ------------------------------------------------- ZaraRadio .lst export/mirror
@@ -159,16 +205,21 @@ def _expand_folder(conn: sqlite3.Connection, item: dict) -> list[str]:
 def export_lst_text(conn: sqlite3.Connection, pid: int) -> str:
     """Render a playlist as ZaraRadio .lst text: a track-count header line, then
     one track per line as '<duration_ms>\\t<path>'. Durations come from the
-    index (0 when unknown); paths use backslashes, like Zara writes them."""
+    item itself, else the index (0 when unknown); paths use backslashes, like
+    Zara writes them."""
     lines = []
+    durs = item_durations(conn, pid)
     for it in get_items(conn, pid):
-        paths = [it["path"]] if it["item_type"] == "file" \
-            else _expand_folder(conn, it)
-        for p in paths:
-            row = conn.execute(
-                "SELECT duration_sec FROM tracks WHERE path = ?", (p,)).fetchone()
-            ms = int(round((row["duration_sec"] or 0) * 1000)) \
-                if row and row["duration_sec"] else 0
+        if it["item_type"] == "file":
+            entries = [(it["path"], durs.get(it["id"]))]
+        else:
+            entries = [(p, None) for p in _expand_folder(conn, it)]
+        for p, dur in entries:
+            if dur is None:
+                row = conn.execute("SELECT duration_sec FROM tracks "
+                                   "WHERE path = ?", (p,)).fetchone()
+                dur = row["duration_sec"] if row else None
+            ms = int(round(dur * 1000)) if dur else 0
             lines.append(f"{ms}\t{p.replace('/', chr(92))}")
     body = "\r\n".join([str(len(lines))] + lines)
     return body + "\r\n" if lines else "0\r\n"
@@ -212,12 +263,18 @@ def write_lst(conn: sqlite3.Connection, lst_dir: str, pid: int,
             remove_lst(lst_dir, old_name)
         target = os.path.join(lst_dir, lst_filename(row["name"]))
     tmp = target + ".tmp"
+    text = export_lst_text(conn, pid)
     try:
-        # cp1252 (Windows ANSI) is what Zara reads/writes; our own parser tries
-        # utf-8-sig then cp1252, so this round-trips both ways.
-        with open(tmp, "w", encoding="cp1252", errors="replace",
-                  newline="") as f:
-            f.write(export_lst_text(conn, pid))
+        # cp1252 (Windows ANSI) is what Zara reads/writes. A path cp1252 can't
+        # hold (e.g. a '√' in a file name) would become '?' and never play
+        # again, so such a playlist is saved as UTF-8 with a BOM instead — our
+        # parser tries utf-8-sig first, so both round-trip.
+        try:
+            data = text.encode("cp1252")
+        except UnicodeEncodeError:
+            data = text.encode("utf-8-sig")
+        with open(tmp, "wb") as f:
+            f.write(data)
         os.replace(tmp, target)
     except OSError as exc:
         log.warning("could not save playlist %d to .lst: %s", pid, exc)
@@ -305,7 +362,8 @@ def sync_all_lst(conn: sqlite3.Connection, lst_dir: str) -> int:
 
 def add_item(conn: sqlite3.Connection, pid: int, item_type: str,
              path: str, title: str | None = None,
-             position: int | None = None) -> int:
+             position: int | None = None,
+             duration_sec: float | None = None) -> int:
     if item_type not in ITEM_TYPES:
         raise ValueError(f"bad item_type {item_type!r}")
     with conn:
@@ -320,8 +378,10 @@ def add_item(conn: sqlite3.Connection, pid: int, item_type: str,
                 "WHERE playlist_id = ? AND position >= ?", (pid, position))
         cur = conn.execute(
             "INSERT INTO playlist_items "
-            "  (playlist_id, position, item_type, path, title) "
-            "VALUES (?, ?, ?, ?, ?)", (pid, position, item_type, path, title))
+            "  (playlist_id, position, item_type, path, title, duration_sec) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (pid, position, item_type, path, title,
+             duration_sec if item_type == "file" and duration_sec else None))
         conn.execute("UPDATE playlists SET updated_at = ? WHERE id = ?",
                      (time.time(), pid))
     return cur.lastrowid
@@ -405,6 +465,23 @@ def relink_broken(conn: sqlite3.Connection, music_root: str,
     return stats
 
 
+def probe_duration(conn: sqlite3.Connection, path: str) -> float | None:
+    """A file's length in seconds: from the music index if it's there, else
+    read from the file's own header (one small read — fine for a single add,
+    never used in bulk). None if unknown/unreadable. Never raises."""
+    row = conn.execute("SELECT duration_sec FROM tracks WHERE path = ?",
+                       (path,)).fetchone()
+    if row and row["duration_sec"]:
+        return float(row["duration_sec"])
+    try:
+        import mutagen
+        m = mutagen.File(path)
+        length = getattr(getattr(m, "info", None), "length", None)
+        return round(float(length), 2) if length else None
+    except Exception:  # noqa: BLE001 — mutagen raises wildly varied errors
+        return None
+
+
 # -------------------------------------------------------------- resolver
 
 def _audio_files(folder: str) -> list[str]:
@@ -464,6 +541,7 @@ class ItemIn(BaseModel):
     path: str
     title: str | None = None
     position: int | None = None
+    duration_sec: float | None = None
 
 
 class OrderIn(BaseModel):
@@ -610,10 +688,20 @@ def register(app: FastAPI) -> None:
         _playlist_or_404(conn, pid)
         if body.item_type not in ITEM_TYPES:
             raise HTTPException(400, f"item_type must be one of {ITEM_TYPES}")
+        dur = body.duration_sec
+        if body.item_type == "file" and not dur:
+            dur = probe_duration(conn, body.path)
         item_id = add_item(conn, pid, body.item_type, body.path,
-                           body.title, body.position)
+                           body.title, body.position, duration_sec=dur)
         _sync(conn, pid)
-        return {"id": item_id}
+        return {"id": item_id,
+                "duration_sec": dur if body.item_type == "file" else None}
+
+    @app.get("/api/playlists/{pid}/stats")
+    def api_stats(pid: int, conn=Depends(get_conn), _=Depends(api_user)):
+        """Song count + total run time ("how long will this playlist go")."""
+        _playlist_or_404(conn, pid)
+        return playlist_stats(conn, pid)
 
     @app.delete("/api/playlists/{pid}/items/{item_id}")
     def api_remove_item(pid: int, item_id: int, conn=Depends(get_conn),

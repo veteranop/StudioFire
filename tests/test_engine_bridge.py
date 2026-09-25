@@ -608,6 +608,20 @@ def main():
         check("now playing exposes song metadata fields", wait_for(
               lambda: bool(client.get("/api/queue").json().get("now_song")),
               8, "now_song"))
+        # Now Playing card: playlist name + songs/time left (the feeder
+        # backfills each item's real length from its cached copy)
+        tm = client.get("/api/rotation").json()["timing"]
+        check("rotation timing: song count + time left after the on-air song",
+              tm["count"] == 4 and tm["songs_after_now"] is not None
+              and tm["left_after_now_sec"] is not None)
+        check("rotation items carry lengths learned while feeding", any(
+              it["duration"] for it in
+              client.get("/api/rotation").json()["items"]))
+        check("playlist stats see those lengths",
+              client.get(f"/api/playlists/{pid}/stats").json()["total_sec"] > 0)
+        up = client.get("/api/schedule").json()["upcoming"]
+        check("schedule entries carry next_at / next_label",
+              all("next_at" in u and "next_label" in u for u in up))
 
         # reorder: reverse -> saved to the playlist AND re-synced on air
         r = client.post("/api/rotation/reorder",

@@ -167,6 +167,52 @@ def main():
     check("finish_all_playing(None) clears everything",
           sched.finish_all_playing(conn) == 1 and sched.playing(conn) is None)
 
+    # ---- "Up next" is in the order things actually air (John's feedback)
+    conn.close()
+    conn, path2 = fresh_db()
+    now = at("2026-09-24", "20:00")                       # a Thursday evening
+    one_next_week = sched.add(conn, "playlist", playlist_id=1,
+                              start_at="2026-10-01T09:00")
+    daily_6am = sched.add(conn, "playlist", playlist_id=1,
+                          recurrence="daily", time_of_day="06:00")
+    manual = sched.add(conn, "playlist", playlist_id=1)   # no time: manual cue
+    sat_only = sched.add(conn, "playlist", playlist_id=1, recurrence="weekly",
+                         time_of_day="10:00", days_mask=32)  # Saturdays
+    later_start = sched.add(conn, "playlist", playlist_id=1,
+                            recurrence="daily", time_of_day="07:00",
+                            start_date="2026-09-28")
+    ended = sched.add(conn, "playlist", playlist_id=1, recurrence="daily",
+                      time_of_day="05:00", end_date="2026-09-24")
+    up = sched.list_waiting(conn, now)
+    order = [e["id"] for e in up]
+    check("up next: soonest airing first, recurring and one-time interleaved",
+          order[:4] == [daily_6am, sat_only, later_start, one_next_week])
+    check("up next: nothing-to-air rows (manual, past stop date) go last",
+          set(order[4:]) == {manual, ended})
+    by = {e["id"]: e for e in up}
+    check("up next: daily 6 AM tonight -> 'Tomorrow 6:00 AM'",
+          by[daily_6am]["next_label"] == "Tomorrow 6:00 AM"
+          and by[daily_6am]["next_at"] == "2026-09-25T06:00")
+    check("up next: weekly lands on its weekday",
+          by[sat_only]["next_at"] == "2026-09-26T10:00")
+    check("up next: a start date pushes the first airing out",
+          by[later_start]["next_at"] == "2026-09-28T07:00")
+    check("up next: manual cue has no next airing",
+          by[manual]["next_at"] is None and by[manual]["next_label"] == "")
+    sched.mark_fired(conn, daily_6am, "2026-09-25")
+    check("up next: already aired today -> tomorrow's slot",
+          sched.next_occurrence(sched.get(conn, daily_6am),
+                                at("2026-09-25", "06:05")).date()
+          == dt.date(2026, 9, 26))
+    check("up next: inside the catch-up window counts as today",
+          sched.next_occurrence(sched.get(conn, later_start),
+                                at("2026-09-28", "07:10"))
+          == at("2026-09-28", "07:00"))
+    try:
+        os.remove(path2)
+    except OSError:
+        pass
+
     conn.close()
     try:
         os.remove(path)
