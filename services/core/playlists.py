@@ -286,14 +286,35 @@ def write_lst(conn: sqlite3.Connection, lst_dir: str, pid: int,
     return target
 
 
+# config paths.path_aliases, loaded by register(): {'\\\\SERVER\\share': 'Z:'}
+_PATH_ALIASES: dict = {}
+
+
+def set_path_aliases(aliases: dict | None) -> None:
+    global _PATH_ALIASES
+    _PATH_ALIASES = dict(aliases or {})
+
+
+def alias_path(path: str, aliases: dict | None = None) -> str:
+    """Rewrite a path prefix per path_aliases so a playlist written on
+    another machine (e.g. \\\\KDPI-Media\\music\\... at the studio) resolves
+    here (e.g. Z:\\... over a VPN where that name doesn't resolve). Applied
+    at feed time too, not just at import: playlists already in the DB keep
+    the paths they were made with."""
+    if not path:
+        return path
+    for prefix, repl in (_PATH_ALIASES if aliases is None
+                         else aliases or {}).items():
+        if prefix and path.lower().startswith(prefix.lower()):
+            return repl + path[len(prefix):]
+    return path
+
+
 def apply_aliases(entries: list[dict], aliases: dict) -> list[dict]:
     """Rewrite path prefixes ({'\\\\SERVER\\share': 'Z:'}) so a .lst written
     on another machine resolves locally."""
     for e in entries:
-        for prefix, repl in (aliases or {}).items():
-            if e["path"].lower().startswith(prefix.lower()):
-                e["path"] = repl + e["path"][len(prefix):]
-                break
+        e["path"] = alias_path(e["path"], aliases)
     return entries
 
 
@@ -501,7 +522,7 @@ def resolve_item(conn: sqlite3.Connection, item: dict) -> str | None:
     """Turn a playlist item into a concrete file path at feed time.
     Returns None when nothing is available (skip + alert, never failover —
     §10.5)."""
-    kind, path = item["item_type"], item["path"]
+    kind, path = item["item_type"], alias_path(item["path"])
     if kind == "file":
         return path if os.path.isfile(path) else None
     files = _audio_files(path)
@@ -555,6 +576,7 @@ class OpenIn(BaseModel):
 def register(app: FastAPI) -> None:
     get_conn = app.state.get_conn
     api_user = app.state.api_user
+    set_path_aliases(app.state.cfg.get("path_aliases"))
 
     def _playlist_or_404(conn, pid: int):
         row = conn.execute("SELECT * FROM playlists WHERE id = ?",

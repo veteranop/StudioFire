@@ -630,6 +630,8 @@ class Feeder:
         Resolution + precache (NAS I/O) happen BEFORE self._lock so a slow
         copy never blocks another operator or the feeder loop; only the
         queue push + bookkeeping are serialized."""
+        file_path = pl.alias_path(file_path) if file_path else file_path
+        folder_path = pl.alias_path(folder_path) if folder_path else folder_path
         if file_path:
             src = file_path if os.path.isfile(file_path) else None
             if src is None:
@@ -691,6 +693,7 @@ class Feeder:
         library search "Insert Next" action. On success `why` is the display
         title (callers that need to distinguish failure kinds should check
         the returned bool first, same contract as insert_spot)."""
+        path = pl.alias_path(path)
         cached = self.precache.ensure(path)  # NAS I/O: before the lock
         if cached is None:
             return False, "file could not be read/cached"
@@ -989,7 +992,9 @@ class Feeder:
                     # move on so the lookahead depth stays roughly honest
                     pending_sec += DEFAULT_TRACK_SEC
                     continue
-                src = item["path"]
+                # same aliasing as the real feed (resolve_item), so the cache
+                # key matches what tick() will look up
+                src = pl.alias_path(item["path"])
                 if not os.path.isfile(src):
                     continue
                 cached = self.precache.ensure(src)

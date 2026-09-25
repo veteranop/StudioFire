@@ -437,6 +437,26 @@ def main():
           and r.json() == {"songs": 2, "folders": 0, "total_sec": 61.0,
                            "unknown": 1})
 
+    # ---- path aliases apply at FEED time, not just import (a rotation made
+    # at the studio with \\KDPI-Media\music\... paths must play on a box that
+    # reaches the NAS as Z:)
+    real = os.path.join(td, "aliased-song.mp3")
+    touch(real)
+    pl.set_path_aliases({"\\\\STUDIO-NAS\\music": td})
+    try:
+        item = {"item_type": "file", "path": "\\\\STUDIO-NAS\\music\\aliased-song.mp3"}
+        check("alias: a stored studio path resolves through the alias",
+              pl.resolve_item(lc, item) == td + "\\aliased-song.mp3")
+        check("alias: prefix match is case-insensitive",
+              pl.alias_path("\\\\studio-nas\\MUSIC\\x.mp3")
+              == td + "\\x.mp3")
+        check("alias: other paths untouched",
+              pl.alias_path("C:\\other\\x.mp3") == "C:\\other\\x.mp3")
+    finally:
+        pl.set_path_aliases({})
+    check("alias: no aliases -> unresolvable stays unresolvable",
+          pl.resolve_item(lc, item) is None)
+
     # ---- a path cp1252 can't hold must survive a save (not become '?')
     upid = pl.create_playlist(lc, "Unicode Save")
     odd = "Z:\\G\\Dylan\\5-01 Subterranean Homesick Blues \u221a.mp3"

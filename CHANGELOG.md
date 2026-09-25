@@ -67,6 +67,15 @@ These came from John after the first live show on the new system.
   that song would then never play again.
 - A malformed length in a .lst file (e.g. "-2") no longer causes that line's
   song to be skipped.
+- Playlists made on another computer now play on this one when a path alias
+  is set up (`path_aliases` in config.json). Aliases used to apply only while
+  importing a playlist, so a rotation that was already saved could fail to
+  play and drop the station into emergency filler.
+- If the audio engine is stopped abruptly (e.g. Ctrl+C in its window), its
+  player no longer keeps running in the background and gets mixed up with the
+  next engine.
+- Recovery after the audio player crashes is faster: it no longer waits 2
+  seconds on a player that's already gone.
 - Closed a race in the web control room's feeder (P2) where an operator
   cueing a song ("Play Next"), firing a station ID/ad, or editing the live
   rotation at the same moment the system was pulling fresh songs from the NAS
