@@ -86,6 +86,15 @@ class EngineClient:
         except httpx.HTTPError:
             return None
 
+    def levels(self) -> dict | None:
+        """Program audio level for the On Air meter (polled ~8x/sec per open
+        page, so a short timeout: a slow answer is just a skipped frame)."""
+        try:
+            r = self._client.get("/levels", timeout=0.8)
+            return r.json() if r.status_code == 200 else None
+        except (httpx.HTTPError, ValueError):
+            return None
+
     def queue(self, mutation: dict) -> tuple[int, dict]:
         try:
             r = self._client.post("/queue", json=mutation)
@@ -1093,6 +1102,13 @@ def register(app: FastAPI) -> None:
     def api_engine_status(_=Depends(api_user)):
         st = engine.status()
         return {"engine_online": st is not None, **(st or {})}
+
+    @app.get("/api/levels")
+    def api_levels(_=Depends(api_user)):
+        """Live program level (dBFS per channel, None = silence) for the On
+        Air VU meter. ok=False when the engine can't be reached."""
+        lv = engine.levels()
+        return {"ok": lv is not None, **(lv or {})}
 
     @app.post("/api/engine/op")
     def api_engine_op(body: dict, _=Depends(api_user)):

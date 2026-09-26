@@ -73,11 +73,16 @@ def create_app(cfg: dict) -> FastAPI:
     templates.env.globals["ga_station"] = cfg["station_name"]
     # cache-buster for /static/style.css: after an update the browser fetches
     # the new stylesheet instead of showing the old layout until a hard refresh
-    try:
-        templates.env.globals["asset_v"] = int(os.path.getmtime(
-            os.path.join(WEB, "static", "style.css")))
-    except OSError:
-        templates.env.globals["asset_v"] = 0
+    # (read on every render — one stat — so a stylesheet updated while the
+    # service runs is picked up too, not only after a restart)
+    class _AssetVersion:
+        def __str__(self):
+            try:
+                return str(int(os.path.getmtime(
+                    os.path.join(WEB, "static", "style.css"))))
+            except OSError:
+                return "0"
+    templates.env.globals["asset_v"] = _AssetVersion()
     app = FastAPI(title="StudioFire", docs_url=None, redoc_url=None)
     app.state.cfg = cfg
     app.state.sessions = sessions

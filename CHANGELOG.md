@@ -11,13 +11,23 @@ plain English a non-technical operator can understand.
 These came from John after the first live show on the new system.
 - **Songs crossfade.** In the last 4 seconds of a song, the next song
   starts underneath it and rises while the old one falls, with no gap and no
-  dip in the middle. PSAs, ads and station IDs are never faded. One can start
+  dip in the middle (an "equal-power" fade, so the overall loudness stays
+  steady all the way through). PSAs, ads and station IDs are never faded. One can start
   over a song's fade-out, but it plays at full volume from start to finish,
   and the song after it starts the moment it ends, at full volume.
   Emergency filler is never faded either. Skip is still an instant cut, and
   "Stop after current song" lets the song finish fully before it stops. The
   crossfade length is set in `config.json` under `engine` → `crossfade_sec`
   (0 turns crossfading off, so items play back to back).
+- **Program Output meter (VU) at the top of the On Air page.** Live left and
+  right levels of what the station is sending to the sound card, with
+  green/amber/red zones, peak-hold marks and a peak readout in dB. If the
+  station goes silent while on air for 8 seconds, the meter card turns red
+  and says so. The level is measured without changing the audio. If the meter
+  can't run, it says "Meter offline" and the music plays on normally.
+- **Redesigned Now Playing card:** bigger title, a progress bar, the
+  playlist/show line, and the Stop, Skip and Stop-after buttons stacked on the
+  right. The card's edge is green while on air and grey when stopped.
 - **Search spots by name.** Type in the new search box above Upcoming Spots
   to find a spot by its name, schedule, or file/folder.
 - **Date next to the clock** at the top of every page (e.g. "Fri, Sep 25").

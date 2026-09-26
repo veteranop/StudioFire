@@ -71,6 +71,8 @@ def load_config(path: str | None) -> dict:
         # are never faded. (fade_out_sec is the pre-two-deck name.)
         "crossfade_sec": engine.get("crossfade_sec",
                                     engine.get("fade_out_sec", 4.0)),
+        # On Air level meter (a measure-only filter; never changes the audio)
+        "level_meter": engine.get("level_meter", True),
     }
 
 

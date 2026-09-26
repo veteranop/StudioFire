@@ -5,6 +5,7 @@ P2 runs on the same machine; nothing on the LAN talks to P1 directly.
 
 Endpoints (JSON in/out):
     GET  /status          -> supervisor status snapshot
+    GET  /levels          -> program audio level for the On Air meter
     GET  /health          -> {"ok": true}  (liveness for NSSM/P2)
     POST /queue           -> queue mutation {op, queue_version, entries?}
                              202 accepted / 409 stale version / 400 bad op
@@ -81,6 +82,8 @@ def _make_handler(supervisor):
         def do_GET(self):
             if self.path == "/status":
                 self._send(200, supervisor.status())
+            elif self.path == "/levels":
+                self._send(200, supervisor.levels())
             elif self.path == "/health":
                 self._send(200, {"ok": True})
             else:

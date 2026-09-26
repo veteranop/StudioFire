@@ -41,6 +41,7 @@ configured instead (config key engine.baked_in_asset).
 from __future__ import annotations
 
 import logging
+import math
 import os
 import queue as queue_mod
 import subprocess
@@ -70,23 +71,62 @@ FADE_SOURCES = {"playlist", "show", "manual"}
 # a file shorter than this many crossfades doesn't crossfade (it would spend
 # its whole life fading)
 MIN_XFADE_MULT = 2.0
+# On Air level meter: a measure-only ffmpeg filter on each deck (per-frame
+# peak + RMS per channel, read via mpv's af-metadata/meter property)
+METER_FILTER = ("@meter:lavfi=[astats=metadata=1:reset=1:"
+                "measure_perchannel=Peak_level+RMS_level:measure_overall=none]")
+METER_FLOOR_DB = -90.0
+# an outgoing song's fade-out reaches silence this long before its end-of-file
+# (mpv's buffered tail can't be ramped: time-pos isn't readable while it drains)
+FADE_END_EARLY = 0.5
+
+
+def _equal_power(x: float, full: float = FULL_VOLUME) -> float:
+    """mpv volume for fade progress x (0 = silent .. 1 = full) on an
+    EQUAL-POWER curve: gain = sin(x·π/2), so an outgoing cos and incoming
+    sin sum to constant loudness — no dip mid-crossfade. mpv's volume is
+    cubic (gain = (v/100)³), so volume = full · gain^(1/3). A straight line
+    in volume would leave both songs at 50 (≈ -18 dB each, ~-15 dB
+    combined) at the midpoint: an audible dip."""
+    x = min(1.0, max(0.0, x))
+    return full * math.sin(x * math.pi / 2) ** (1.0 / 3.0)
 
 
 def fade_volume(pos, dur, fade_in: float, fade_out: float,
                 full: float = FULL_VOLUME) -> float:
-    """Volume at position `pos` of a `dur`-second file: ramps up over the
-    first `fade_in` seconds, down over the last `fade_out`. Unknown pos/dur
-    -> full volume (never guess toward silence)."""
+    """Volume at position `pos` of a `dur`-second file: rises over the first
+    `fade_in` seconds, falls over the last `fade_out`, equal-power. Unknown
+    pos/dur -> full volume (never guess toward silence)."""
     if pos is None:
         return full
     vol = full
     if fade_in > 0 and pos < fade_in:
-        vol = min(vol, full * max(pos, 0.0) / fade_in)
+        vol = min(vol, _equal_power(pos / fade_in, full))
     if fade_out > 0 and dur:
         left = dur - pos
         if left < fade_out:
-            vol = min(vol, full * max(left, 0.0) / fade_out)
+            vol = min(vol, _equal_power(left / fade_out, full))
     return vol
+
+
+def _db(v) -> float | None:
+    """astats metadata value ('-12.3', '-inf') -> float dB, or None."""
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return None if math.isinf(f) or math.isnan(f) else f
+
+
+def _add_db(level: float | None, gain_db: float) -> float | None:
+    if level is None or math.isinf(gain_db):
+        return None
+    return level + gain_db
+
+
+def _floor(db: float | None) -> float | None:
+    """Below METER_FLOOR_DB counts as silence; round for the wire."""
+    return None if db is None or db < METER_FLOOR_DB else round(db, 1)
 
 
 def _same_path(a, b) -> bool:
@@ -146,6 +186,10 @@ class Deck:
         # mpv's playlist_entry_id of the file now loaded: end-file events for
         # any OTHER (earlier) file on this deck are stale and ignored
         self.mpv_entry_id = None
+        # the volume we last set on this player (the level meter reads the
+        # signal BEFORE mpv's volume, so it scales by this)
+        self.volume = FULL_VOLUME
+        self.meter = False                 # level-meter filter attached
 
     def reset(self) -> None:
         self.role, self.path, self.entry = "idle", None, None
@@ -170,6 +214,11 @@ class EngineSupervisor:
         self._heartbeat_path = c["heartbeat_path"]
         # crossfade length in seconds; 0 = back to back, no fades
         self._xfade = max(0.0, float(c.get("crossfade_sec", 0) or 0))
+        # On Air level meter (measure-only filter on each deck)
+        self._meter_on = bool(c.get("level_meter", True))
+        self._levels_lock = threading.Lock()
+        self._levels: dict = {"channels": [{"peak": None, "rms": None}] * 2,
+                              "decks": 0, "ts": 0.0}
 
         self._store = QueueStore(c["state_path"])
         self._journal = Journal(c["journal_path"])
@@ -396,7 +445,19 @@ class EngineSupervisor:
         ref[0] = client
         client.start()
         client.set_property("pause", True)
+        deck.meter = False
+        if self._meter_on:
+            # measure-only filter for the On Air level meter, attached at
+            # runtime so a player that can't do it just has no meter —
+            # playback is never affected
+            try:
+                client.command("af", "set", METER_FILTER)
+                deck.meter = True
+            except MpvError as exc:
+                log.warning("deck %s: level meter unavailable (%s)",
+                            deck.name, exc)
         deck.client = client
+        deck.volume = FULL_VOLUME
         deck.reset()
 
     def _other(self, deck: Deck | None) -> Deck:
@@ -435,6 +496,7 @@ class EngineSupervisor:
             deck.fade = {"in": fade_in} if fade_in > 0 else None
             deck.xfade_asked = False
             deck.client.set_property("volume", start_vol)
+            deck.volume = start_vol
         if not hold and not self._paused:
             deck.client.set_property("pause", False)
         self._onair = deck
@@ -554,9 +616,13 @@ class EngineSupervisor:
         except MpvError:
             return
         left = max(0.1, (dur or 0) - (pos or 0))
+        # finish the fade-out FADE_END_EARLY before end-of-file: mpv's last
+        # few hundred ms drain from its audio buffer where time-pos can't be
+        # read, so a ramp aimed at the very end would stall around 75%
+        out_len = max(0.1, min(self._xfade, left - FADE_END_EARLY))
         with self._mix_lock:
             deck.role = "fading"
-            deck.fade = {"out": min(self._xfade, left)}
+            deck.fade = {"out": out_len, "end_early": FADE_END_EARLY}
         self._onair = None
         # new item: a song rises from silence, a spot starts at full
         fade_in = self._xfade if nxt.get("source") in FADE_SOURCES else 0.0
@@ -569,6 +635,7 @@ class EngineSupervisor:
         ever touches volume; every error path falls back to full volume for
         the on-air deck."""
         while not self._stopping.wait(MIX_TICK):
+            levels: list[list[tuple]] = []      # per audible deck
             for deck in list(self._decks):
                 client = deck.client
                 if client is None:
@@ -580,24 +647,16 @@ class EngineSupervisor:
                     if role == "onair" and not asked and \
                             self._crossfades(deck):
                         self._check_xfade_point(deck, client)
-                    if role not in ("onair", "fading") or not fade:
+                    if role not in ("onair", "fading"):
                         continue
                     if client.get_property("pause", timeout=0.5):
                         continue
-                    pos = client.get_property("time-pos", timeout=0.5)
-                    dur = client.get_property("duration", timeout=0.5)
-                    vol = fade_volume(pos, dur, fade.get("in", 0.0),
-                                      fade.get("out", 0.0))
-                    with self._mix_lock:
-                        if deck.client is not client or deck.fade is None \
-                                or deck.role != role:
-                            continue            # changed under us
-                        if "in" in fade and pos is not None and \
-                                pos >= fade["in"]:
-                            deck.fade = None    # fade-in complete
-                            vol = FULL_VOLUME
-                        client.set_property("volume", round(vol),
-                                            timeout=0.5)
+                    if fade and not self._ramp(deck, client, role, fade):
+                        continue                # changed under us
+                    if deck.meter:
+                        lv = self._read_meter(deck, client)
+                        if lv:
+                            levels.append(lv)
                 except MpvError:
                     continue    # e.g. time-pos unavailable while loading
                 except MpvDead:
@@ -607,8 +666,78 @@ class EngineSupervisor:
                     if deck is self._onair:
                         try:
                             client.set_property("volume", FULL_VOLUME)
+                            deck.volume = FULL_VOLUME
                         except (MpvDead, MpvError):
                             pass
+            if self._meter_on:
+                self._publish_levels(levels)
+
+    def _ramp(self, deck: Deck, client, role: str, fade: dict) -> bool:
+        """One step of a deck's fade. False = the deck changed under us."""
+        pos = client.get_property("time-pos", timeout=0.5)
+        dur = client.get_property("duration", timeout=0.5)
+        if dur and fade.get("end_early"):
+            dur = max(0.0, dur - fade["end_early"])   # reach 0 a bit early
+        vol = fade_volume(pos, dur, fade.get("in", 0.0), fade.get("out", 0.0))
+        with self._mix_lock:
+            if deck.client is not client or deck.fade is None \
+                    or deck.role != role:
+                return False
+            if "in" in fade and pos is not None and pos >= fade["in"]:
+                deck.fade = None            # fade-in complete
+                vol = FULL_VOLUME
+            client.set_property("volume", round(vol), timeout=0.5)
+            deck.volume = round(vol)
+        return True
+
+    # ---------------------------------------------------------- level meter
+
+    def _read_meter(self, deck: Deck, client) -> list[tuple] | None:
+        """[(peak_db, rms_db), ...] per channel for one audible deck, as heard:
+        the filter measures before mpv's volume, so scale by the deck's
+        volume (mpv's volume curve is cubic: gain = (v/100)^3)."""
+        md = client.get_property("af-metadata/meter", timeout=0.3)
+        if not isinstance(md, dict):
+            return None
+        vol = max(0.0, float(deck.volume)) / FULL_VOLUME
+        gain_db = 60.0 * math.log10(vol) if vol > 0 else -math.inf
+        chans = []
+        for ch in range(1, 9):
+            peak = _db(md.get(f"lavfi.astats.{ch}.Peak_level"))
+            rms = _db(md.get(f"lavfi.astats.{ch}.RMS_level"))
+            if peak is None and rms is None:
+                break
+            chans.append((_add_db(peak, gain_db), _add_db(rms, gain_db)))
+        return chans or None
+
+    def _publish_levels(self, decks: list[list[tuple]]) -> None:
+        """Combine every audible deck into one program level per channel:
+        peaks take the max, RMS adds as power (two decks mid-crossfade)."""
+        out = []
+        for ch in range(2):
+            peaks, powers = [], []
+            for chans in decks:
+                p, r = chans[min(ch, len(chans) - 1)]   # mono feeds both
+                if p is not None:
+                    peaks.append(p)
+                if r is not None:
+                    powers.append(10 ** (r / 10.0))
+            peak = max(peaks) if peaks else None
+            rms = 10 * math.log10(sum(powers)) if powers and sum(powers) > 0 \
+                else None
+            out.append({"peak": _floor(peak), "rms": _floor(rms)})
+        with self._levels_lock:
+            self._levels = {"channels": out, "decks": len(decks),
+                            "ts": time.time()}
+
+    def levels(self) -> dict:
+        """Latest program level for the On Air meter (dBFS; None = silence).
+        `enabled` False = this engine/mpv can't meter."""
+        with self._levels_lock:
+            lv = dict(self._levels)
+        lv["enabled"] = self._meter_on and any(d.meter for d in self._decks)
+        lv["paused"] = self._paused
+        return lv
 
     def _check_xfade_point(self, deck: Deck, client) -> None:
         pos = client.get_property("time-pos", timeout=0.5)
