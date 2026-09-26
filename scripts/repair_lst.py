@@ -25,6 +25,7 @@ Usage (run from the StudioFire folder):
 """
 import argparse
 import collections
+import concurrent.futures
 import glob
 import os
 import re
@@ -71,21 +72,25 @@ def to_share(p, share, local):
 
 
 def load_index(db_path):
-    """basename(lower) -> [(normalized local path, duration_sec)] of files the
-    indexer found present."""
+    """(basename(lower) -> [(normalized local path, duration_sec)],
+    set of lowercased paths) for files the indexer found present."""
     idx = collections.defaultdict(list)
+    present = set()
     conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-    for path, dur in conn.execute(
-            "SELECT path, duration_sec FROM tracks WHERE missing = 0"):
+    for path, dur, size in conn.execute(
+            "SELECT path, duration_sec, size FROM tracks WHERE missing = 0"):
         norm = os.path.normpath(path)                # 'Z:/G\\x' -> 'Z:\\G\\x'
         idx[os.path.basename(norm).lower()].append((norm, dur))
+        present.add(norm.lower())
+        if size:
+            _SIZES[norm] = size       # no network stat needed for ties
     conn.close()
-    return idx
+    return idx, present
 
 
-def pick(old_local, want_sec, cands):
+def pick(old_local, want_sec, cands, check=os.path.isfile):
     """Best candidate or (None, why)."""
-    live = [(p, d) for p, d in cands if os.path.isfile(p)]
+    live = [(p, d) for p, d in cands if check(p)]
     if not live:
         return None, "only in the index, not on disk"
     if len(live) == 1:
@@ -102,11 +107,45 @@ def pick(old_local, want_sec, cands):
             return close[0], f"{len(live)} copies; length matches"
         if close:
             pool = close
-    # identical files in several places (same size) are fine to take any of
-    sizes = {os.path.getsize(p) for p, _ in pool}
-    if len(sizes) == 1:
-        return sorted(pool)[0], f"{len(live)} identical copies"
+    # identical files in several places (same size) are fine to take any of.
+    # Only worth checking for a handful of copies: a name shared by many
+    # files ("01 Intro.mp3") is ambiguous anyway, and each size is a network
+    # round trip
+    if len(pool) <= MAX_SIZE_COMPARE:
+        sizes = {_size(p) for p, _ in pool}
+        if len(sizes) == 1 and None not in sizes:
+            return sorted(pool)[0], f"{len(live)} identical copies"
     return None, f"{len(live)} different files share this name"
+
+
+MAX_SIZE_COMPARE = 8
+_SIZES: dict = {}     # path -> size, filled from the index + folder listings
+
+
+def _scan(folder):
+    """(path, size) for every file under folder. os.scandir returns sizes
+    with the listing on Windows — no per-file network round trip."""
+    try:
+        entries = list(os.scandir(folder))
+    except OSError:
+        return
+    for e in entries:
+        try:
+            if e.is_dir(follow_symlinks=False):
+                yield from _scan(e.path)
+            elif e.is_file(follow_symlinks=False):
+                yield os.path.normpath(e.path), e.stat().st_size
+        except OSError:
+            continue
+
+
+def _size(p):
+    if p not in _SIZES:
+        try:
+            _SIZES[p] = os.path.getsize(p)
+        except OSError:
+            _SIZES[p] = None
+    return _SIZES[p]
 
 
 def write_lst(path, lines):
@@ -144,18 +183,44 @@ def main():
     for f in args.files:
         files += sorted(glob.glob(f)) or [f]
     print("loading library index…", flush=True)
-    idx = load_index(args.db)
+    idx, present = load_index(args.db)
     print(f"  {sum(len(v) for v in idx.values()):,} files indexed")
+
+    disk_cache: dict[str, bool] = {}
+
+    def exists(p):
+        # the index vouches for files it found (no network round trip —
+        # checking tens of thousands of songs over a VPN one by one takes
+        # hours); anything it doesn't know is checked on disk, once
+        key = os.path.normpath(p).lower()
+        if key in present:
+            return True
+        if key not in disk_cache:
+            disk_cache[key] = os.path.isfile(p)
+        return disk_cache[key]
+
+    def prefetch(paths):
+        """Check many unknown paths on disk at once — the cost is network
+        latency, not CPU, so 32 in flight is ~30x faster than one by one."""
+        todo = {os.path.normpath(p).lower(): p for p in paths}
+        todo = {k: p for k, p in todo.items()
+                if k not in present and k not in disk_cache}
+        if not todo:
+            return
+        with concurrent.futures.ThreadPoolExecutor(32) as pool:
+            for k, ok in zip(todo, pool.map(os.path.isfile, todo.values())):
+                disk_cache[k] = ok
     for extra in args.also:
         n = 0
-        for dirpath, _dirs, names in os.walk(extra):
-            for name in names:
-                if os.path.splitext(name)[1].lower() in AUDIO_EXTS:
-                    full = os.path.normpath(os.path.join(dirpath, name))
-                    if all(full.lower() != p.lower()
-                           for p, _ in idx[name.lower()]):
-                        idx[name.lower()].append((full, None))
-                        n += 1
+        for full, size in _scan(extra):
+            name = os.path.basename(full)
+            if os.path.splitext(name)[1].lower() in AUDIO_EXTS:
+                if all(full.lower() != p.lower()
+                       for p, _ in idx[name.lower()]):
+                    idx[name.lower()].append((full, None))
+                    present.add(full.lower())
+                    _SIZES[full] = size
+                    n += 1
         print(f"  + {n:,} files from {extra}")
     print()
     bdir = None
@@ -167,17 +232,19 @@ def main():
             print(f"!! {path}: {exc}")
             continue
         audio = [ln for ln in lines if ln["audio"]]
+        prefetch([to_local(ln["path"], args.share, args.local)
+                  for ln in audio])
         fixed, unresolved, ok = [], [], 0
         for ln in audio:
             local = to_local(ln["path"], args.share, args.local)
-            if os.path.isfile(local):
+            if exists(local):
                 ok += 1
                 continue
             cands = idx.get(os.path.basename(local).lower(), [])
             if not cands:
                 unresolved.append((ln["path"], "not found in the library"))
                 continue
-            best, why = pick(local, ln["ms"] / 1000.0, cands)
+            best, why = pick(local, ln["ms"] / 1000.0, cands, exists)
             if best is None:
                 unresolved.append((ln["path"], why))
                 continue
