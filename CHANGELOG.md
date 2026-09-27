@@ -7,6 +7,8 @@ plain English a non-technical operator can understand.
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-09-27
+
 ### Added (operator feedback from KDPI, 2026-09-25, TimeTrax #644)
 These came from John after the first live show on the new system.
 - **Songs crossfade.** In the last 4 seconds of a song, the next song
