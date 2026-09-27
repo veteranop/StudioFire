@@ -21,6 +21,7 @@ what other projects are in the vault.
 - [[StudioFire/docs/Roadmap|Roadmap]] — phases and what's built so far
 - [[StudioFire/docs/Operations|Operations]] — running, restarting, deploying, the soak test
 - [[StudioFire/docs/Gotchas|Gotchas]] — hard-won lessons (read before touching the audio path)
+- [[StudioFire/docs/Training-Guide-Best-Practices|Training Guide — Best Practices]] — how to build the operator training PDF + LMS modules
 
 ## Reference docs (repo root)
 - [[StudioFire/PLAN|PLAN]] — the full binding spec (§10 is the engine contract)
