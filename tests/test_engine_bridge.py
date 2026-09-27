@@ -115,7 +115,13 @@ def main():
               pc.ensure(os.path.join(nas, "ghost.wav")) is None)
         check("no .part litter", not [n for n in os.listdir(precache_dir)
                                       if n.endswith(".part")])
+        # eviction grace age (feeder hardening §2e): a freshly-cached file
+        # survives an eviction pass for min_age_sec even if not in keep —
+        # closes the window between a feeder snapshot and this call
         pc.evict_except(set())
+        check("fresh cache survives an eviction pass (grace age)",
+              os.path.exists(cached))
+        pc.evict_except(set(), min_age_sec=0)
         check("evict clears file + manifest",
               not os.path.exists(cached)
               and json.load(open(os.path.join(
@@ -602,6 +608,20 @@ def main():
         check("now playing exposes song metadata fields", wait_for(
               lambda: bool(client.get("/api/queue").json().get("now_song")),
               8, "now_song"))
+        # Now Playing card: playlist name + songs/time left (the feeder
+        # backfills each item's real length from its cached copy)
+        tm = client.get("/api/rotation").json()["timing"]
+        check("rotation timing: song count + time left after the on-air song",
+              tm["count"] == 4 and tm["songs_after_now"] is not None
+              and tm["left_after_now_sec"] is not None)
+        check("rotation items carry lengths learned while feeding", any(
+              it["duration"] for it in
+              client.get("/api/rotation").json()["items"]))
+        check("playlist stats see those lengths",
+              client.get(f"/api/playlists/{pid}/stats").json()["total_sec"] > 0)
+        up = client.get("/api/schedule").json()["upcoming"]
+        check("schedule entries carry next_at / next_label",
+              all("next_at" in u and "next_label" in u for u in up))
 
         # reorder: reverse -> saved to the playlist AND re-synced on air
         r = client.post("/api/rotation/reorder",

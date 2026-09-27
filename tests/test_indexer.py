@@ -101,22 +101,64 @@ def main():
                        ).fetchone()
     check("returned file un-flagged", row["missing"] == 0)
 
-    # ---- flaky-NAS protection: a whole folder going unreachable must NOT flag
-    # its tracks missing (that would wipe them from search). We can't reach into
-    # it this pass, so leave those rows exactly as they were.
+    # ---- a file that comes back UNCHANGED (same size + mtime) is un-flagged
+    # too (the unchanged fast path used to skip clearing the flag forever)
+    p1 = os.path.join(nas, "rock", "song1.wav")
+    keep = os.path.join(td, "song1-keep.wav")
     import shutil
-    shutil.rmtree(os.path.join(nas, "jazz"))
-    stats = scan(conn, nas)
+    shutil.copy2(p1, keep)                       # same bytes + mtime
+    os.remove(p1)
+    scan(conn, nas)
+    shutil.copy2(keep, p1)
+    scan(conn, nas)
+    row = conn.execute("SELECT missing FROM tracks WHERE path LIKE '%song1%'"
+                       ).fetchone()
+    check("a file restored unchanged is un-flagged", row["missing"] == 0)
+
+    # ---- flaky-NAS protection: a folder that EXISTS but can't be read this
+    # pass must NOT flag its tracks missing (that would wipe them from search)
+    from services.worker import indexer as idxmod
+    real_scandir = os.scandir
+    jazz_dir = os.path.normcase(os.path.join(nas, "jazz"))
+
+    def flaky_scandir(d):
+        if os.path.normcase(str(d)) == jazz_dir:
+            raise OSError("simulated SMB timeout")
+        return real_scandir(d)
+    idxmod.os.scandir = flaky_scandir
+    try:
+        stats = scan(conn, nas)
+    finally:
+        idxmod.os.scandir = real_scandir
     check("unreadable folder doesn't flag its tracks missing",
           stats["missing"] == 0)
     jazz = conn.execute("SELECT missing FROM tracks WHERE path LIKE '%jazz%'"
                         ).fetchall()
     check("that folder's tracks stay searchable (missing=0)",
           bool(jazz) and all(r["missing"] == 0 for r in jazz))
-    # but a file removed from a folder that IS still readable is flagged
+
+    # ---- but a folder that's really GONE (moved/deleted: its parent was
+    # read and no longer lists it) flags its tracks — this is how songs in a
+    # re-filed artist folder stopped being reported as present forever
+    shutil.rmtree(os.path.join(nas, "jazz"))
+    stats = scan(conn, nas)
+    jazz = conn.execute("SELECT missing FROM tracks WHERE path LIKE '%jazz%'"
+                        ).fetchall()
+    check("a deleted/moved folder's tracks are flagged missing",
+          stats["missing"] == len(jazz) and all(r["missing"] == 1
+                                               for r in jazz))
+    # a file removed from a folder that IS still readable is flagged
     os.remove(os.path.join(nas, "rock", "song2.wav"))
     stats = scan(conn, nas)
     check("missing still flags a file in a readable folder",
+          stats["missing"] == 1)
+    # nested: a whole sub-tree removed two levels down is still proven gone
+    os.makedirs(os.path.join(nas, "pop", "Artist", "Album"))
+    make_wav(os.path.join(nas, "pop", "Artist", "Album", "t1.wav"), 1.0, 450)
+    scan(conn, nas)
+    shutil.rmtree(os.path.join(nas, "pop", "Artist"))
+    stats = scan(conn, nas)
+    check("a removed nested folder (Artist/Album) is proven gone",
           stats["missing"] == 1)
 
     # ---- status row for the GUI tile

@@ -10,12 +10,14 @@
     "wasapi_mode": "shared",
     "watchdog_interval_sec": 1,
     "ipc_host": "127.0.0.1",
-    "ipc_port": 7701
+    "ipc_port": 7701,
+    "crossfade_sec": 4
   },
   "core": {
     "bind_host": "0.0.0.0",
     "bind_port": 8080,
-    "precache_target_minutes": 45
+    "precache_target_minutes": 45,
+    "feed_ahead_tracks": 3
   },
   "poller": {
     "interval_sec": 60,

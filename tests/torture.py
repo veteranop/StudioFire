@@ -14,10 +14,13 @@ Scenarios (on top of tests/test_supervisor_bench.py's seven):
 
 Run:
   python tests/torture.py            -> one pass of T1-T5 (~2 min, silent)
-  python tests/torture.py soak 72    -> 72h soak: continuous playback with
-                                        random fault injection; report line
-                                        appended to logs/torture_report.jsonl
-                                        every 5 min. Ctrl+C = early summary.
+  python tests/torture.py soak 72    -> 72h soak: continuous playback AS IT
+                                        SHIPS (4s crossfade, level meter on)
+                                        with random fault injection; report
+                                        line (gaps, faults, crossfades,
+                                        restarts) appended to
+                                        logs/torture_report.jsonl every 5 min.
+                                        Ctrl+C = early summary.
 """
 import json
 import math
@@ -304,9 +307,18 @@ def run_matrix():
 FAULTS = ("kill_mpv", "corrupt_next", "delete_next", "stale_flood", "none")
 
 
+SOAK_CROSSFADE_SEC = 4.0   # what ships (engine.crossfade_sec default)
+SOAK_TRACK_SECS = 20.0     # long enough to crossfade (needs > 2x crossfade)
+
+
 def run_soak(hours):
-    td, tracks, emdir = setup_env("soak", n_tracks=8, track_secs=6.0)
+    # soak the engine AS IT SHIPS: two-deck crossfade + level meter on, so
+    # every track change is a real crossfade under fault injection
+    td, tracks, emdir = setup_env("soak", n_tracks=8,
+                                  track_secs=SOAK_TRACK_SECS)
     cfg = build_config(td, emdir, "soak")
+    cfg["crossfade_sec"] = SOAK_CROSSFADE_SEC
+    cfg["level_meter"] = True
     report_path = os.path.join(ROOT, "logs", "torture_report.jsonl")
     os.makedirs(os.path.dirname(report_path), exist_ok=True)
     sup = EngineSupervisor(cfg)
@@ -348,18 +360,35 @@ def run_soak(hours):
                 except OSError:
                     pass
             time.sleep(3)
-            make_wav(victim, 6.0, random.randrange(300, 900))
+            make_wav(victim, SOAK_TRACK_SECS, random.randrange(300, 900))
         elif fault == "stale_flood":
             for _ in range(30):
                 sup.submit_mutation({"op": "append", "queue_version": 1,
                                      "entries": []})
 
+    def journal_counts():
+        counts = {"crossfades": 0, "track_starts": 0, "mpv_restarts": 0}
+        try:
+            for e in read_events(cfg["journal_path"]):
+                ev = e.get("event")
+                if ev == "crossfade":
+                    counts["crossfades"] += 1
+                elif ev == "track_start":
+                    counts["track_starts"] += 1
+                elif ev == "mpv_restart":
+                    counts["mpv_restarts"] += 1
+        except OSError:
+            pass
+        return counts
+
     def write_report(final=False):
+        lv = sup.levels()
         rec = {"ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                "elapsed_h": round((time.monotonic() - started) / 3600, 3),
                "max_gap_s": round(mon.max_gap, 3),
                "gap_violations": len(mon.gap_events),
-               "faults": dict(faults), "final": final}
+               "faults": dict(faults), **journal_counts(),
+               "meter_enabled": lv.get("enabled"), "final": final}
         with open(report_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(rec) + "\n")
         print(("FINAL " if final else "") + json.dumps(rec))

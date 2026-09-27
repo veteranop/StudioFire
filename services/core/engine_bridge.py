@@ -86,6 +86,15 @@ class EngineClient:
         except httpx.HTTPError:
             return None
 
+    def levels(self) -> dict | None:
+        """Program audio level for the On Air meter (polled ~8x/sec per open
+        page, so a short timeout: a slow answer is just a skipped frame)."""
+        try:
+            r = self._client.get("/levels", timeout=0.8)
+            return r.json() if r.status_code == 200 else None
+        except (httpx.HTTPError, ValueError):
+            return None
+
     def queue(self, mutation: dict) -> tuple[int, dict]:
         try:
             r = self._client.post("/queue", json=mutation)
@@ -184,14 +193,23 @@ class Precache:
         with self._lock:
             self._manifest["files"][dst] = {
                 "src": src, "src_size": src_stat.st_size,
-                "src_mtime": src_stat.st_mtime}
+                "src_mtime": src_stat.st_mtime, "cached_at": time.time()}
             self._write_manifest()
         return dst
 
-    def evict_except(self, keep: set[str]) -> int:
-        """Drop cached files not in keep (played/abandoned). Returns count."""
+    def evict_except(self, keep: set[str], min_age_sec: float = 600.0) -> int:
+        """Drop cached files not in keep (played/abandoned). Returns count.
+
+        A file cached more recently than min_age_sec survives regardless of
+        keep — closes the window between a feeder snapshot (what to keep)
+        and this call where a concurrent operator action could have just
+        cached something not yet reflected in keep. Legacy manifest entries
+        with no cached_at are treated as old (evictable)."""
+        now = time.time()
         with self._lock:
-            victims = [p for p in self._manifest["files"] if p not in keep]
+            victims = [p for p, rec in self._manifest["files"].items()
+                       if p not in keep
+                       and now - rec.get("cached_at", 0) >= min_age_sec]
             for p in victims:
                 try:
                     os.remove(p)
@@ -206,13 +224,29 @@ class Precache:
 # ------------------------------------------------------------------- feeder
 
 class Feeder:
-    """Keeps P1's pending queue topped up from the active playlist."""
+    """Keeps P1's pending queue topped up from the active playlist.
+
+    Thread safety: feeder_state (SQLite settings) is read-modify-written by
+    both the background feeder loop (tick(), every 5s) and FastAPI request
+    threads (operator actions — insert_spot, insert_manual, show controls,
+    playlist edits). All of that is serialized through self._lock so a slow
+    NAS copy mid-tick can never clobber a concurrent operator mutation and
+    have _evict then delete that operator's still-queued file out from under
+    P1 (the lost-update race closed by the feeder-hardening changes)."""
 
     def __init__(self, cfg: dict, engine: EngineClient, precache: Precache):
         self.cfg = cfg
         self.engine = engine
         self.precache = precache
         self.target_sec = cfg.get("precache_target_minutes", 45) * 60.0
+        # how many tracks P1's queue itself is fed ahead of the play-head —
+        # deliberately shallow; the 45-min disk cache (target_sec, above) is
+        # what actually protects against a NAS outage via P1's emergency
+        # filler tier reading the precache dir directly
+        self.feed_ahead = max(1, int(cfg.get("feed_ahead_tracks", 3)))
+        self._lock = threading.RLock()   # serializes ALL feeder_state r-m-w
+        self._spot_retry: dict[int, float] = {}      # rule id -> 1st failure epoch
+        self._spot_last_warn: dict[int, float] = {}  # rule id -> last warn epoch
 
     # feeder bookkeeping lives in settings so it survives P2 restarts
     def _load_state(self, conn) -> dict:
@@ -296,13 +330,14 @@ class Feeder:
 
     def activate(self, conn, playlist_id: int) -> tuple[bool, str]:
         """Make a playlist the live rotation: replace P1's queue now."""
-        coredb.set_setting(conn, "active_playlist_id", str(playlist_id))
-        st = self._load_state(conn)
-        st["fed"], st["cursor"] = [], 0
-        if st.get("show"):
-            self._finish_show(conn, st)  # picking a rotation cancels any show
-        self._save_state(conn, st)
-        ok, why = self.tick(conn, op="replace")
+        with self._lock:
+            coredb.set_setting(conn, "active_playlist_id", str(playlist_id))
+            st = self._load_state(conn)
+            st["fed"], st["cursor"] = [], 0
+            if st.get("show"):
+                self._finish_show(conn, st)  # picking a rotation cancels any show
+            self._save_state(conn, st)
+            ok, why = self.tick(conn, op="replace")
         return ok, why
 
     # ---- scheduled/cued "shows" that interrupt the rotation (§6 Phase 3)
@@ -371,7 +406,8 @@ class Feeder:
                     p = repl + p[len(prefix):]
                     break
             out.append({"id": f"l{i}", "item_type": "file", "path": p,
-                        "title": e["title"]})
+                        "title": e["title"],
+                        "duration_sec": e.get("duration")})
         return out
 
     def _clear_pending(self, conn, st: dict, status: dict) -> dict:
@@ -451,16 +487,17 @@ class Feeder:
 
     def stop_show(self, conn) -> tuple[bool, str]:
         """Operator: end the show that's on air now and return to the rotation."""
-        status = self.engine.status()
-        if status is None:
-            return False, "engine unreachable"
-        st = self._load_state(conn)
-        if not st.get("show"):
-            return False, "no show is on air"
-        self._finish_show(conn, st)          # mark done, clear the overlay
-        self._clear_pending(conn, st, status)  # drop the show's tail
-        self._save_state(conn, st)
-        ok, why = self.tick(conn)            # refill from the base rotation
+        with self._lock:
+            status = self.engine.status()
+            if status is None:
+                return False, "engine unreachable"
+            st = self._load_state(conn)
+            if not st.get("show"):
+                return False, "no show is on air"
+            self._finish_show(conn, st)          # mark done, clear the overlay
+            self._clear_pending(conn, st, status)  # drop the show's tail
+            self._save_state(conn, st)
+            ok, why = self.tick(conn)            # refill from the base rotation
         return ok, f"back to the rotation ({why})"
 
     def start_show_now(self, conn, sched_id: int,
@@ -469,23 +506,24 @@ class Feeder:
         finishes, then the show plays. cut=True ("Start now"): the current song
         is stopped immediately and the show starts now. Either way it takes
         over whatever show is already on air."""
-        status = self.engine.status()
-        if status is None:
-            return False, "engine unreachable"
-        entry = sched.get(conn, sched_id)
-        if entry is None or entry["state"] != "waiting":
-            return False, "that show is not waiting to start"
-        st = self._load_state(conn)
-        if "pending_ids" in status:  # keep bookkeeping sane before we clear
-            live = set(status["pending_ids"])
-            st["fed"] = [e for e in st["fed"] if e["id"] in live]
-        if st.get("show"):  # operator intent: take over whatever show is on air
-            self._finish_show(conn, st)
-        self._start_show(conn, st, entry, status)
-        self._save_state(conn, st)
-        ok, why = self.tick(conn)  # feed the show in behind the current song
-        if ok and cut:
-            self.engine.op("skip")  # hard cut: drop the current song, show now
+        with self._lock:
+            status = self.engine.status()
+            if status is None:
+                return False, "engine unreachable"
+            entry = sched.get(conn, sched_id)
+            if entry is None or entry["state"] != "waiting":
+                return False, "that show is not waiting to start"
+            st = self._load_state(conn)
+            if "pending_ids" in status:  # keep bookkeeping sane before we clear
+                live = set(status["pending_ids"])
+                st["fed"] = [e for e in st["fed"] if e["id"] in live]
+            if st.get("show"):  # take over whatever show is already on air
+                self._finish_show(conn, st)
+            self._start_show(conn, st, entry, status)
+            self._save_state(conn, st)
+            ok, why = self.tick(conn)  # feed the show in behind the current song
+            if ok and cut:
+                self.engine.op("skip")  # hard cut: drop current song, show now
         return ok, f"show started ({why})"
 
     def resync_rotation(self, conn) -> tuple[bool, str]:
@@ -493,34 +531,36 @@ class Feeder:
         pre-cached buffer so the change takes effect right away. The current
         song keeps playing; everything after it is re-fed from the edited list
         starting just after wherever the play-head is."""
-        status = self.engine.status()
-        if status is None:
-            return False, "engine unreachable"
-        base_pid = coredb.get_setting(conn, "active_playlist_id")
-        if not base_pid:
-            return True, "no active rotation"
-        items = pl.get_items(conn, int(base_pid))
-        st = self._load_state(conn)
-        now_id = status.get("now_id")
-        cur = next((e for e in st["fed"] if e["id"] == now_id), None)
-        cur_item_id = (cur.get("pl_item_id") if cur and cur.get("prog") == "base"
-                       else st.get("now_item_id"))
-        idx_by_id = {it["id"]: i for i, it in enumerate(items)}
-        if cur_item_id in idx_by_id:            # resume right after the play-head
-            st["cursor"] = idx_by_id[cur_item_id] + 1
-        else:                                   # play-head item gone/unknown
-            st["cursor"] = min(st.get("cursor", 0), len(items))
-        # while a show is on air the base buffer isn't live — just fix the
-        # cursor so the edit takes effect when the rotation resumes
-        if st.get("show"):
+        with self._lock:
+            status = self.engine.status()
+            if status is None:
+                return False, "engine unreachable"
+            base_pid = coredb.get_setting(conn, "active_playlist_id")
+            if not base_pid:
+                return True, "no active rotation"
+            items = pl.get_items(conn, int(base_pid))
+            st = self._load_state(conn)
+            now_id = status.get("now_id")
+            cur = next((e for e in st["fed"] if e["id"] == now_id), None)
+            cur_item_id = (cur.get("pl_item_id")
+                           if cur and cur.get("prog") == "base"
+                           else st.get("now_item_id"))
+            idx_by_id = {it["id"]: i for i, it in enumerate(items)}
+            if cur_item_id in idx_by_id:  # resume right after the play-head
+                st["cursor"] = idx_by_id[cur_item_id] + 1
+            else:                         # play-head item gone/unknown
+                st["cursor"] = min(st.get("cursor", 0), len(items))
+            # while a show is on air the base buffer isn't live — just fix
+            # the cursor so the edit takes effect when the rotation resumes
+            if st.get("show"):
+                self._save_state(conn, st)
+                return True, "rotation cursor updated (show on air)"
+            # drop the buffer (current song keeps playing), re-feed new order
+            status = self._clear_pending(conn, st, status)
+            if cur is not None:
+                st["fed"] = [cur]  # keep play-head so the now-marker survives
             self._save_state(conn, st)
-            return True, "rotation cursor updated (show on air)"
-        # drop the buffer (current song keeps playing) and re-feed the new order
-        status = self._clear_pending(conn, st, status)
-        if cur is not None:
-            st["fed"] = [cur]  # keep the play-head so the now-marker survives
-        self._save_state(conn, st)
-        ok, why = self.tick(conn)
+            ok, why = self.tick(conn)
         return ok, f"re-synced ({why})"
 
     # ---- on-the-fly editing of the show that's on air (§ shows are editable)
@@ -529,26 +569,28 @@ class Feeder:
         """Re-feed the on-air show after its item list was edited: keep the
         current song, re-point the cursor to just after the play-head, and
         rebuild the pending buffer from the new order."""
-        status = self.engine.status()
-        if status is None:
-            return False, "engine unreachable"
-        show = st["show"]
-        items = show.get("items") or []
-        now_id = status.get("now_id")
-        cur = next((e for e in st["fed"] if e["id"] == now_id), None)
-        cur_item_id = (cur.get("pl_item_id") if cur and cur.get("prog") == "show"
-                       else st.get("now_item_id"))
-        idx_by_id = {it["id"]: i for i, it in enumerate(items)}
-        if cur_item_id in idx_by_id:
-            show["cursor"] = idx_by_id[cur_item_id] + 1
-        else:
-            show["cursor"] = min(show.get("cursor", 0), len(items))
-        show["done_feeding"] = False  # the edit may have added items back
-        status = self._clear_pending(conn, st, status)
-        if cur is not None:
-            st["fed"] = [cur]
-        self._save_state(conn, st)
-        ok, why = self.tick(conn)
+        with self._lock:
+            status = self.engine.status()
+            if status is None:
+                return False, "engine unreachable"
+            show = st["show"]
+            items = show.get("items") or []
+            now_id = status.get("now_id")
+            cur = next((e for e in st["fed"] if e["id"] == now_id), None)
+            cur_item_id = (cur.get("pl_item_id")
+                           if cur and cur.get("prog") == "show"
+                           else st.get("now_item_id"))
+            idx_by_id = {it["id"]: i for i, it in enumerate(items)}
+            if cur_item_id in idx_by_id:
+                show["cursor"] = idx_by_id[cur_item_id] + 1
+            else:
+                show["cursor"] = min(show.get("cursor", 0), len(items))
+            show["done_feeding"] = False  # the edit may have added items back
+            status = self._clear_pending(conn, st, status)
+            if cur is not None:
+                st["fed"] = [cur]
+            self._save_state(conn, st)
+            ok, why = self.tick(conn)
         return ok, f"show re-synced ({why})"
 
     def _ensure_show_items(self, conn, show: dict) -> None:
@@ -559,27 +601,30 @@ class Feeder:
 
     def reorder_show(self, conn, item_ids: list) -> tuple[bool, str]:
         """Set the on-air show's item order to exactly this id sequence."""
-        st = self._load_state(conn)
-        show = st.get("show")
-        if not show:
-            return False, "no show is on air"
-        self._ensure_show_items(conn, show)
-        by_id = {str(it["id"]): it for it in (show.get("items") or [])}
-        if {str(i) for i in item_ids} != set(by_id):
-            return False, "list changed — reload the page"
-        show["items"] = [by_id[str(i)] for i in item_ids]
-        return self._resync_show(conn, st)
+        with self._lock:
+            st = self._load_state(conn)
+            show = st.get("show")
+            if not show:
+                return False, "no show is on air"
+            self._ensure_show_items(conn, show)
+            by_id = {str(it["id"]): it for it in (show.get("items") or [])}
+            if {str(i) for i in item_ids} != set(by_id):
+                return False, "list changed — reload the page"
+            show["items"] = [by_id[str(i)] for i in item_ids]
+            return self._resync_show(conn, st)
 
     def remove_show_item(self, conn, item_id) -> tuple[bool, str]:
         """Drop one item from the on-air show (this airing only)."""
-        st = self._load_state(conn)
-        show = st.get("show")
-        if not show:
-            return False, "no show is on air"
-        self._ensure_show_items(conn, show)
-        items = show.get("items") or []
-        show["items"] = [it for it in items if str(it["id"]) != str(item_id)]
-        return self._resync_show(conn, st)
+        with self._lock:
+            st = self._load_state(conn)
+            show = st.get("show")
+            if not show:
+                return False, "no show is on air"
+            self._ensure_show_items(conn, show)
+            items = show.get("items") or []
+            show["items"] = [it for it in items
+                             if str(it["id"]) != str(item_id)]
+            return self._resync_show(conn, st)
 
     # ---- spots: station IDs / ads / jingles / PSAs between songs (§ spots)
 
@@ -589,10 +634,13 @@ class Feeder:
                     pick_mode: str | None = None) -> tuple[bool, str]:
         """Drop a spot in right after the current song (airs at the next
         boundary). Targets, in priority: a specific file, a browsed folder
-        (rotate/random via pick_mode), or a legacy preset station folder."""
-        status = self.engine.status()
-        if status is None:
-            return False, "engine unreachable"
+        (rotate/random via pick_mode), or a legacy preset station folder.
+
+        Resolution + precache (NAS I/O) happen BEFORE self._lock so a slow
+        copy never blocks another operator or the feeder loop; only the
+        queue push + bookkeeping are serialized."""
+        file_path = pl.alias_path(file_path) if file_path else file_path
+        folder_path = pl.alias_path(folder_path) if folder_path else folder_path
         if file_path:
             src = file_path if os.path.isfile(file_path) else None
             if src is None:
@@ -620,29 +668,78 @@ class Feeder:
         cached = self.precache.ensure(src)
         if cached is None:
             return False, "the spot file could not be cached"
-        entry = {"id": uuid.uuid4().hex, "path": cached, "title": title,
-                 "source": "spot", "src": src}
-        mutation = {"op": "insert_next",
-                    "queue_version": status["queue_version"] + 1,
-                    "entries": [entry]}
-        code, resp = self.engine.queue(mutation)
-        if code == 409:
-            fresh = resp.get("status") or self.engine.status() or {}
-            mutation["queue_version"] = fresh.get("queue_version", 0) + 1
+        with self._lock:
+            status = self.engine.status()
+            if status is None:
+                return False, "engine unreachable"
+            entry = {"id": uuid.uuid4().hex, "path": cached, "title": title,
+                     "source": "spot", "src": src}
+            mutation = {"op": "insert_next",
+                        "queue_version": status["queue_version"] + 1,
+                        "entries": [entry]}
             code, resp = self.engine.queue(mutation)
-        if code != 202:
-            return False, f"engine said {code}: {resp}"
-        st = self._load_state(conn)
-        st["queue_version"] = mutation["queue_version"]
-        st["fed"].insert(0, {"id": entry["id"], "path": cached,
-                             "duration": self._duration_of(conn, src),
-                             "title": title, "prog": "spot"})
-        self._save_state(conn, st)
+            if code == 409:
+                fresh = resp.get("status") or self.engine.status() or {}
+                mutation["queue_version"] = fresh.get("queue_version", 0) + 1
+                code, resp = self.engine.queue(mutation)
+            if code != 202:
+                return False, f"engine said {code}: {resp}"
+            st = self._load_state(conn)
+            st["queue_version"] = mutation["queue_version"]
+            st["fed"].insert(0, {"id": entry["id"], "path": cached,
+                                 "duration": self._duration_of(conn, src),
+                                 "title": title, "prog": "spot"})
+            self._save_state(conn, st)
         return True, title
+
+    SPOT_RETRY_GRACE_SEC = 600.0   # retry a failed spot before giving up its
+                                    # window — closes the ad-affidavit gap
+    SPOT_WARN_INTERVAL_SEC = 60.0  # throttle the retry warning log
+
+    def insert_manual(self, conn, path: str,
+                      title: str | None = None) -> tuple[bool, str]:
+        """Cue a track immediately after the current song (§6 Phase 1) — the
+        library search "Insert Next" action. On success `why` is the display
+        title (callers that need to distinguish failure kinds should check
+        the returned bool first, same contract as insert_spot)."""
+        path = pl.alias_path(path)
+        cached = self.precache.ensure(path)  # NAS I/O: before the lock
+        if cached is None:
+            return False, "file could not be read/cached"
+        disp = title or os.path.splitext(os.path.basename(path))[0]
+        with self._lock:
+            status = self.engine.status()
+            if status is None:
+                return False, "engine unreachable"
+            entry = {"id": uuid.uuid4().hex, "path": cached, "title": disp,
+                     "source": "manual", "src": path}
+            mutation = {"op": "insert_next",
+                        "queue_version": status["queue_version"] + 1,
+                        "entries": [entry]}
+            code, resp = self.engine.queue(mutation)
+            if code == 409:
+                fresh = resp.get("status") or self.engine.status() or {}
+                mutation["queue_version"] = fresh.get("queue_version", 0) + 1
+                code, resp = self.engine.queue(mutation)
+            if code != 202:
+                return False, f"engine said {code}: {resp}"
+            st = self._load_state(conn)
+            st["fed"].insert(0, {"id": entry["id"], "path": cached,
+                                 "duration": self._duration_of(conn, path),
+                                 "title": disp, "prog": "manual"})
+            self._save_state(conn, st)
+        return True, disp
 
     def fire_due_spots(self, conn) -> None:
         """Called every tick: fire any spot rule that is due (all trigger
-        types except manual). Spots play everywhere, shows included."""
+        types except manual). Spots play everywhere, shows included.
+
+        A failed insert (e.g. a transient NAS blip) doesn't immediately give
+        up the rule's window: the rule stays due and retries for up to
+        SPOT_RETRY_GRACE_SEC before mark_fired is finally called, so a
+        genuine ad/legal-ID doesn't silently miss its slot on one bad tick.
+        Each retry goes through insert_spot, which re-enters self._lock —
+        safe, it's an RLock."""
         status = self.engine.status()
         if status is None or not status.get("now_playing") \
                 or status.get("emergency_mode"):
@@ -656,142 +753,267 @@ class Feeder:
                 file_path=rule.get("file_path"),
                 folder_path=rule.get("folder_path"),
                 pick_mode=rule.get("pick_mode"))
-            spotmod.mark_fired(conn, rule, now)  # advance schedule either way
+            rid = rule["id"]
             if ok:
+                spotmod.mark_fired(conn, rule, now)
+                self._spot_retry.pop(rid, None)
+                self._spot_last_warn.pop(rid, None)
                 log.info("spot fired (%s): %s",
                          rule.get("file_path") or rule["folder_key"], why)
-            else:
-                log.warning("spot rule %d skipped: %s", rule["id"], why)
+                continue
+            first_fail = self._spot_retry.setdefault(rid, now)
+            if now - first_fail < self.SPOT_RETRY_GRACE_SEC:
+                last_warn = self._spot_last_warn.get(rid, 0.0)
+                if now - last_warn >= self.SPOT_WARN_INTERVAL_SEC:
+                    self._spot_last_warn[rid] = now
+                    log.warning("spot rule %d failed, retrying within its "
+                               "window: %s", rid, why)
+                continue  # stays due — no mark_fired; tries again next tick
+            spotmod.mark_fired(conn, rule, now)
+            self._spot_retry.pop(rid, None)
+            self._spot_last_warn.pop(rid, None)
+            log.error("spot rule %d MISSED its window after %ds of retries: "
+                      "%s", rid, int(self.SPOT_RETRY_GRACE_SEC), why)
 
     def tick(self, conn, op: str = "append") -> tuple[bool, str]:
-        status = self.engine.status()
-        if status is None:
-            return False, "engine unreachable"
+        """Reconcile with P1, feed it up to self.feed_ahead tracks, and (on a
+        successful top-up/feed) run the cache lookahead + eviction AFTER
+        releasing self._lock — that part does NAS I/O and must never block
+        an operator action or the next tick (§10.3, feeder hardening)."""
+        evict_keep = None
+        evict_snapshot = None
+        with self._lock:
+            status = self.engine.status()
+            if status is None:
+                return False, "engine unreachable"
 
-        st = self._load_state(conn)
-        # reconcile: keep entries P1 still has pending, PLUS the one currently
-        # playing (so we can map the play-head back to a playlist item for the
-        # rotation view's "now" marker). Count fallback if no pending_ids.
-        now_id = status.get("now_id")
-        if op == "replace":
-            st["fed"] = []
-        elif "pending_ids" in status:
-            keep = set(status["pending_ids"])
-            if now_id:
-                keep.add(now_id)
-            st["fed"] = [e for e in st["fed"] if e["id"] in keep]
-        else:
-            pending_count = max(0, status["queue_len"]
-                                - status["current_index"] - 1)
-            if len(st["fed"]) > pending_count:
-                st["fed"] = st["fed"][len(st["fed"]) - pending_count:]
-        st["now_item_id"] = self._now_item_id(st, now_id,
-                                              status.get("now_playing"))
-
-        # a show that has fully aired hands back to the rotation
-        self._finalize_show_if_aired(conn, st, status)
-        # a scheduled show whose time has come interrupts the rotation
-        if op != "replace":
-            status = self._maybe_fire_scheduled(conn, st, status)
-        # keep the schedule's 'playing' flags in lockstep with the overlay:
-        # exactly the on-air show (if any) stays 'playing'; strays are retired
-        # (a stray would wrongly display as SHOW ON AIR)
-        _show = st.get("show")
-        sched.finish_all_playing(conn,
-                                 except_id=_show["sched_id"] if _show else None)
-
-        base_pid = coredb.get_setting(conn, "active_playlist_id")
-        base_items = pl.get_items(conn, int(base_pid)) if base_pid else []
-        if not base_items and not st.get("show"):
-            self._save_state(conn, st)
-            return True, "no active playlist"
-
-        # the currently-playing entry is kept in fed for the now-marker but is
-        # not "pending work" — don't count it toward the top-up target
-        pending = [e for e in st["fed"] if e["id"] != now_id]
-        pending_sec = sum(e["duration"] for e in pending)
-        if pending and pending_sec >= self.target_sec:
-            self._save_state(conn, st)
-            self._evict(conn, st, status)
-            return True, "topped up"
-
-        # build a batch up to the duration target: the active show plays once
-        # through first, then the base rotation carries on forever
-        show_items = self._show_items(conn, st)
-        batch = []
-        cache_fails = 0
-        while pending_sec < self.target_sec and len(batch) < MAX_FEED_BATCH:
-            show = st.get("show")
-            if show and not show.get("done_feeding"):
-                resolved = self._next_resolved(conn, show_items, show,
-                                               wrap=False)
-                if resolved is None:      # fully fed -> fill the rest with base
-                    show["done_feeding"] = True
-                    show_items = []
-                    continue
-                prog, source = "show", "show"
+            st = self._load_state(conn)
+            # reconcile: keep entries P1 still has pending, PLUS the one
+            # currently playing (so we can map the play-head back to a
+            # playlist item for the rotation view's "now" marker). Count
+            # fallback if no pending_ids.
+            now_id = status.get("now_id")
+            if op == "replace":
+                st["fed"] = []
+            elif "pending_ids" in status:
+                keep = set(status["pending_ids"])
+                if now_id:
+                    keep.add(now_id)
+                st["fed"] = [e for e in st["fed"] if e["id"] in keep]
             else:
-                if not base_items:
-                    break
-                resolved = self._next_resolved(conn, base_items, st, wrap=True)
-                if resolved is None:
-                    break
-                prog, source = "base", "playlist"
-            src, title, item_id = resolved
-            cached = self.precache.ensure(src)
-            if cached is None:
-                cache_fails += 1
-                if cache_fails >= max(1, len(base_items) + len(show_items)):
-                    break  # NAS is gone — stop burning the tick, retry later
-                continue  # source vanished mid-feed; try the next item
-            # read real artist/album/title/duration from the cached copy
-            meta = _read_meta(cached)
-            song = meta["title"] or title           # tag title, else filename
-            artist, album = meta["artist"], meta["album"]
-            duration = meta["duration"] or self._duration_of(conn, src)
-            disp = f"{artist} - {song}" if artist else song  # log + Now Playing
-            eid = uuid.uuid4().hex
-            batch.append({"id": eid, "path": cached, "title": disp,
-                          "source": source, "src": src})
-            st["fed"].append({"id": eid, "path": cached, "duration": duration,
-                              "title": disp, "prog": prog,
-                              # the playlist item this came from (base OR show),
-                              # so the on-air list can mark the current song in
-                              # whichever program is playing
-                              "pl_item_id": item_id,
-                              # full metadata for the Now Playing panel
-                              "artist": artist, "album": album, "song": song})
-            pending_sec += duration
-        if not batch and op != "replace":
-            self._save_state(conn, st)
-            return True, "nothing to feed"
+                pending_count = max(0, status["queue_len"]
+                                    - status["current_index"] - 1)
+                if len(st["fed"]) > pending_count:
+                    st["fed"] = st["fed"][len(st["fed"]) - pending_count:]
+            st["now_item_id"] = self._now_item_id(st, now_id,
+                                                  status.get("now_playing"))
 
-        mutation = {"op": op, "queue_version": status["queue_version"] + 1,
-                    "entries": batch}
-        code, body = self.engine.queue(mutation)
-        if code == 409:  # someone else bumped the version — re-sync, retry
-            fresh = body.get("status") or self.engine.status() or {}
-            mutation["queue_version"] = fresh.get("queue_version", 0) + 1
-            code, body = self.engine.queue(mutation)
-        if code != 202:
-            # roll back bookkeeping for the rejected batch
-            fed_ids = {b["id"] for b in batch}
-            st["fed"] = [e for e in st["fed"] if e["id"] not in fed_ids]
-            self._save_state(conn, st)
-            return False, f"queue push failed ({code}): {body}"
-        st["queue_version"] = mutation["queue_version"]
-        self._save_state(conn, st)
-        self._evict(conn, st, status)
-        return True, f"fed {len(batch)} entries"
+            # a show that has fully aired hands back to the rotation
+            self._finalize_show_if_aired(conn, st, status)
+            # a scheduled show whose time has come interrupts the rotation
+            if op != "replace":
+                status = self._maybe_fire_scheduled(conn, st, status)
+            # keep the schedule's 'playing' flags in lockstep with the
+            # overlay: exactly the on-air show (if any) stays 'playing';
+            # strays are retired (a stray would wrongly display as SHOW ON
+            # AIR)
+            _show = st.get("show")
+            sched.finish_all_playing(
+                conn, except_id=_show["sched_id"] if _show else None)
 
-    def _evict(self, conn, st: dict, status: dict) -> None:
+            base_pid = coredb.get_setting(conn, "active_playlist_id")
+            base_items = pl.get_items(conn, int(base_pid)) if base_pid else []
+            if not base_items and not st.get("show"):
+                self._save_state(conn, st)
+                return True, "no active playlist"
+
+            # the currently-playing entry is kept in fed for the now-marker
+            # but is not "pending work" — don't count it toward feed_ahead
+            pending = [e for e in st["fed"] if e["id"] != now_id]
+            if pending and len(pending) >= self.feed_ahead:
+                self._save_state(conn, st)
+                evict_keep, evict_snapshot = self._pre_evict_snapshot(
+                    st, status)
+                result = (True, "topped up")
+            else:
+                # build a batch up to feed_ahead tracks deep: the active show
+                # plays once through first, then the base rotation carries on
+                # forever. P1's queue is fed shallow on purpose — the disk
+                # cache lookahead below is what carries the real NAS-outage
+                # buffer (feeder hardening: feed depth != cache depth)
+                show_items = self._show_items(conn, st)
+                batch = []
+                cache_fails = 0
+                while len(pending) + len(batch) < self.feed_ahead \
+                        and len(batch) < MAX_FEED_BATCH:
+                    show = st.get("show")
+                    if show and not show.get("done_feeding"):
+                        resolved = self._next_resolved(conn, show_items, show,
+                                                       wrap=False)
+                        if resolved is None:  # fully fed -> fill with base
+                            show["done_feeding"] = True
+                            show_items = []
+                            continue
+                        prog, source = "show", "show"
+                    else:
+                        if not base_items:
+                            break
+                        resolved = self._next_resolved(conn, base_items, st,
+                                                        wrap=True)
+                        if resolved is None:
+                            break
+                        prog, source = "base", "playlist"
+                    src, title, item_id = resolved
+                    cached = self.precache.ensure(src)
+                    if cached is None:
+                        cache_fails += 1
+                        if cache_fails >= max(1, len(base_items)
+                                              + len(show_items)):
+                            break  # NAS is gone — stop burning the tick
+                        continue  # source vanished mid-feed; try the next
+                    # read real artist/album/title/duration from the cache
+                    meta = _read_meta(cached)
+                    song = meta["title"] or title       # tag title, else file
+                    artist, album = meta["artist"], meta["album"]
+                    duration = meta["duration"] or self._duration_of(conn, src)
+                    # remember the real length on the playlist item (feeds the
+                    # song count / run time + time-left displays). Int ids are
+                    # playlist_items rows; .lst/folder show items use string ids
+                    if isinstance(item_id, int) and meta["duration"]:
+                        pl.set_duration_if_unknown(conn, item_id,
+                                                   meta["duration"])
+                    disp = f"{artist} - {song}" if artist else song
+                    eid = uuid.uuid4().hex
+                    batch.append({"id": eid, "path": cached, "title": disp,
+                                  "source": source, "src": src})
+                    st["fed"].append({"id": eid, "path": cached,
+                                      "duration": duration, "title": disp,
+                                      "prog": prog,
+                                      # the playlist item this came from (base
+                                      # OR show), so the on-air list can mark
+                                      # the current song in whichever program
+                                      # is playing
+                                      "pl_item_id": item_id,
+                                      # full metadata for Now Playing
+                                      "artist": artist, "album": album,
+                                      "song": song})
+                if not batch and op != "replace":
+                    self._save_state(conn, st)
+                    return True, "nothing to feed"
+
+                mutation = {"op": op,
+                            "queue_version": status["queue_version"] + 1,
+                            "entries": batch}
+                code, body = self.engine.queue(mutation)
+                if code == 409:  # version bumped elsewhere — re-sync, retry
+                    fresh = body.get("status") or self.engine.status() or {}
+                    mutation["queue_version"] = fresh.get(
+                        "queue_version", 0) + 1
+                    code, body = self.engine.queue(mutation)
+                if code != 202:
+                    # roll back bookkeeping for the rejected batch
+                    fed_ids = {b["id"] for b in batch}
+                    st["fed"] = [e for e in st["fed"] if e["id"] not in fed_ids]
+                    self._save_state(conn, st)
+                    return False, f"queue push failed ({code}): {body}"
+                st["queue_version"] = mutation["queue_version"]
+                self._save_state(conn, st)
+                evict_keep, evict_snapshot = self._pre_evict_snapshot(
+                    st, status)
+                result = (True, f"fed {len(batch)} entries")
+
+        # NAS/disk I/O deliberately outside self._lock (§10.3, feeder
+        # hardening): a slow copy here must never block an operator action.
+        keep = evict_keep | self._cache_lookahead(conn, evict_snapshot)
+        n = self.precache.evict_except(keep)
+        if n:
+            log.info("precache: evicted %d played file(s)", n)
+        return result
+
+    def _pre_evict_snapshot(self, st: dict, status: dict
+                            ) -> tuple[set[str], dict]:
+        """Called with self._lock held: capture what must survive eviction
+        (currently-fed paths + now playing) and a deep-copied state snapshot
+        for _cache_lookahead to simulate forward from without touching the
+        real (still-locked) st."""
         keep = {e["path"] for e in st["fed"]}
         now_playing = status.get("now_playing")
         if now_playing:
             keep.add(now_playing)
-        n = self.precache.evict_except(keep)
-        if n:
-            log.info("precache: evicted %d played file(s)", n)
+        return keep, json.loads(json.dumps(st))
+
+    @staticmethod
+    def _peek_item(items: list[dict], cur: dict, key: str = "cursor",
+                   wrap: bool = True) -> dict | None:
+        """Like _next_resolved but returns the raw item — never calls
+        pl.resolve_item, so a speculative lookahead can never trigger
+        folder-rotation's persisted-cursor side effect or burn a random pick
+        that the real feed won't use. Advances cur[key] by exactly one."""
+        n = len(items)
+        if n == 0:
+            return None
+        c = cur[key]
+        if c >= n:
+            if not wrap:
+                return None
+            c %= n
+        item = items[c]
+        cur[key] = c + 1
+        return item
+
+    def _cache_lookahead(self, conn, st_snapshot: dict) -> set[str]:
+        """Pre-copy upcoming rotation material to the precache dir WITHOUT
+        consuming the real cursor (operates on the deep-copied snapshot).
+        Returns the set of cache paths to protect from eviction. Runs
+        OUTSIDE self._lock — only touches the snapshot and the DB/NAS.
+
+        This is what actually carries ~precache_target_minutes of real music
+        on disk even though P1's own queue is only fed self.feed_ahead
+        tracks deep (see tick()): P1's emergency filler tier reads real
+        rotation music straight from the precache dir when it can't reach
+        the queue feed at all, so this buffer IS the NAS-outage protection."""
+        keep: set[str] = set()
+        try:
+            show = st_snapshot.get("show")
+            show_items = self._show_items(conn, st_snapshot) if show else []
+            base_pid = coredb.get_setting(conn, "active_playlist_id")
+            base_items = pl.get_items(conn, int(base_pid)) if base_pid else []
+            pending_sec = 0.0
+            scanned = 0
+            max_scan = MAX_FEED_BATCH * 2  # runaway guard, pathological lists
+            while pending_sec < self.target_sec and scanned < max_scan:
+                scanned += 1
+                if show and not show.get("done_feeding") and show_items:
+                    item = self._peek_item(show_items, show, wrap=False)
+                    if item is None:
+                        show = None  # snapshot's show exhausted -> base
+                        continue
+                else:
+                    if not base_items:
+                        break
+                    item = self._peek_item(base_items, st_snapshot, wrap=True)
+                    if item is None:
+                        break
+                if item["item_type"] != "file":
+                    # non-deterministic (folder-rotation/random/newest) —
+                    # resolving here would either mutate real rotation-cursor
+                    # state or just be a wasted guess; count an estimate and
+                    # move on so the lookahead depth stays roughly honest
+                    pending_sec += DEFAULT_TRACK_SEC
+                    continue
+                # same aliasing as the real feed (resolve_item), so the cache
+                # key matches what tick() will look up
+                src = pl.alias_path(item["path"])
+                if not os.path.isfile(src):
+                    continue
+                cached = self.precache.ensure(src)
+                if cached is None:
+                    continue
+                keep.add(cached)
+                pending_sec += self._duration_of(conn, src)
+        except Exception:
+            log.exception("feeder: cache lookahead failed (non-fatal)")
+        return keep
 
 
 # ----------------------------------------------------------- journal ingest
@@ -881,6 +1103,13 @@ def register(app: FastAPI) -> None:
         st = engine.status()
         return {"engine_online": st is not None, **(st or {})}
 
+    @app.get("/api/levels")
+    def api_levels(_=Depends(api_user)):
+        """Live program level (dBFS per channel, None = silence) for the On
+        Air VU meter. ok=False when the engine can't be reached."""
+        lv = engine.levels()
+        return {"ok": lv is not None, **(lv or {})}
+
     @app.post("/api/engine/op")
     def api_engine_op(body: dict, _=Depends(api_user)):
         op = body.get("op", "")
@@ -898,26 +1127,34 @@ def register(app: FastAPI) -> None:
     def api_queue(conn=Depends(get_conn), _=Depends(api_user)):
         """Now playing + the pending titles the feeder has queued into P1."""
         st = engine.status()
-        fst = feeder._load_state(conn)
-        pending = fst["fed"]
-        # the currently-playing fed entry carries full artist/album/song
         now_id = (st or {}).get("now_id")
-        now_e = next((e for e in fst["fed"] if e["id"] == now_id), None) \
-            if now_id else None
-        if st is not None and "pending_ids" in st:
-            order = {i: k for k, i in enumerate(st["pending_ids"])}
-            pending = sorted((e for e in pending if e["id"] in order),
-                             key=lambda e: order[e["id"]])
-        elif st is not None:
-            n = max(0, st["queue_len"] - st["current_index"] - 1)
-            if len(pending) > n:
-                pending = pending[len(pending) - n:]
+        with feeder._lock:  # consistent snapshot of feeder_state vs a live tick
+            fst = feeder._load_state(conn)
+            pending = fst["fed"]
+            # the currently-playing fed entry carries full artist/album/song
+            now_e = next((e for e in pending if e["id"] == now_id), None) \
+                if now_id else None
+            if st is not None and "pending_ids" in st:
+                order = {i: k for k, i in enumerate(st["pending_ids"])}
+                pending = sorted((e for e in pending if e["id"] in order),
+                                 key=lambda e: order[e["id"]])
+            elif st is not None:
+                n = max(0, st["queue_len"] - st["current_index"] - 1)
+                if len(pending) > n:
+                    pending = pending[len(pending) - n:]
+            pending_view = [{"id": e["id"],
+                             "title": e.get("title") or "(untitled)",
+                             "duration": e.get("duration")}
+                            for e in pending]
+            now_artist = (now_e or {}).get("artist")
+            now_album = (now_e or {}).get("album")
+            now_song = (now_e or {}).get("song")
         return {"engine_online": st is not None,
                 "now_playing": (st or {}).get("now_playing"),
                 "now_title": (st or {}).get("now_title"),
-                "now_artist": (now_e or {}).get("artist"),
-                "now_album": (now_e or {}).get("album"),
-                "now_song": (now_e or {}).get("song"),
+                "now_artist": now_artist,
+                "now_album": now_album,
+                "now_song": now_song,
                 "now_source": (st or {}).get("now_source"),
                 "duration": (st or {}).get("duration"),
                 "position": (st or {}).get("position"),
@@ -925,10 +1162,7 @@ def register(app: FastAPI) -> None:
                 "stop_after_current": (st or {}).get("stop_after_current", False),
                 "emergency_mode": (st or {}).get("emergency_mode", False),
                 "forced_emergency": (st or {}).get("forced_emergency", False),
-                "pending": [{"id": e["id"],
-                             "title": e.get("title") or "(untitled)",
-                             "duration": e.get("duration")}
-                            for e in pending]}
+                "pending": pending_view}
 
     def _queue_mutate(mutation_body: dict) -> dict:
         """Submit a queue mutation with the version protocol + 409 re-sync.
@@ -1004,50 +1238,92 @@ def register(app: FastAPI) -> None:
         A show overrides the base rotation while it plays; the list follows
         whatever is airing so it always matches Now Playing. It's read-only
         while a show is on (you edit your rotation, not a one-time show)."""
-        st = feeder._load_state(conn)
-        estatus = engine.status() or {}
-        now_eid = estatus.get("now_id")
-        now_item_id = feeder._now_item_id(st, now_eid,
-                                          estatus.get("now_playing"))
+        with feeder._lock:  # consistent snapshot of feeder_state vs a live tick
+            st = feeder._load_state(conn)
+            estatus = engine.status() or {}
+            now_eid = estatus.get("now_id")
+            now_item_id = feeder._now_item_id(st, now_eid,
+                                              estatus.get("now_playing"))
 
-        def _fmt(items):
-            return [{"id": it["id"], "item_type": it["item_type"],
-                     "title": it["title"] or os.path.splitext(
-                         os.path.basename(it["path"]))[0]} for it in items]
+            def _fmt(items, durs=None):
+                """durs: {item_id: sec} for a base playlist; show items carry
+                their own duration_sec (or fall back to the music index)."""
+                out = []
+                for it in items:
+                    dur = (durs or {}).get(it["id"]) or it.get("duration_sec")
+                    if not dur and it["item_type"] == "file" and durs is None:
+                        row = conn.execute(
+                            "SELECT duration_sec FROM tracks WHERE path = ?",
+                            (it["path"],)).fetchone()
+                        dur = row["duration_sec"] if row else None
+                    out.append({"id": it["id"], "item_type": it["item_type"],
+                                "title": it["title"] or os.path.splitext(
+                                    os.path.basename(it["path"]))[0],
+                                "duration": dur or None})
+                return out
 
-        def _with_inserts(items):
-            """Splice cued one-offs (library 'Insert Next' + spots) into the
-            on-air list right after the current song, so a DJ sees what they
-            just queued instead of it being invisible in the engine queue."""
-            inserts = [
-                {"id": e["id"], "item_type": "insert",
-                 "kind": "spot" if e.get("prog") == "spot" else "cued",
-                 "title": e.get("title") or "…"}
-                for e in st.get("fed", [])
-                if e["id"] != now_eid and e.get("prog") in ("manual", "spot")]
-            if not inserts:
+            def _timing(items):
+                """Song count, total run time, and how much is left AFTER the
+                on-air song (the page adds the on-air song's own time left).
+                A rotation loops forever, so 'left' means left in this pass.
+                `*_unknown` = songs with no known length (not in the sums)."""
+                songs = [i for i in items if i["item_type"] != "insert"]
+                at = next((k for k, i in enumerate(songs)
+                           if i["id"] == now_item_id), None)
+                after = songs[at + 1:] if at is not None else []
+                return {"count": len(songs),
+                        "total_sec": round(sum(i["duration"] or 0
+                                               for i in songs), 1),
+                        "total_unknown": sum(1 for i in songs
+                                             if not i["duration"]),
+                        "left_after_now_sec": (round(sum(
+                            i["duration"] or 0 for i in after), 1)
+                            if at is not None else None),
+                        "left_unknown": sum(1 for i in after
+                                            if not i["duration"]),
+                        "songs_after_now": len(after)
+                        if at is not None else None}
+
+            def _with_inserts(items):
+                """Splice cued one-offs (library 'Insert Next' + spots) into
+                the on-air list right after the current song, so a DJ sees
+                what they just queued instead of it being invisible in the
+                engine queue."""
+                inserts = [
+                    {"id": e["id"], "item_type": "insert",
+                     "kind": "spot" if e.get("prog") == "spot" else "cued",
+                     "title": e.get("title") or "…"}
+                    for e in st.get("fed", [])
+                    if e["id"] != now_eid
+                    and e.get("prog") in ("manual", "spot")]
+                if not inserts:
+                    return items
+                at = next((i for i, it in enumerate(items)
+                           if it["id"] == now_item_id), -1)
+                for off, ins in enumerate(inserts):
+                    items.insert(at + 1 + off, ins)
                 return items
-            at = next((i for i, it in enumerate(items)
-                       if it["id"] == now_item_id), -1)
-            for off, ins in enumerate(inserts):
-                items.insert(at + 1 + off, ins)
-            return items
 
-        if st.get("show"):  # a show is on air — follow it (playlist/file/lst)
-            cur = sched.playing(conn)
-            name = (cur.get("name") if cur else None) or "Show on air"
-            return {"playlist": {"id": None, "name": name}, "is_show": True,
-                    "now_item_id": now_item_id,
-                    "items": _with_inserts(_fmt(feeder._show_items(conn, st)))}
-        base = coredb.get_setting(conn, "active_playlist_id")
-        row = conn.execute("SELECT id, name FROM playlists WHERE id = ?",
-                           (int(base),)).fetchone() if base else None
-        if row is None:
-            return {"playlist": None, "items": [], "now_item_id": None,
-                    "is_show": False}
-        return {"playlist": {"id": row["id"], "name": row["name"]},
-                "is_show": False, "now_item_id": now_item_id,
-                "items": _with_inserts(_fmt(pl.get_items(conn, row["id"])))}
+            if st.get("show"):  # a show is on air — follow it
+                cur = sched.playing(conn)
+                name = (cur.get("name") if cur else None) or "Show on air"
+                items = _fmt(feeder._show_items(conn, st))
+                return {"playlist": {"id": None, "name": name},
+                        "is_show": True, "now_item_id": now_item_id,
+                        "timing": _timing(items),
+                        "items": _with_inserts(items)}
+            base = coredb.get_setting(conn, "active_playlist_id")
+            row = conn.execute("SELECT id, name FROM playlists WHERE id = ?",
+                               (int(base),)).fetchone() if base else None
+            if row is None:
+                return {"playlist": None, "items": [], "now_item_id": None,
+                        "is_show": False, "timing": None}
+            items = _fmt(pl.get_items(conn, row["id"]),
+                         pl.item_durations(conn, row["id"]))
+            return {"playlist": {"id": row["id"], "name": row["name"]},
+                    "is_show": False, "now_item_id": now_item_id,
+                    "timing": _timing(items),
+                    "items": _with_inserts(items)}
 
     @app.get("/api/history")
     def api_history(limit: int = 40, conn=Depends(get_conn),
@@ -1139,7 +1415,9 @@ def register(app: FastAPI) -> None:
                           "start_at": e["start_at"],
                           "recurrence": e.get("recurrence") or "once",
                           "end_date": e.get("end_date"),
-                          "when": e["when"]}
+                          "when": e["when"],
+                          "next_at": e["next_at"],
+                          "next_label": e["next_label"]}
                          for e in sched.list_waiting(conn)],
         }
 
@@ -1380,33 +1658,11 @@ def register(app: FastAPI) -> None:
     def api_play_next(body: PlayNextIn, conn=Depends(get_conn),
                       _=Depends(api_user)):
         """Cue a track immediately after the current song (§6 Phase 1)."""
-        status = engine.status()
-        if status is None:
-            raise HTTPException(502, "engine unreachable")
-        cached = precache.ensure(body.path)
-        if cached is None:
-            raise HTTPException(400, "file could not be read/cached")
-        title = body.title or os.path.splitext(
-            os.path.basename(body.path))[0]
-        entry = {"id": uuid.uuid4().hex, "path": cached, "title": title,
-                 "source": "manual", "src": body.path}
-        mutation = {"op": "insert_next",
-                    "queue_version": status["queue_version"] + 1,
-                    "entries": [entry]}
-        code, resp = engine.queue(mutation)
-        if code == 409:
-            fresh = resp.get("status") or engine.status() or {}
-            mutation["queue_version"] = fresh.get("queue_version", 0) + 1
-            code, resp = engine.queue(mutation)
-        if code != 202:
-            raise HTTPException(502, f"engine said {code}: {resp}")
-        # tell the feeder so queue view + eviction know about it
-        st = feeder._load_state(conn)
-        st["fed"].insert(0, {"id": entry["id"], "path": cached,
-                             "duration": feeder._duration_of(conn, body.path),
-                             "title": title, "prog": "manual"})
-        feeder._save_state(conn, st)
-        return {"ok": True, "title": title}
+        ok, why = feeder.insert_manual(conn, body.path, body.title)
+        if not ok:
+            code = 400 if why == "file could not be read/cached" else 502
+            raise HTTPException(code, why)
+        return {"ok": True, "title": why}
 
     # ------------------------------------------------- background loop
     stop = threading.Event()

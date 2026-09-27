@@ -258,6 +258,15 @@ ALTER TABLE spot_rules ADD COLUMN pick_mode TEXT;   -- 'rotate' | 'random'
 -- straight back to it. The DB rows are the editor's working copy.
 ALTER TABLE playlists ADD COLUMN source_path TEXT;
 """),
+    (11, """
+-- Each playlist item remembers its own length (seconds). Needed for the song
+-- count / run time display and for time-remaining on air. The music index only
+-- covers the NAS music root, so a .lst pointing elsewhere (e.g. a DJ's own
+-- folders) would otherwise show no length at all — and saving the .lst would
+-- blank out the durations Zara wrote into it. NULL = not known yet (the feeder
+-- fills it in the first time the song is cached for air).
+ALTER TABLE playlist_items ADD COLUMN duration_sec REAL;
+"""),
 ]
 
 SCHEMA_VERSION = MIGRATIONS[-1][0]

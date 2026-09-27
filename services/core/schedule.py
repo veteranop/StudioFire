@@ -175,13 +175,81 @@ def expire_past(conn: sqlite3.Connection, today: str | None = None) -> int:
     return cur.rowcount
 
 
-def list_waiting(conn: sqlite3.Connection) -> list[dict]:
-    """Upcoming shows: timed one-shots first, then recurring, then manual."""
+def next_occurrence(r: dict,
+                    now: _dt.datetime | None = None) -> _dt.datetime | None:
+    """When this schedule row will next air, or None (manual cue / past its
+    stop date / no valid time). A recurring slot that's inside its catch-up
+    window and hasn't aired today counts as 'now' (it's about to fire)."""
+    now = now or _dt.datetime.now()
+    rec = r.get("recurrence") or "once"
+    if rec == "once":
+        try:
+            return _dt.datetime.strptime(r["start_at"][:16], "%Y-%m-%dT%H:%M") \
+                if r.get("start_at") else None
+        except ValueError:
+            return None
+    try:
+        tod = _dt.datetime.strptime(r.get("time_of_day") or "", "%H:%M").time()
+    except ValueError:
+        return None
+    day = now.date()
+    if r.get("start_date"):
+        try:
+            day = max(day, _dt.date.fromisoformat(r["start_date"]))
+        except ValueError:
+            pass
+    end = None
+    if r.get("end_date"):
+        try:
+            end = _dt.date.fromisoformat(r["end_date"])
+        except ValueError:
+            pass
+    mask = r.get("days_mask") or 0
+    for _ in range(8):  # a weekly slot recurs within 7 days of `day`
+        if end and day > end:
+            return None
+        slot = _dt.datetime.combine(day, tod)
+        if ((rec == "daily" or mask & (1 << day.weekday()))
+                and r.get("last_fired") != day.isoformat()
+                and (now - slot).total_seconds() <= CATCH_UP_MIN * 60):
+            return slot
+        day += _dt.timedelta(days=1)
+    return None
+
+
+def next_label(when: _dt.datetime | None,
+               now: _dt.datetime | None = None) -> str:
+    """'Today 6:00 AM' / 'Tomorrow 6:00 AM' / 'Sat Sep 27, 6:00 AM'."""
+    if when is None:
+        return ""
+    now = now or _dt.datetime.now()
+    tod = _fmt_tod(when.strftime("%H:%M"))
+    delta = (when.date() - now.date()).days
+    if delta <= 0:
+        return f"Today {tod}"
+    if delta == 1:
+        return f"Tomorrow {tod}"
+    return f"{when:%a %b} {when.day}, {tod}"
+
+
+def list_waiting(conn: sqlite3.Connection,
+                 now: _dt.datetime | None = None) -> list[dict]:
+    """Upcoming shows in the order they'll actually air (soonest first, one-
+    time and recurring interleaved), then anything with no next airing
+    (manual cues) in the order it was added. Each row gains `next_at`
+    ('YYYY-MM-DDTHH:MM' or None) and a plain-English `next_label`."""
+    now = now or _dt.datetime.now()
     rows = conn.execute(
-        _SEL + "WHERE s.state = 'waiting' "
-        "ORDER BY (s.recurrence != 'once'), (s.start_at IS NULL), "
-        "s.start_at, s.time_of_day, s.sort").fetchall()
-    return [_display(r) for r in rows]
+        _SEL + "WHERE s.state = 'waiting' ORDER BY s.sort").fetchall()
+    out = []
+    for row in rows:
+        r = _display(row)
+        nxt = next_occurrence(r, now)
+        r["next_at"] = nxt.strftime("%Y-%m-%dT%H:%M") if nxt else None
+        r["next_label"] = next_label(nxt, now)
+        out.append(r)
+    out.sort(key=lambda r: (r["next_at"] is None, r["next_at"] or ""))
+    return out
 
 
 def playing(conn: sqlite3.Connection) -> dict | None:

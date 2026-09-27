@@ -95,6 +95,21 @@
 </div>
 {% endif %}
 
+<div class="card" id="updates">
+  <h1>Software updates</h1>
+  <p class="muted">New versions of StudioFire are published on GitHub.
+    StudioFire checks for one every few hours. It never installs anything
+    by itself — an admin presses <strong>Install</strong>.</p>
+  <div id="upd-summary">Checking…</div>
+  <div id="upd-notes" class="upd-notes" hidden></div>
+  <div class="row">
+    <button class="btn" id="upd-check" onclick="updCheck()">🔄 Check now</button>
+    <button class="btn btn-green" id="upd-install" onclick="updInstall()"
+            hidden>⬆ Install update</button>
+  </div>
+  <div id="upd-progress" class="muted"></div>
+</div>
+
 <div class="card" style="background: #fff5f5; border-color: #ffcccc;">
   <h1>System</h1>
   <p class="muted">Stop all services and exit.</p>
@@ -397,10 +412,97 @@ async function quitStudioFire() {
   }
 }
 
+// ---- software updates (GitHub Releases)
+const UPD_BUSY = ["starting", "downloading", "backing_up", "installing",
+                  "restarting", "rolling_back"];
+let updPoll = null;
+function updEsc(s) {
+  return String(s == null ? "" : s).replace(/[&<>"]/g,
+    c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+}
+function updRender(u) {
+  const sum = document.getElementById("upd-summary");
+  const notes = document.getElementById("upd-notes");
+  const inst = document.getElementById("upd-install");
+  const prog = document.getElementById("upd-progress");
+  let html = "This station is running <strong>StudioFire " +
+    updEsc(u.current) + "</strong>. ";
+  if (u.dev_checkout) {
+    html += "<span class='muted'>(developer copy — updated with git, not " +
+      "from here)</span>";
+  } else if (u.check_error) {
+    html += "<span class='tile-red-text'>Couldn't reach GitHub: " +
+      updEsc(u.check_error) + "</span>";
+  } else if (u.update_available) {
+    html += "<strong class='tile-green-text'>Version " +
+      updEsc(u.latest.version) + " is available.</strong>";
+  } else if (u.latest) {
+    html += "<span class='tile-green-text'>That's the latest version.</span>";
+  } else {
+    html += "<span class='muted'>Not checked yet.</span>";
+  }
+  sum.innerHTML = html;
+  notes.hidden = !(u.update_available && u.latest && u.latest.notes);
+  if (!notes.hidden)
+    notes.innerHTML = "<strong>What's new in " + updEsc(u.latest.version) +
+      ":</strong><pre>" + updEsc(u.latest.notes) + "</pre>";
+  const st = u.state || {};
+  const busy = UPD_BUSY.includes(st.state);
+  inst.hidden = !(u.update_available && u.can_install && !u.dev_checkout);
+  inst.disabled = busy;
+  if (u.update_available && !u.can_install && !u.dev_checkout)
+    sum.innerHTML += "<br><span class='muted'>Ask an admin to install it.</span>";
+  // last/ongoing install
+  if (st.state && st.state !== "done" || (st.state === "done" && st.finished_at &&
+      Date.now() / 1000 - st.finished_at < 3600)) {
+    const cls = st.state === "failed" ? "tile-red-text"
+      : st.state === "rolled_back" ? "tile-red-text"
+      : st.state === "done" ? "tile-green-text" : "";
+    prog.innerHTML = "<span class='" + cls + "'>" +
+      (busy ? "⏳ " : "") + updEsc(st.message || st.state) + "</span>";
+  } else prog.textContent = "";
+  if (busy && !updPoll) updPoll = setInterval(updRefresh, 3000);
+  if (!busy && updPoll) { clearInterval(updPoll); updPoll = null; }
+}
+async function updRefresh() {
+  try {
+    const r = await fetch("/api/update", {cache: "no-store"});
+    if (r.ok) updRender(await r.json());
+  } catch (e) {
+    // the web service restarts during an update — keep polling
+    document.getElementById("upd-progress").textContent =
+      "⏳ Restarting StudioFire… this page reconnects by itself.";
+  }
+}
+async function updCheck() {
+  const b = document.getElementById("upd-check");
+  b.disabled = true; b.textContent = "Checking…";
+  try {
+    const r = await fetch("/api/update/check", {method: "POST"});
+    if (r.ok) updRender(await r.json());
+  } finally { b.disabled = false; b.textContent = "🔄 Check now"; }
+}
+async function updInstall() {
+  if (!confirm("Install the StudioFire update now?\n\n" +
+      "StudioFire backs itself up first, and if the new version doesn't " +
+      "start cleanly it puts the old one back by itself.\n\n" +
+      "The web pages restart (a short blip). If the update changes the " +
+      "audio engine, the music drops for a few seconds — pick a quiet " +
+      "moment (not during a live show or an ad).")) return;
+  const r = await fetch("/api/update/install", {method: "POST"});
+  const b = await r.json().catch(() => ({}));
+  if (!r.ok) { alert(b.detail || "Could not start the update"); return; }
+  document.getElementById("upd-install").disabled = true;
+  document.getElementById("upd-progress").textContent =
+    "⏳ Installing " + b.to + "…";
+  if (!updPoll) updPoll = setInterval(updRefresh, 3000);
+}
+
 loadDirs();
 loadLstDir();
 loadUsers();
 loadDevices();
+updRefresh();
 setInterval(loadDevices, 10000);
 </script>
 {% endblock %}

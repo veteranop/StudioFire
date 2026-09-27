@@ -77,8 +77,11 @@ def _walk_paths(conn: sqlite3.Connection, root: str, t0: float,
     stats = {"scanned": 0, "added": 0, "updated": 0, "missing": 0, "errors": 0}
     known = {row["path"]: (row["mtime"], row["size"])
              for row in conn.execute("SELECT path, mtime, size FROM tracks")}
+    flagged = {row["path"] for row in conn.execute(
+        "SELECT path FROM tracks WHERE missing = 1")}
     seen: set[str] = set()
     walked_dirs: set[str] = set()  # folders we could actually read
+    listed_dirs: set[str] = set()  # every folder some readable parent listed
 
     # Iterative DFS with os.scandir instead of os.walk + per-file os.stat. On
     # Windows the directory enumeration already carries each entry's size and
@@ -98,6 +101,7 @@ def _walk_paths(conn: sqlite3.Connection, root: str, t0: float,
             try:
                 if e.is_dir():
                     subdirs.append(e.path)
+                    listed_dirs.add(os.path.normcase(os.path.normpath(e.path)))
                     continue
             except OSError:
                 continue
@@ -119,6 +123,13 @@ def _walk_paths(conn: sqlite3.Connection, root: str, t0: float,
             seen.add(path)
             prev = known.get(path)
             if prev is not None and prev == (st.st_mtime, st.st_size):
+                if path in flagged:
+                    # it's back (a folder moved back, or a flaky pass wrongly
+                    # flagged it): unchanged file, but it IS here — unflag it
+                    with conn:
+                        conn.execute("UPDATE tracks SET missing = 0 "
+                                     "WHERE path = ?", (path,))
+                    stats["updated"] += 1
                 continue  # unchanged — the incremental fast path
             # record the path now (searchable immediately); tags come in PHASE 2
             title = os.path.splitext(e.name)[0]
@@ -141,15 +152,31 @@ def _walk_paths(conn: sqlite3.Connection, root: str, t0: float,
             stack.append(sd)
 
     # Flag rows whose files vanished (don't delete — playlists may reference).
-    # ONLY flag a file whose folder was actually readable this pass: a
-    # flaky/slow NAS that hides a whole subfolder must not mark its tracks
-    # missing (that would wipe them from search). Files in folders os.walk
-    # couldn't reach are left exactly as they were.
+    # A file is gone when this pass PROVED it: either its folder was read and
+    # the file wasn't in it, or its folder itself is gone — some ancestor was
+    # read and did not list the next folder down (a moved/deleted folder,
+    # e.g. an artist folder re-filed elsewhere; before, those tracks stayed
+    # "present" forever). A folder that exists but couldn't be READ (flaky/
+    # slow NAS) proves nothing, so its tracks are left exactly as they were.
     root_prefix = os.path.join(root, "")
+    root_norm = os.path.normcase(os.path.normpath(root))
+
+    def proven_gone(p: str) -> bool:
+        d = os.path.normcase(os.path.normpath(os.path.dirname(p)))
+        if d in walked_dirs:
+            return True                      # folder read; file not in it
+        child, parent = d, os.path.dirname(d)
+        while parent and parent != child and len(child) > len(root_norm):
+            if parent in walked_dirs:        # read this ancestor fine...
+                return child not in listed_dirs   # ...and it had no `child`
+            if parent in listed_dirs:
+                return False                 # listed but unreadable: flaky
+            child, parent = parent, os.path.dirname(parent)
+        return False
+
     gone = [p for p in known
-            if p not in seen and p.startswith(root_prefix)
-            and os.path.normcase(os.path.normpath(os.path.dirname(p)))
-            in walked_dirs]
+            if p not in seen and p not in flagged
+            and p.startswith(root_prefix) and proven_gone(p)]
     if gone and not stop_check():
         with conn:
             for p in gone:

@@ -50,3 +50,6 @@ installer/Output/
 
 # per-station service drive mapping (copy from drive-map.example.bat)
 config/drive-map.bat
+
+# local config backups (may contain this machine's paths)
+config/*.bak-*

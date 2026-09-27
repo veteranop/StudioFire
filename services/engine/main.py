@@ -65,6 +65,14 @@ def load_config(path: str | None) -> dict:
         "heartbeat_path": os.path.join(data_dir, "engine_heartbeat.txt"),
         "logs_dir": logs_dir,
         "extra_mpv_args": engine.get("extra_mpv_args", []),
+        # song crossfade length (seconds; 0 = back to back, no fades). The
+        # next item starts under the last N seconds of a song: a song rises
+        # while the old one falls; spots/IDs/PSAs start at full volume and
+        # are never faded. (fade_out_sec is the pre-two-deck name.)
+        "crossfade_sec": engine.get("crossfade_sec",
+                                    engine.get("fade_out_sec", 4.0)),
+        # On Air level meter (a measure-only filter; never changes the audio)
+        "level_meter": engine.get("level_meter", True),
     }
 
 

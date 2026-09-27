@@ -61,6 +61,13 @@ def load_config(path: str | None = None) -> dict:
         "ga_measurement_id": core.get("ga_measurement_id",
                                       GA_MEASUREMENT_ID_DEFAULT),
         "precache_target_minutes": int(core.get("precache_target_minutes", 45)),
+        # how many tracks P1's queue itself is fed ahead of the play-head —
+        # deliberately shallow; precache_target_minutes (disk cache) is what
+        # actually protects against a NAS outage (feeder hardening)
+        "feed_ahead_tracks": int(core.get("feed_ahead_tracks", 3)),
+        # look for a newer StudioFire release on GitHub every few hours and
+        # offer it in Settings (never installs on its own)
+        "update_check": bool(core.get("update_check", True)),
         "engine_url": "http://%s:%d" % (engine.get("ipc_host", "127.0.0.1"),
                                         int(engine.get("ipc_port", 7701))),
         "journal_path": os.path.join(logs_dir, "play_journal.jsonl"),

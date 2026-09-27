@@ -9,6 +9,8 @@
   <a href="/reports">Reports</a>
 </nav>
 <div class="nav-right topbar-right">
+  <a id="upd-pill" class="upd-pill" href="/settings#updates" hidden
+     title="A new StudioFire version is available — see Settings">⬆ Update</a>
   <div class="onair" id="onair">OFF AIR</div>
   {% if allow_restart %}
   <button id="btn-restart" class="restart-btn" onclick="restartSystem()"
@@ -40,20 +42,53 @@
 
 <div class="onair-wrap">
 <div class="onair-left">
-<div class="card">
-  <h1>Now Playing</h1>
-  <div class="nowplaying">
-    <div>
+<!-- program output: the level the players are sending to the sound card -->
+<div class="card vu-card" id="vu-card"
+     title="Program audio level (peak, dBFS): what the players are sending to the sound card">
+  <div class="vu-head">
+    <span class="vu-title">Program Output</span>
+    <span class="vu-state" id="vu-state">…</span>
+  </div>
+  <div class="vu-body">
+    <div class="vu-meters">
+      <div class="vu-row">
+        <span class="vu-ch">L</span>
+        <div class="vu-bar"><div class="vu-cover" id="vu-l"></div>
+          <div class="vu-hold" id="vu-lh"></div></div>
+      </div>
+      <div class="vu-row">
+        <span class="vu-ch">R</span>
+        <div class="vu-bar"><div class="vu-cover" id="vu-r"></div>
+          <div class="vu-hold" id="vu-rh"></div></div>
+      </div>
+      <div class="vu-scale" id="vu-scale"></div>
+    </div>
+    <div class="vu-readout">
+      <div><span class="vu-rd-ch">L</span><span class="vu-rd-db" id="vu-ldb">—</span></div>
+      <div><span class="vu-rd-ch">R</span><span class="vu-rd-db" id="vu-rdb">—</span></div>
+      <div class="vu-rd-unit">dBFS peak</div>
+    </div>
+  </div>
+  <div class="vu-note" id="vu-note" hidden></div>
+</div>
+
+<div class="card np-card">
+  <div class="np-grid">
+    <div class="np-info">
+      <div class="np-label">Now Playing</div>
       <div id="np-title" class="np-title">—</div>
       <div id="np-artist" class="np-artist"></div>
-      <div id="np-pos" class="np-pos muted"></div>
+      <div class="np-progress"><div class="np-progress-fill" id="np-bar"></div></div>
+      <div id="np-pos" class="np-pos"></div>
+      <div id="np-playlist" class="np-playlist"></div>
     </div>
-    <div class="controls">
-      <button id="btn-onair" class="btn btn-big btn-red"
+    <div class="controls controls-stack">
+      <button id="btn-onair" class="btn btn-big btn-ctl btn-red"
               onclick="engineOp(this.dataset.op)" data-op="pause">
         ⏹ STOP — On Air</button>
-      <button class="btn btn-big" onclick="engineOp('skip')">⏭ Skip Song</button>
-      <button id="btn-stopafter" class="btn btn-big btn-yellow"
+      <button class="btn btn-big btn-ctl btn-skip" onclick="engineOp('skip')">
+        ⏭ Skip Song</button>
+      <button id="btn-stopafter" class="btn btn-big btn-ctl btn-yellow"
               onclick="engineOp('stop_after')" data-armed="">
         ⏏ Stop after current Song</button>
     </div>
@@ -63,6 +98,8 @@
 <div class="grid3">
   <div class="card">
     <h2>Upcoming spots</h2>
+    <input type="text" id="spot-search" class="rot-search" autocomplete="off"
+           placeholder="🔎 Search spots by name…" oninput="renderSpots()">
     <ol id="spot-list" class="schedlist"><li class="muted">loading…</li></ol>
     <details class="advanced">
       <summary>➕ Add a spot rule</summary>
@@ -244,6 +281,17 @@ function fmt(sec) {
   return Math.floor(sec / 60) + ":" + String(sec % 60).padStart(2, "0");
 }
 function basename(p) { return p ? p.split(/[\\/]/).pop() : "—"; }
+function fmtLong(sec) {   // run times: "8h 12m", "47m", "3:05"
+  if (sec == null) return "";
+  sec = Math.round(sec);
+  if (sec < 600) return fmt(sec);
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60);
+  return h ? h + "h " + m + "m" : m + "m";
+}
+function clockAt(secFromNow) {   // "3:12 PM" — when something will end
+  return new Date(Date.now() + secFromNow * 1000)
+    .toLocaleTimeString([], {hour: "numeric", minute: "2-digit"});
+}
 function esc(s) {
   return (s || "").replace(/[&<>"]/g, c =>
     ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
@@ -348,9 +396,16 @@ async function refreshSchedule() {
         ? " <span class='src-tag rep-tag'>🔁 " + esc(e.recurrence) + "</span>" : "";
       const stopTag = e.end_date
         ? " <span class='src-tag stop-tag'>⏳ until " + esc(e.end_date) + "</span>" : "";
+      // lead with WHEN it actually airs next (the list is sorted by it);
+      // the recurrence rule follows in grey
+      const nextTxt = e.next_label
+        ? "<span class='next-when'>▶ " + esc(e.next_label) + "</span>" +
+          (e.recurrence && e.recurrence !== "once"
+            ? " <span class='muted'>· " + esc(e.when) + "</span>" : "")
+        : "<span class='muted'>" + esc(e.when || fmtWhen(e.start_at)) +
+          "</span>";
       info.innerHTML = "<strong>" + esc(e.name) + "</strong>" + kindTag + recTag +
-        stopTag + "<br><small class='muted'>" +
-        esc(e.when || fmtWhen(e.start_at)) + "</small>";
+        stopTag + "<br><small>" + nextTxt + "</small>";
       const btns = document.createElement("div");
       btns.className = "item-btns";
       const start = document.createElement("button");
@@ -625,7 +680,16 @@ function renderSpots() {
     ol.innerHTML = "<li class='muted'>No spots yet</li>";
     return;
   }
-  for (const r of spotRules) {
+  // search by name: the spot's label, its schedule text, or its file/folder
+  const q = document.getElementById("spot-search").value.trim().toLowerCase();
+  const shown = !q ? spotRules : spotRules.filter(r =>
+    [r.label, r.summary, r.file_path, r.folder_path]
+      .some(s => (s || "").toLowerCase().includes(q)));
+  if (!shown.length) {
+    ol.innerHTML = "<li class='muted'>No spots match “" + esc(q) + "”</li>";
+    return;
+  }
+  for (const r of shown) {
     const li = document.createElement("li");
     const info = document.createElement("div");
     const when = (r.trigger === "manual")
@@ -736,11 +800,15 @@ let rotDragId = null;
 let rotLastNow = null;     // for auto-scrolling when the play-head moves
 let rotScrolledAt = 0;     // when the user last scrolled (suppress auto-scroll)
 let rotIsShow = false;     // a show is on air -> list is read-only
+let rotName = null;        // playlist/show name, for the Now Playing card
+let rotTiming = null;      // song count / run time / time left (server)
 
 async function refreshRotation() {
   try {
     const d = await (await fetch("/api/rotation")).json();
     rotIsShow = !!d.is_show;
+    rotName = d.playlist ? d.playlist.name : null;
+    rotTiming = d.timing || null;
     const t = document.getElementById("rot-title");
     t.textContent = d.playlist ? d.playlist.name : "Now playing list";
     if (rotIsShow) {
@@ -811,6 +879,11 @@ function renderRotation() {
     title.className = "qtitle";
     title.textContent = (isNow ? "▶ " : "") + rotIcon(it.item_type) + it.title;
     row.appendChild(grip); row.appendChild(title);
+    if (it.duration) {
+      const dur = document.createElement("span");
+      dur.className = "qdur"; dur.textContent = fmt(it.duration);
+      row.appendChild(dur);
+    }
     const del = document.createElement("button");
     del.className = "btn btn-sm rot-x"; del.textContent = "✕";
     del.title = rotIsShow ? "Remove from this show" : "Remove from playlist";
@@ -884,6 +957,7 @@ async function refresh() {
     const oa = document.getElementById("onair");
     oa.classList.toggle("live", onAir);
     oa.textContent = onAir ? "ON AIR" : "OFF AIR";
+    document.querySelector(".np-card").classList.toggle("np-offair", !onAir);
     document.getElementById("emergency-banner").hidden = !q.emergency_mode;
     // song title on the big line, "Artist • Album" underneath
     let title = q.now_song || q.now_title;
@@ -904,6 +978,17 @@ async function refresh() {
     }
     document.getElementById("np-pos").textContent =
       pos + (q.paused ? "  — OFF AIR (stopped)" : "");
+    // progress bar; the CSS transition glides it between 2s polls
+    const bar = document.getElementById("np-bar");
+    const frac = (q.duration && q.position != null)
+      ? Math.min(1, Math.max(0, q.position / q.duration)) : 0;
+    if (frac < parseFloat(bar.dataset.frac || 0))  // new song: jump, don't glide back
+      bar.style.transition = "none";
+    else bar.style.transition = "";
+    bar.style.width = (frac * 100) + "%";
+    bar.dataset.frac = frac;
+    bar.classList.toggle("np-paused", !!q.paused);
+    renderNpPlaylist(q);
     // master On Air switch: off air -> green "GO ON AIR"; on air -> red "STOP"
     const b = document.getElementById("btn-onair");
     if (q.paused) {
@@ -927,6 +1012,31 @@ async function refresh() {
     const oa = document.getElementById("onair");
     oa.classList.remove("live"); oa.textContent = "OFF AIR";
   }
+}
+// Now Playing card: which playlist/show is airing + how much of it is left.
+// Time left = the on-air song's remaining time + every song after it. A
+// rotation loops forever, so for it "left" means left in this pass.
+function renderNpPlaylist(q) {
+  const el = document.getElementById("np-playlist");
+  if (!rotName) { el.textContent = ""; return; }
+  const t = rotTiming;
+  let html = "<span class='np-pl-kind'>" + (rotIsShow ? "SHOW" : "PLAYLIST") +
+    "</span> <strong>" + esc(rotName) + "</strong>";
+  if (t && t.left_after_now_sec != null) {
+    const songLeft = (q.duration != null && q.position != null)
+      ? Math.max(0, q.duration - q.position) : 0;
+    const left = t.left_after_now_sec + songLeft;
+    html += " <span class='muted'>· " + t.songs_after_now + " of " + t.count +
+      " songs left · </span><strong>" + fmtLong(left) + " left</strong>" +
+      " <span class='muted'>(ends ≈ " + clockAt(left) + ")</span>";
+    if (t.left_unknown)
+      html += " <span class='muted'>+ " + t.left_unknown +
+        " song(s) with no known length</span>";
+  } else if (t) {   // a spot/cue is on air — show the list's size instead
+    html += " <span class='muted'>· " + t.count + " songs · " +
+      fmtLong(t.total_sec) + " total</span>";
+  }
+  el.innerHTML = html;
 }
 let healthOpen = false;
 function toggleHealth() {
@@ -1003,6 +1113,110 @@ rotListEl.addEventListener("dragover", (ev) => {
 });
 rotListEl.addEventListener("scroll", () => { rotScrolledAt = Date.now(); });
 
+// ---- VU / level meter: program peak level from the audio engine
+// Scale weighted toward the top, where the action is: -60..-20 dB takes the
+// left half of the bar, -20..0 dB the right half.
+const VU_FLOOR = -60, VU_RELEASE_DB_PER_S = 24, VU_HOLD_MS = 1500;
+const VU_SILENCE_DB = -50, VU_SILENCE_WARN_S = 8;
+function vuFrac(db) {
+  if (db == null || db <= VU_FLOOR) return 0;
+  if (db >= 0) return 1;
+  return db >= -20 ? 0.5 + (db + 20) / 40 : (db - VU_FLOOR) / 80;
+}
+const vu = {
+  target: [null, null],      // latest peak per channel from the engine
+  shown: [VU_FLOOR, VU_FLOOR],
+  hold: [VU_FLOOR, VU_FLOOR], holdAt: [0, 0],
+  last: performance.now(), quietSince: null, onAir: false, enabled: true,
+  state: null, note: null,
+};
+(function buildVuScale() {
+  const el = document.getElementById("vu-scale");
+  for (const db of [-60, -40, -30, -20, -12, -6, -3, 0]) {
+    const t = document.createElement("span");
+    t.className = "vu-tick"; t.style.left = (vuFrac(db) * 100) + "%";
+    t.textContent = db;
+    el.appendChild(t);
+  }
+})();
+async function pollLevels() {
+  if (!document.hidden) {
+    try {
+      const r = await fetch("/api/levels", {cache: "no-store"});
+      const d = await r.json();
+      vu.enabled = d.ok && d.enabled !== false;
+      vu.onAir = d.ok && !d.paused;
+      const ch = (d.channels || []);
+      vu.target = [0, 1].map(i => ch[i] ? ch[i].peak : null);
+    } catch (e) { vu.enabled = false; vu.onAir = false; }
+  }
+  setTimeout(pollLevels, 100);
+}
+function drawVu(now) {
+  const dt = Math.min(0.25, (now - vu.last) / 1000);
+  vu.last = now;
+  ["l", "r"].forEach((side, i) => {
+    const t = vu.target[i] == null ? VU_FLOOR : Math.max(VU_FLOOR, vu.target[i]);
+    // fast attack, smooth release (like a real meter)
+    vu.shown[i] = t >= vu.shown[i] ? t
+      : Math.max(t, vu.shown[i] - VU_RELEASE_DB_PER_S * dt);
+    if (vu.shown[i] >= vu.hold[i] || now - vu.holdAt[i] > VU_HOLD_MS) {
+      vu.hold[i] = vu.shown[i]; vu.holdAt[i] = now;
+    }
+    document.getElementById("vu-" + side).style.width =
+      ((1 - vuFrac(vu.shown[i])) * 100) + "%";
+    const h = document.getElementById("vu-" + side + "h");
+    h.style.left = (vuFrac(vu.hold[i]) * 100) + "%";
+    h.hidden = vu.hold[i] <= VU_FLOOR + 1;
+    const rd = document.getElementById("vu-" + side + "db");
+    rd.textContent = vu.target[i] == null ? "—" : vu.target[i].toFixed(1);
+    rd.dataset.zone = vu.target[i] == null ? "" : vu.target[i] > -3 ? "red"
+      : vu.target[i] > -12 ? "yellow" : "green";
+  });
+  // card state: live / paused / offline / silence alarm (on air, not
+  // paused, yet nothing coming out for a while)
+  const loud = Math.max(...vu.target.map(x => x == null ? -999 : x));
+  let state = "live", chip = "● LIVE", note = "";
+  if (!vu.enabled) {
+    vu.quietSince = null;
+    state = "offline"; chip = "METER OFFLINE";
+    note = "The audio engine isn't reporting levels. Restart StudioFire to " +
+      "turn the meter on (the music is not affected).";
+  } else if (!vu.onAir) {
+    vu.quietSince = null;
+    state = "paused"; chip = "❚❚ OFF AIR";
+  } else if (loud < VU_SILENCE_DB) {
+    vu.quietSince = vu.quietSince || now;
+    const s = Math.floor((now - vu.quietSince) / 1000);
+    if (s >= VU_SILENCE_WARN_S) {
+      state = "silent"; chip = "⚠ NO AUDIO " + s + "s";
+      note = "The players are sending silence while on air. Check what's " +
+        "playing.";
+    }
+  } else {
+    vu.quietSince = null;
+  }
+  if (state !== vu.state || note !== vu.note) {
+    vu.state = state; vu.note = note;
+    document.getElementById("vu-card").dataset.state = state;
+    document.getElementById("vu-state").textContent = chip;
+    const n = document.getElementById("vu-note");
+    n.textContent = note; n.hidden = !note;
+  } else if (state === "silent") {
+    document.getElementById("vu-state").textContent = chip;   // tick secs
+  }
+  requestAnimationFrame(drawVu);
+}
+pollLevels(); requestAnimationFrame(drawVu);
+
+async function refreshUpdatePill() {
+  try {
+    const u = await (await fetch("/api/update")).json();
+    document.getElementById("upd-pill").hidden =
+      !(u.update_available && !u.dev_checkout);
+  } catch (e) { /* next poll */ }
+}
+refreshUpdatePill(); setInterval(refreshUpdatePill, 60000);
 refresh(); refreshTiles(); refreshSchedule();
 refreshSpots(); refreshRotation(); refreshHistory();
 setInterval(refresh, 2000);

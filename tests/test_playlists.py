@@ -384,6 +384,95 @@ def main():
     check("API delete removes the playlist's .lst file",
           r.status_code == 200 and not os.path.exists(src2))
 
+    # ---- per-item durations: song count / run time (John's feedback batch)
+    lc = db.connect(db_path)
+    dl = ("3\r\n"
+          "215457\t\\\\NAS\\m\\one.mp3\r\n"
+          "-2\t\\\\NAS\\m\\two.mp3\r\n"          # seen in a real .lst
+          "0\t\\\\NAS\\m\\three.mp3\r\n")
+    de = pl.parse_lst(dl.encode("cp1252"))
+    check("lst: durations parsed (ms -> s)", de[0]["duration"] == 215.457)
+    check("lst: a negative duration is unknown, not part of the path",
+          de[1]["path"] == "\\\\NAS\\m\\two.mp3" and de[1]["duration"] is None)
+    check("lst: 0 duration is unknown", de[2]["duration"] is None)
+    spid = pl.create_playlist(lc, "Stats")
+    pl.add_items_bulk(lc, spid, de)
+    pl.add_item(lc, spid, "folder-rotation", r"C:\ads", "ads")
+    st = pl.playlist_stats(lc, spid)
+    check("stats: songs / folders / unknown counted",
+          st["songs"] == 3 and st["folders"] == 1 and st["unknown"] == 2)
+    check("stats: total is the sum of known lengths",
+          abs(st["total_sec"] - 215.5) < 0.1)
+    two_id = pl.get_items(lc, spid)[1]["id"]
+    pl.set_duration_if_unknown(lc, two_id, 180.0)
+    pl.set_duration_if_unknown(lc, two_id, 999.0)     # first real value wins
+    check("feeder backfill fills an unknown length once",
+          pl.item_durations(lc, spid)[two_id] == 180.0)
+    folder_id = pl.get_items(lc, spid)[3]["id"]
+    pl.set_duration_if_unknown(lc, folder_id, 30.0)
+    check("feeder backfill never pins a folder item's length",
+          folder_id not in pl.item_durations(lc, spid))
+    ex = pl.export_lst_text(lc, spid).split("\r\n")
+    check("export keeps the .lst's own durations (not index-only)",
+          ex[1].startswith("215457\t") and ex[2].startswith("180000\t"))
+    dup = pl.duplicate_playlist(lc, spid, "Stats copy")
+    check("duplicate keeps durations",
+          pl.playlist_stats(lc, dup)["total_sec"]
+          == pl.playlist_stats(lc, spid)["total_sec"])
+    # an add from the file browser: length probed when the index lacks it
+    apid = client.post("/api/playlists", json={"name": "Browse Adds"}).json()["id"]
+    apath = os.path.join(td, "not-audio.mp3")
+    touch(apath)
+    r = client.post(f"/api/playlists/{apid}/items",
+                    json={"item_type": "file", "path": apath, "title": "x"})
+    check("API add: unreadable file adds with unknown length",
+          r.status_code == 201 and r.json()["duration_sec"] is None)
+    r = client.post(f"/api/playlists/{apid}/items",
+                    json={"item_type": "file", "path": apath, "title": "y",
+                          "duration_sec": 61.0})
+    check("API add: explicit length stored",
+          r.status_code == 201 and r.json()["duration_sec"] == 61.0)
+    r = client.get(f"/api/playlists/{apid}/stats")
+    check("API stats", r.status_code == 200
+          and r.json() == {"songs": 2, "folders": 0, "total_sec": 61.0,
+                           "unknown": 1})
+
+    # ---- path aliases apply at FEED time, not just import (a rotation made
+    # at the studio with \\KDPI-Media\music\... paths must play on a box that
+    # reaches the NAS as Z:)
+    real = os.path.join(td, "aliased-song.mp3")
+    touch(real)
+    pl.set_path_aliases({"\\\\STUDIO-NAS\\music": td})
+    try:
+        item = {"item_type": "file", "path": "\\\\STUDIO-NAS\\music\\aliased-song.mp3"}
+        check("alias: a stored studio path resolves through the alias",
+              pl.resolve_item(lc, item) == td + "\\aliased-song.mp3")
+        check("alias: prefix match is case-insensitive",
+              pl.alias_path("\\\\studio-nas\\MUSIC\\x.mp3")
+              == td + "\\x.mp3")
+        check("alias: other paths untouched",
+              pl.alias_path("C:\\other\\x.mp3") == "C:\\other\\x.mp3")
+    finally:
+        pl.set_path_aliases({})
+    check("alias: no aliases -> unresolvable stays unresolvable",
+          pl.resolve_item(lc, item) is None)
+
+    # ---- a path cp1252 can't hold must survive a save (not become '?')
+    upid = pl.create_playlist(lc, "Unicode Save")
+    odd = "Z:\\G\\Dylan\\5-01 Subterranean Homesick Blues \u221a.mp3"
+    pl.add_item(lc, upid, "file", odd, "SHB", duration_sec=139.9)
+    upath = pl.write_lst(lc, lst_dir, upid)
+    with open(upath, "rb") as f:
+        raw = f.read()
+    check("non-cp1252 path saved as utf-8 with BOM",
+          raw.startswith(b"\xef\xbb\xbf"))
+    check("...and parses back to the exact path",
+          pl.parse_lst(raw)[0]["path"] == odd)
+    plain = pl.write_lst(lc, lst_dir, spid)
+    with open(plain, "rb") as f:
+        check("plain playlists still save as cp1252 (Zara)",
+              not f.read().startswith(b"\xef\xbb\xbf"))
+
     print(f"PLAYLISTS OK ({passed} checks)")
     return 0
 

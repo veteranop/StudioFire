@@ -76,10 +76,87 @@ Use robocopy (adjust the source path):
 robocopy "C:\Users\<you>\Desktop\Projects\StudioFire" "\\KDPI-Media\music\StudioFire" /MIR /XD .git data precache logs installer .playwright-mcp __pycache__ /XF *.db *.db-wal *.db-shm queue_state.json heartbeat.txt
 ```
 
-**On the dry-run / on-air box, to update:**
-- If it was `git clone`d:  `git pull` then re-run `start-all.bat`.
-- If it runs from the NAS mirror: re-copy locally (don't run over the network),
-  then restart.
+**On the dry-run / on-air box, to update:** see "Updating a station" below.
+A developer `git clone` is the exception: use `git pull`, then restart.
+
+---
+
+## Publishing a patch (GitHub is the source of truth)
+
+Every installed station updates itself from **GitHub Releases** on
+`veteranop/StudioFire` (a public repo, so stations need no login). A
+station only ever sees **published releases**. Pushing to `main` alone
+changes nothing on air.
+
+1. Write the operator-facing notes under `## [Unreleased]` in
+   `CHANGELOG.md`, in plain English. Operators read them before they press
+   Install.
+2. Merge to `main` and push.
+3. Run: `python scripts/release.py 1.1.0 --dry-run`, check the notes, then
+   run it again without `--dry-run`.
+   The script checks that `main` is clean and in sync and that the version
+   is newer. It then runs the whole test suite, turns `[Unreleased]` into
+   `[1.1.0] - <date>`, writes `VERSION`, commits, tags `v1.1.0`, pushes,
+   and publishes the GitHub release (it needs the `gh` CLI, logged in).
+
+The `VERSION` file inside a tagged release **must** match its tag. The
+updater refuses a release where they differ, so always release with the
+script. (Note: `v1.0.1` was tagged by hand with `VERSION` still at 1.0.0,
+so stations will correctly refuse it. The next release made with the script
+supersedes it.)
+
+**Patches that need a new Python package:** if `requirements.txt` changes,
+the updater refuses the release on purpose. It can't safely install packages
+into the bundled runtime while services are running. Ship those as a new
+installer build instead (see `installer/README.md`). The same applies to a
+new `mpv.exe` or NSSM.
+
+---
+
+## Updating a station
+
+**From the web GUI (normal way):** Settings → **Software updates**.
+StudioFire checks GitHub every 6 hours, and a green **⬆ Update** pill
+appears on the On Air page when there's a newer release. An **admin**
+presses **Install update**. Nothing ever installs by itself.
+
+**From the box:** Start menu → *Update StudioFire from GitHub*, or run
+`update.bat` in the install folder (`update.bat check` only reports).
+
+What an update does (`services/updater.py`, log in `logs\update.log`):
+1. Downloads the release and verifies it **before touching anything**: the
+   VERSION matches the tag, every file compiles, and there are no new Python
+   packages.
+2. Backs up the current code **and the database** to `data\updates\backup-*`
+   (the last 3 are kept).
+3. Swaps in the new code. `config\config.json`, `data\`, `logs\`,
+   `precache\`, `assets\`, `bin\` and `runtime\` are never touched.
+4. Restarts **only what changed**. Most patches restart only the web GUI and
+   the library indexer, and **the music keeps playing**. The audio engine
+   restarts only when engine code changed, and then the audio drops for a
+   few seconds. The GUI warns about this, so pick a quiet moment, not
+   during an ad or a live show.
+5. Checks that everything came back on the new version. If not, it puts the
+   old version back by itself and reports **"rolled back"**. A release
+   that crashes on startup is detected within about 15 seconds.
+
+**To go back to an older release by hand:**
+`runtime\python.exe -m services.updater apply --tag v1.0.5 --force`
+
+**Requirements on the box:**
+- Internet access to `api.github.com` / `codeload.github.com`.
+- The account the services run as must be able to modify the install
+  folder. Installers from this version on grant that (`users-modify`).
+  On an older install, grant *Modify* on the StudioFire folder to that
+  account once, or install the new build over it.
+
+**Bootstrapping:** stations on 1.0.x have no updater yet. They need **one**
+manual upgrade: install the new installer over the top (config is kept).
+After that, every patch comes from GitHub.
+
+**Testing / private mirror:** set `"update_api"` at the top level of
+`config\config.json` (or the env var `STUDIOFIRE_UPDATE_API`) to another
+releases API base URL.
 
 ---
 

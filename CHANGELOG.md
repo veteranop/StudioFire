@@ -7,6 +7,107 @@ plain English a non-technical operator can understand.
 
 ## [Unreleased]
 
+### Added (operator feedback from KDPI, 2026-09-25, TimeTrax #644)
+These came from John after the first live show on the new system.
+- **Songs crossfade.** In the last 4 seconds of a song, the next song
+  starts underneath it and rises while the old one falls, with no gap and no
+  dip in the middle (an "equal-power" fade, so the overall loudness stays
+  steady all the way through). PSAs, ads and station IDs are never faded. One can start
+  over a song's fade-out, but it plays at full volume from start to finish,
+  and the song after it starts the moment it ends, at full volume.
+  Emergency filler is never faded either. Skip is still an instant cut, and
+  "Stop after current song" lets the song finish fully before it stops. The
+  crossfade length is set in `config.json` under `engine` → `crossfade_sec`
+  (0 turns crossfading off, so items play back to back).
+- **Program Output meter (VU) at the top of the On Air page.** Live left and
+  right levels of what the station is sending to the sound card, with
+  green/amber/red zones, peak-hold marks and a peak readout in dB. If the
+  station goes silent while on air for 8 seconds, the meter card turns red
+  and says so. The level is measured without changing the audio. If the meter
+  can't run, it says "Meter offline" and the music plays on normally.
+- **Redesigned Now Playing card:** bigger title, a progress bar, the
+  playlist/show line, and the Stop, Skip and Stop-after buttons stacked on the
+  right. The card's edge is green while on air and grey when stopped.
+- **Search spots by name.** Type in the new search box above Upcoming Spots
+  to find a spot by its name, schedule, or file/folder.
+- **Date next to the clock** at the top of every page (e.g. "Fri, Sep 25").
+- **Now Playing shows the playlist.** The card now shows which playlist or
+  show is on air, how many songs are left, how much time is left, and roughly
+  when it will end.
+- **Song count and run time for playlists.** The playlist page shows how many
+  songs it has and how long it plays, and each song shows its length. Songs
+  whose length isn't known yet are counted separately; their length fills in
+  automatically the first time they're readied for air.
+- **File browser on the playlist page.** Open any folder the studio PC can
+  see (NAS included) and use **+ Add** to add a song to the playlist or
+  **▶ Next** to play it right after the current song. There's also an
+  "Add all songs in this folder" button. It reopens the last folder you used.
+  Adding songs no longer reloads the page, so you can add several in a row.
+
+- **StudioFire can update itself from GitHub.** Settings → **Software
+  updates** shows your version and whether a newer one has been published,
+  with its release notes, and a green **⬆ Update** pill appears on the On
+  Air page when one is available. An admin presses **Install update**
+  (StudioFire never installs anything by itself). It backs up first,
+  restarts only what the update changed (most updates don't interrupt the
+  music at all), and if the new version doesn't start properly it puts the
+  old one back by itself. You can also run **Update StudioFire from GitHub**
+  from the Start menu.
+
+### Changed
+- **The On-Air schedule's "Up next" list is in true air order.** Each entry
+  now starts with when it will actually air next (e.g. "▶ Tomorrow 6:00 AM").
+  Before, every one-time show was listed ahead of every repeating one, so a
+  daily 6 AM show could appear below something scheduled for next week.
+- **Better on smaller monitors.** The On-Air schedule and Upcoming Spots
+  lists wrap long names, and their buttons move under the text instead of
+  getting cut off. The Now Playing buttons shrink to fit, and the History/Log
+  column moves below the main area on screens narrower than 1440 pixels. The
+  clock no longer overlaps the menu.
+- **Calendar names stay in their box.** Long show names wrap inside the day
+  box instead of spilling into the next day or getting cut off.
+- After an update, the page picks up the new layout by itself. Before, the
+  browser could keep showing the old layout until you did a hard refresh.
+
+### Fixed
+- Saving a playlist from StudioFire no longer blanks out the song lengths
+  stored in its .lst file.
+- A playlist containing a file name with an unusual character (e.g. "√")
+  no longer breaks when saved. The character used to be turned into "?", and
+  that song would then never play again.
+- A malformed length in a .lst file (e.g. "-2") no longer causes that line's
+  song to be skipped.
+- Playlists made on another computer now play on this one when a path alias
+  is set up (`path_aliases` in config.json). Aliases used to apply only while
+  importing a playlist, so a rotation that was already saved could fail to
+  play and drop the station into emergency filler.
+- If the audio engine is stopped abruptly (e.g. Ctrl+C in its window), its
+  player no longer keeps running in the background and gets mixed up with the
+  next engine.
+- Recovery after the audio player crashes is faster: it no longer waits 2
+  seconds on a player that's already gone.
+- Closed a race in the web control room's feeder (P2) where an operator
+  cueing a song ("Play Next"), firing a station ID/ad, or editing the live
+  rotation at the same moment the system was pulling fresh songs from the NAS
+  could silently vanish: the cued item would be dropped from bookkeeping and
+  its just-copied local file deleted while it was still queued to play. The
+  song would just never air, with nothing showing an error. All feeder
+  bookkeeping is now serialized so this can't happen. A newly-cached file
+  also can't be deleted for at least 10 minutes no matter what, as a second
+  safety net.
+- A failed ad/station-ID insert (e.g. a brief network hiccup) no longer
+  silently gives up that spot's time slot — it now retries for up to 10
+  minutes before finally logging it as missed, so a real network blip
+  doesn't quietly cost a sponsor their ad play.
+
+### Changed
+- The system now only queues a few songs ahead in the live player (was ~45
+  minutes' worth) — the 45-minute local cache is unchanged and still fully
+  protects against a NAS/network outage (the player's own emergency filler
+  reads straight from that cache), but now the on-air queue reflects reality
+  almost immediately instead of lagging up to 45 minutes behind edits.
+  Configurable via `core.feed_ahead_tracks` in config.json (default 3).
+
 ## [1.0.0] - 2026-07-30
 
 First public release. StudioFire has been on air 24/7 at KDPI since July 2026 —

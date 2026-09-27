@@ -13,6 +13,7 @@ import io
 import logging
 import os
 import sys
+import time
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
@@ -70,6 +71,18 @@ def create_app(cfg: dict) -> FastAPI:
     # threading extra ctx through each handler
     templates.env.globals["ga_id"] = cfg.get("ga_measurement_id") or ""
     templates.env.globals["ga_station"] = cfg["station_name"]
+    # cache-buster for /static/style.css: after an update the browser fetches
+    # the new stylesheet instead of showing the old layout until a hard refresh
+    # (read on every render — one stat — so a stylesheet updated while the
+    # service runs is picked up too, not only after a restart)
+    class _AssetVersion:
+        def __str__(self):
+            try:
+                return str(int(os.path.getmtime(
+                    os.path.join(WEB, "static", "style.css"))))
+            except OSError:
+                return "0"
+    templates.env.globals["asset_v"] = _AssetVersion()
     app = FastAPI(title="StudioFire", docs_url=None, redoc_url=None)
     app.state.cfg = cfg
     app.state.sessions = sessions
@@ -119,9 +132,16 @@ def create_app(cfg: dict) -> FastAPI:
 
     # ------------------------------------------------------------- routes
 
+    from .. import updater
+    # read ONCE at startup: this is the version of the code actually running
+    # (the updater swaps VERSION on disk before this process restarts, and
+    # uses this to confirm the NEW code is what came back up)
+    running_version = updater.read_version()
+    app.state.running_version = running_version
+
     @app.get("/health")
     def health():
-        return {"ok": True, "service": "core"}
+        return {"ok": True, "service": "core", "version": running_version}
 
     @app.get("/setup", response_class=HTMLResponse)
     def setup_page(request: Request, conn=Depends(get_conn)):
@@ -605,6 +625,77 @@ def create_app(cfg: dict) -> FastAPI:
             tiles.append({"name": "Station equipment", "state": state,
                           "detail": detail})
         return tiles
+
+    # ---- software updates (GitHub Releases; see services/updater.py)
+    import threading as _threading
+    upd = {"check": None}
+    _upd_stop = _threading.Event()
+    UPDATE_CHECK_EVERY = 6 * 3600
+
+    def _update_checker():
+        # first check shortly after startup, then every few hours. Offline
+        # boxes just record the error — never affects anything else.
+        if _upd_stop.wait(30):
+            return
+        while True:
+            try:
+                upd["check"] = updater.check()
+            except Exception:  # noqa: BLE001 — a check must never crash P2
+                log.exception("update check failed")
+            if _upd_stop.wait(UPDATE_CHECK_EVERY):
+                return
+
+    @app.on_event("startup")
+    def _start_update_checker():
+        if cfg.get("update_check", False):   # load_config turns it on
+            _threading.Thread(target=_update_checker, name="update-check",
+                              daemon=True).start()
+
+    @app.on_event("shutdown")
+    def _stop_update_checker():
+        _upd_stop.set()
+
+    def _update_view(sess: dict) -> dict:
+        chk = upd["check"] or {}
+        return {"current": running_version,
+                "latest": chk.get("latest"),
+                "update_available": bool(chk.get("update_available")),
+                "checked_at": chk.get("checked_at"),
+                "check_error": chk.get("error"),
+                "dev_checkout": updater.is_dev_checkout(),
+                "can_install": sess["role"] == "admin",
+                "state": updater.read_state()}
+
+    @app.get("/api/update")
+    def api_update(sess: dict = Depends(api_user)):
+        return _update_view(sess)
+
+    @app.post("/api/update/check")
+    def api_update_check(sess: dict = Depends(api_user)):
+        upd["check"] = updater.check()
+        return _update_view(sess)
+
+    @app.post("/api/update/install")
+    def api_update_install(sess: dict = Depends(api_admin)):
+        """Start installing the latest release in a detached helper (this
+        web service is one of the things it restarts). Admin only."""
+        if updater.is_dev_checkout():
+            raise HTTPException(409, "this is a developer (git) checkout — "
+                                     "update it with git")
+        chk = upd["check"] = updater.check()
+        if chk.get("error"):
+            raise HTTPException(502, chk["error"])
+        if not chk.get("update_available"):
+            raise HTTPException(409, "already up to date")
+        busy = updater.read_state()
+        if busy.get("state") in ("starting", "downloading", "backing_up",
+                                 "installing", "restarting", "rolling_back") \
+                and time.time() - (busy.get("updated_at") or 0) < 45 * 60:
+            raise HTTPException(409, "an update is already running")
+        updater.spawn_detached_apply(chk["latest"]["tag"])
+        log.warning("GUI-triggered update %s -> %s", running_version,
+                    chk["latest"]["version"])
+        return {"ok": True, "to": chk["latest"]["version"]}
 
     @app.get("/schedule", response_class=HTMLResponse)
     def schedule_calendar_page(request: Request, sess: dict = Depends(page_user)):
