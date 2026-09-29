@@ -460,6 +460,18 @@ def restart(names: list[str]) -> None:
         _log("NSSM services will restart themselves")
         return
     time.sleep(1.5)
+    # a detached relaunch doesn't inherit the logged-in session's mapped drives,
+    # so re-map the NAS (config\drive-map.bat, if present) before starting — else
+    # legacy Z:\ data would fail every isdir/isfile after the update restart.
+    # Best-effort: never let a mapping error block the update.
+    bat = os.path.join(ROOT, "config", "drive-map.bat")
+    if os.path.exists(bat):
+        try:
+            subprocess.run(["cmd", "/c", bat], cwd=ROOT,
+                           capture_output=True, timeout=30)
+            _log("ran config\\drive-map.bat")
+        except Exception as exc:  # noqa: BLE001 — mapping is best-effort
+            _log(f"config\\drive-map.bat failed ({exc}); continuing")
     flags = (getattr(subprocess, "DETACHED_PROCESS", 0)
              | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
     cfg = os.path.join("config", "config.json")

@@ -7,6 +7,27 @@ plain English a non-technical operator can understand.
 
 ## [Unreleased]
 
+### Fixed
+- **The station no longer needs a mapped drive (like `Z:`) to find its music,
+  playlists, station IDs, PSAs or ads.** A mapped drive only exists while
+  someone is logged in, so after a reboot or a Windows update the station could
+  come back up without it — and then the file browser showed only `C:\`, the
+  station folders in Settings read "does not exist", and scheduled items could
+  silently miss their windows (on 2026-09-29 a Windows-update reboot dropped the
+  drive on the KDPI on-air PC and the legal-ID, PSA and underwriter rules missed
+  every window for the rest of the afternoon). StudioFire now finds those files
+  through the music library's own address instead of the drive letter, so
+  playlists, shows, IDs and PSAs keep working whether the drive is mapped or not.
+- **The file browser can now reach the music library even with no drive
+  mapped.** At the top level the picker lists the library itself alongside the
+  local drives, so you can always browse to your music and your `.lst`
+  playlists. Opening a path that was saved with a drive letter (e.g. `Z:\...`)
+  also works when that drive isn't there any more.
+- **Restarting or updating re-connects the drive automatically** when the
+  station has a `config\drive-map.bat` — every way StudioFire starts or restarts
+  now runs it first (previously only the Windows-service path did). If the
+  mapping fails, the station still starts; playback is never held up by it.
+
 ## [1.1.0] - 2026-09-27
 
 ### Added (operator feedback from KDPI, 2026-09-25, TimeTrax #644)

@@ -22,6 +22,7 @@ from fastapi.templating import Jinja2Templates
 
 from . import auth, db, spots
 from . import schedule as sched
+from .. import pathmap
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 WEB = os.path.join(ROOT, "web")
@@ -267,17 +268,25 @@ def create_app(cfg: dict) -> FastAPI:
 
     @app.get("/api/settings/dirs")
     def get_dirs(conn=Depends(get_conn), _=Depends(api_user)):
+        from . import playlists as pl
+        # 'exists' is checked against the resolved path so a Z:\ station folder
+        # reports the truth (mapped -> NAS share root) instead of "does not
+        # exist" when this session has no drive mapping
         return [{"key": k, "label": lbl, "hint": hint,
                  "path": db.get_setting(conn, k) or "",
-                 "exists": os.path.isdir(db.get_setting(conn, k) or "")}
+                 "exists": os.path.isdir(pl.alias_path(db.get_setting(conn, k)
+                                                       or ""))}
                 for k, lbl, hint in DIR_SETTINGS]
 
     @app.post("/api/settings/dirs")
     def set_dir(body: dict, conn=Depends(get_conn), _=Depends(api_user)):
+        from . import playlists as pl
         key, path = body.get("key"), (body.get("path") or "").strip()
         if key not in {k for k, _, _ in DIR_SETTINGS}:
             raise HTTPException(400, "unknown setting")
-        if path and not os.path.isdir(path):
+        # validate against the resolved path (a Z:\ folder that maps is valid);
+        # store what the operator entered — resolve, don't rewrite
+        if path and not os.path.isdir(pl.alias_path(path)):
             raise HTTPException(400, "that folder does not exist")
         db.set_setting(conn, key, path)
         return {"ok": True}
@@ -401,6 +410,7 @@ def create_app(cfg: dict) -> FastAPI:
         (comma list: 'audio', 'lst', or explicit exts) also lists matching
         files so you can pick a single file / .lst. Paths inside the music root
         are served from the index (fast over a VPN); everything else is live."""
+        from . import playlists as pl
         want = set()
         for tok in (files or "").split(","):
             tok = tok.strip().lower()
@@ -413,7 +423,19 @@ def create_app(cfg: dict) -> FastAPI:
         if not path:
             drives = [f"{c}:\\" for c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
                       if os.path.exists(f"{c}:\\")]
+            # add the browsable NAS roots so John can reach his library with no
+            # Z: mapping (the picker used to show ONLY C:\ — the reported bug).
+            # UNC roots render/click as folders in the picker like any drive;
+            # normalise to the canonical \\host\share\... form so a click round-
+            # trips cleanly back through this endpoint.
+            nas = cfg.get("nas_music_root") or ""
+            nas_norm = os.path.normpath(nas) if nas else ""
+            for root in (pathmap.share_root(nas), nas_norm):
+                if root and root not in drives:
+                    drives.append(root)
             return {"path": "", "parent": None, "dirs": drives, "files": []}
+        # a Z:\... path pasted into the picker still browses when Z: is gone
+        path = pl.alias_path(path)
         # music library: serve from the index so browsing works over a slow VPN
         # (a live listdir of /G is thousands of SMB round-trips). .lst files
         # aren't indexed, so fall through to live when the picker wants them.
@@ -574,8 +596,11 @@ def create_app(cfg: dict) -> FastAPI:
         import json as _json
         import shutil as _shutil
         tiles = []
+        from . import playlists as pl
         nas = cfg.get("nas_music_root") or ""
-        nas_ok = bool(nas) and os.path.isdir(nas)
+        # resolve so a station that (mis)configured nas_music_root as a Z:\ path
+        # still reports Connected when the share is reachable by UNC
+        nas_ok = bool(nas) and os.path.isdir(pl.alias_path(nas))
         tiles.append({"name": "Music library (NAS)",
                       "state": "green" if nas_ok else "red",
                       "detail": "Connected" if nas_ok else

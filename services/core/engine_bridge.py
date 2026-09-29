@@ -359,14 +359,16 @@ class Feeder:
         kind = show.get("kind", "playlist")
         if kind == "playlist":
             return pl.get_items(conn, show["playlist_id"])
+        # a scheduled show's container path is stored in playlist_schedule
+        # (often Z:\Shows\...) — resolve it so it loads without a drive mapping
+        p = pl.alias_path(show.get("source_path") or "")
         if kind == "file":
-            p = show.get("source_path") or ""
             return [{"id": "f0", "item_type": "file", "path": p,
                      "title": os.path.splitext(os.path.basename(p))[0]}]
         if kind == "lst":
-            return self._lst_items(show.get("source_path") or "")
+            return self._lst_items(p)
         if kind == "folder":
-            return self._folder_items(show.get("source_path") or "")
+            return self._folder_items(p)
         return []
 
     def _folder_items(self, path: str) -> list[dict]:
@@ -397,14 +399,11 @@ class Feeder:
         except OSError:
             log.warning("feeder: .lst show unreadable: %r", path)
             return []
-        aliases = self.cfg.get("path_aliases") or {}
         out = []
         for i, e in enumerate(entries):
-            p = e["path"]
-            for prefix, repl in aliases.items():
-                if p.lower().startswith(prefix.lower()):
-                    p = repl + p[len(prefix):]
-                    break
+            # same resolution as import: explicit aliases, then the missing-drive
+            # fallback (contents are usually already UNC, but a Z:\ entry resolves)
+            p = pl.alias_path(e["path"])
             out.append({"id": f"l{i}", "item_type": "file", "path": p,
                         "title": e["title"],
                         "duration_sec": e.get("duration")})
@@ -656,7 +655,11 @@ class Feeder:
             title = f"{label or os.path.basename(folder_path.rstrip(chr(92) + '/'))}: " + \
                 os.path.splitext(os.path.basename(src))[0]
         else:
-            folder = coredb.get_setting(conn, folder_key)
+            # legacy preset station folder (e.g. dir_station_ids = Z:\John\...):
+            # resolve so a dropped Z: mapping doesn't make every legal ID / PSA
+            # miss its window (KDPI 2026-09-29) — file/folder branches above
+            # already go through alias_path.
+            folder = pl.alias_path(coredb.get_setting(conn, folder_key))
             if not folder or not os.path.isdir(folder):
                 return False, f"the {label or folder_key} folder is not set up"
             src = pl.resolve_item(conn, {"item_type": "folder-rotation",
@@ -1478,14 +1481,16 @@ def register(app: FastAPI) -> None:
             return {"id": sched.add(conn, "playlist", playlist_id=pid, **timing)}
         if kind in ("file", "lst"):
             path = (body.get("source_path") or "").strip()
-            if not path or not os.path.isfile(path):
+            # validate against the resolved path (a Z:\ path that maps is valid);
+            # store the raw value so it stays portable — resolve, don't rewrite
+            if not path or not os.path.isfile(pl.alias_path(path)):
                 raise HTTPException(400, "that file does not exist")
             if kind == "lst" and not path.lower().endswith(".lst"):
                 raise HTTPException(400, "that isn't a .lst file")
             return {"id": sched.add(conn, kind, source_path=path, **timing)}
         if kind == "folder":
             path = (body.get("source_path") or "").strip()
-            if not path or not os.path.isdir(path):
+            if not path or not os.path.isdir(pl.alias_path(path)):
                 raise HTTPException(400, "that folder does not exist")
             return {"id": sched.add(conn, "folder", source_path=path, **timing)}
         raise HTTPException(400,
@@ -1530,8 +1535,10 @@ def register(app: FastAPI) -> None:
         out = []
         for key, label, _hint in spotmod.FOLDER_CATEGORIES:
             path = coredb.get_setting(conn, key) or ""
+            # 'ready' against the resolved path so a Z:\ folder still reads as
+            # set up when this session has no Z: mapping
             out.append({"key": key, "label": label, "path": path,
-                        "ready": bool(path) and os.path.isdir(path)})
+                        "ready": bool(path) and os.path.isdir(pl.alias_path(path))})
         return out
 
     @app.get("/api/spots")
@@ -1566,11 +1573,12 @@ def register(app: FastAPI) -> None:
         pick_mode = "random" if body.get("pick_mode") == "random" else "rotate"
         key = body.get("folder_key") or ""
         if file_path:
-            if not os.path.isfile(file_path):
+            # validate resolved; store raw (a Z:\ pick that maps is valid)
+            if not os.path.isfile(pl.alias_path(file_path)):
                 raise HTTPException(400, "that file does not exist")
             key = ""
         elif folder_path:
-            if not os.path.isdir(folder_path):
+            if not os.path.isdir(pl.alias_path(folder_path)):
                 raise HTTPException(400, "that folder does not exist")
             key = ""
         elif key not in {k for k, _, _ in spotmod.FOLDER_CATEGORIES}:

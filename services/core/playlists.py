@@ -24,6 +24,7 @@ from fastapi import Depends, FastAPI, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
 from . import db as coredb
+from .. import pathmap
 
 log = logging.getLogger("core.playlists")
 
@@ -226,6 +227,7 @@ def export_lst_text(conn: sqlite3.Connection, pid: int) -> str:
 
 
 def remove_lst(lst_dir: str, name: str) -> None:
+    lst_dir = alias_path(lst_dir)  # a Z:\ folder still resolves when Z: is gone
     if not lst_dir:
         return
     try:
@@ -288,26 +290,31 @@ def write_lst(conn: sqlite3.Connection, lst_dir: str, pid: int,
 
 # config paths.path_aliases, loaded by register(): {'\\\\SERVER\\share': 'Z:'}
 _PATH_ALIASES: dict = {}
+# nas_music_root, loaded by register(): lets alias_path() fall back to the NAS
+# share root when a stored path's drive letter is gone from this session (the
+# KDPI Z:-drop fix — see services/pathmap.py).
+_NAS_ROOT: str = ""
 
 
-def set_path_aliases(aliases: dict | None) -> None:
-    global _PATH_ALIASES
+def set_path_aliases(aliases: dict | None, nas_root: str | None = None) -> None:
+    global _PATH_ALIASES, _NAS_ROOT
     _PATH_ALIASES = dict(aliases or {})
+    _NAS_ROOT = nas_root or ""
 
 
 def alias_path(path: str, aliases: dict | None = None) -> str:
-    """Rewrite a path prefix per path_aliases so a playlist written on
-    another machine (e.g. \\\\KDPI-Media\\music\\... at the studio) resolves
-    here (e.g. Z:\\... over a VPN where that name doesn't resolve). Applied
-    at feed time too, not just at import: playlists already in the DB keep
-    the paths they were made with."""
-    if not path:
-        return path
-    for prefix, repl in (_PATH_ALIASES if aliases is None
-                         else aliases or {}).items():
-        if prefix and path.lower().startswith(prefix.lower()):
-            return repl + path[len(prefix):]
-    return path
+    """Rewrite a path so it resolves on THIS machine even without the drive
+    letter it was stored with. Explicit path_aliases are applied first — a
+    playlist written elsewhere (e.g. \\\\KDPI-Media\\music\\... at the studio)
+    maps here (e.g. Z:\\... over a VPN where that name doesn't resolve). Then,
+    if the path is on a drive that doesn't exist in this session, it is
+    re-pointed at the NAS share root (Z:\\John\\... -> \\\\KDPI-Media\\music\\
+    John\\...). Applied at feed time too, not just at import: playlists already
+    in the DB keep the paths they were made with."""
+    return pathmap.resolve(
+        path,
+        _PATH_ALIASES if aliases is None else (aliases or {}),
+        _NAS_ROOT)
 
 
 def apply_aliases(entries: list[dict], aliases: dict) -> list[dict]:
@@ -323,7 +330,8 @@ def open_lst(conn: sqlite3.Connection, path: str, aliases: dict) -> dict:
     truth. Already linked -> reuse that playlist (reloading its items from
     the file if something else, e.g. Zara, edited it since our last save).
     New -> create a playlist named after the file and link it."""
-    norm = os.path.abspath(path)
+    # a .lst path pasted/stored as Z:\... must still open when Z: is gone
+    norm = os.path.abspath(alias_path(path))
     if os.path.splitext(norm)[1].lower() != ".lst":
         raise ValueError("not a .lst file")
     if not os.path.isfile(norm):
@@ -372,6 +380,7 @@ def open_lst(conn: sqlite3.Connection, path: str, aliases: dict) -> dict:
 def sync_all_lst(conn: sqlite3.Connection, lst_dir: str) -> int:
     """Write every playlist to lst_dir (used when the folder is first set, so
     existing playlists get their .lst without needing an edit)."""
+    lst_dir = alias_path(lst_dir)  # a Z:\ folder still resolves when Z: is gone
     if not lst_dir or not os.path.isdir(lst_dir):
         return 0
     n = 0
@@ -576,7 +585,8 @@ class OpenIn(BaseModel):
 def register(app: FastAPI) -> None:
     get_conn = app.state.get_conn
     api_user = app.state.api_user
-    set_path_aliases(app.state.cfg.get("path_aliases"))
+    set_path_aliases(app.state.cfg.get("path_aliases"),
+                     app.state.cfg.get("nas_music_root"))
 
     def _playlist_or_404(conn, pid: int):
         row = conn.execute("SELECT * FROM playlists WHERE id = ?",
@@ -589,7 +599,9 @@ def register(app: FastAPI) -> None:
         """The playlists folder: where NEW playlists are saved as .lst.
         The operator-set folder wins; the fallback (<data>/playlists) exists
         so a playlist is ALWAYS a real file, even before any setup."""
-        d = coredb.get_setting(conn, LST_DIR_KEY) or ""
+        # resolve so a Z:\ playlists folder still points at the NAS share root
+        # (\\KDPI-Media\music) when this session has no Z: mapping
+        d = alias_path(coredb.get_setting(conn, LST_DIR_KEY) or "")
         if d and os.path.isdir(d):
             return d
         d = os.path.join(app.state.cfg["data_dir"], "playlists")
@@ -656,7 +668,9 @@ def register(app: FastAPI) -> None:
     @app.get("/api/playlists/lst_dir")
     def api_lst_dir_get(conn=Depends(get_conn), _=Depends(api_user)):
         path = coredb.get_setting(conn, LST_DIR_KEY) or ""
-        return {"path": path, "exists": bool(path) and os.path.isdir(path),
+        # report the truth against the resolved location, not the raw Z:\ value
+        return {"path": path,
+                "exists": bool(path) and os.path.isdir(alias_path(path)),
                 # where new playlists actually land / where Open starts
                 "effective": _lst_dir(conn)}
 
@@ -696,12 +710,11 @@ def register(app: FastAPI) -> None:
         src = row["source_path"] if "source_path" in row.keys() else None
         if src:
             try:
-                os.remove(src)
+                os.remove(alias_path(src))  # delete the real file even if Z: is gone
             except OSError:
                 pass
         else:
-            remove_lst(coredb.get_setting(conn, LST_DIR_KEY) or "",
-                       row["name"])
+            remove_lst(coredb.get_setting(conn, LST_DIR_KEY) or "", row["name"])
         return {"ok": True}
 
     @app.post("/api/playlists/{pid}/items", status_code=201)
@@ -770,7 +783,9 @@ def register(app: FastAPI) -> None:
         """Set the folder playlists are mirrored to as .lst, and immediately
         write every existing playlist there so they're all covered."""
         path = (body.name or "").strip()
-        if path and not os.path.isdir(path):
+        # validate against the resolved location so an operator may keep a Z:\
+        # folder that maps to the NAS; store the raw value (resolve, don't rewrite)
+        if path and not os.path.isdir(alias_path(path)):
             raise HTTPException(400, "that folder does not exist")
         coredb.set_setting(conn, LST_DIR_KEY, path)
         n = sync_all_lst(conn, path) if path else 0

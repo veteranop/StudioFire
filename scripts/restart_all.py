@@ -76,6 +76,22 @@ def open_log(name: str):
         return subprocess.DEVNULL
 
 
+def map_drives() -> None:
+    """A detached process doesn't inherit the logged-in session's mapped drives,
+    so re-map the NAS (config\\drive-map.bat, if present) before the restart —
+    legacy Z:\\ data then still resolves literally. Best-effort: a mapping
+    failure must never block the restart. This runs `cmd /c drive-map.bat`, whose
+    command line does NOT contain 'services.<x>.main', so the python-runner
+    detection above never mistakes it for a service."""
+    bat = os.path.join("config", "drive-map.bat")
+    if os.path.exists(bat):
+        try:
+            subprocess.run(["cmd", "/c", bat], capture_output=True, timeout=30)
+            log("ran config\\drive-map.bat")
+        except Exception as exc:  # noqa: BLE001 — mapping is best-effort
+            log(f"config\\drive-map.bat failed ({exc}); continuing")
+
+
 def nssm_managed() -> bool:
     """True when the stack runs as NSSM Windows services. Then THIS helper
     must not kill/relaunch anything: NSSM would revive what we kill (duplicate
@@ -93,6 +109,7 @@ def main() -> int:
         log("stack is NSSM-managed — refusing; use services.msc or "
             "scripts\\restart-services.bat (run as Administrator)")
         return 1
+    map_drives()  # before the stop/start cycle, so the relaunch sees the NAS
     for pid, name in service_pids():
         # engine gets /T so its mpv child dies too; core/worker do NOT (a tree
         # kill of core would kill this helper, which is core's child).

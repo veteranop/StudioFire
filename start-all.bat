@@ -41,6 +41,12 @@ REM windows stay open but stay quiet; tail the logs or run healthcheck.bat inste
 REM Python -u keeps output unbuffered so tracebacks land in the log immediately.
 if not exist logs mkdir logs
 
+REM Map the NAS drive if this station uses a legacy mapped drive (e.g. Z:).
+REM A fresh session/boot doesn't inherit your logged-in drive letters, so
+REM stored Z:\ paths would fail until this runs. Best-effort: never abort the
+REM launch if mapping fails (single-line IF, so it parses under any EOL).
+if exist config\drive-map.bat call config\drive-map.bat >nul 2>&1
+
 echo Starting P1 audio engine (the only process that must stay alive)...
 start "StudioFire Engine (P1)" cmd /k ""%PYTHON%" -u -m services.engine.main "%CFG%" >> "logs\engine_console.log" 2>&1"
 timeout /t 2 >nul
