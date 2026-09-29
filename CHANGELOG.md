@@ -7,6 +7,8 @@ plain English a non-technical operator can understand.
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-09-29
+
 ### Fixed
 - **The station no longer needs a mapped drive (like `Z:`) to find its music,
   playlists, station IDs, PSAs or ads.** A mapped drive only exists while
