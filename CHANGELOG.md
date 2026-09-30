@@ -7,6 +7,8 @@ plain English a non-technical operator can understand.
 
 ## [Unreleased]
 
+## [1.3.2] - 2026-09-29
+
 ### Changed
 - **Auto-start is now one .bat, and it doesn't leave the fiddly part to you.**
   `scripts\install-services.bat` (run as Administrator on the on-air PC) registers
