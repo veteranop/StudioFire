@@ -172,14 +172,20 @@ It registers all three (auto-start, restart-on-crash, rotated service logs)
 with the working directory set correctly. `scripts\remove-services.bat` undoes
 it.
 
-**Then do BOTH of these, or the services sit "Paused" (learned 2026-07-08):**
-1. **Log On as a real user** — services.msc → each StudioFire\* service →
-   Log On → *This account* (the box's username/password). LocalSystem has no
-   usable Python profile and no NAS credentials.
-2. **Map the NAS inside the service session** —
-   `copy config\drive-map.example.bat config\drive-map.bat` and edit the UNC.
-   Services never inherit your logged-in drive letters; the wrapper
-   (`scripts\svc-run.bat`) runs this before each service starts. **Easier still:** build the customer installer — see
+**Two things decide whether the services can actually read the music — the script
+now handles the first, and reports it if Windows refuses:**
+1. **Log On as a real user** — a Windows service session has no usable Python
+   profile and no NAS credentials, so LocalSystem starts and then finds no music.
+   `install-services.bat` asks for the account and sets it on all three services;
+   it says so plainly if the account or password is rejected. (Manual fallback:
+   services.msc → each StudioFire\* service → Log On → *This account*.)
+   Without it the services sit "Paused" (learned 2026-07-08).
+2. **Reach the NAS from the service session** — prefer a UNC root in
+   `config\config.json`; services never inherit your logged-in drive letters. The
+   resolver handles stored drive-letter paths without a mapped drive (v1.2.0+), and
+   the wrapper (`scripts\svc-run.bat`) still runs `config\drive-map.bat` first if
+   you have one for legacy `Z:` data — copy `config\drive-map.example.bat` and edit
+   the UNC. **Easier still:** build the customer installer — see
 [[StudioFire/installer/README|installer/README]] — which bundles Python, mpv,
 NSSM, and a station-setup wizard into one setup.exe.
 

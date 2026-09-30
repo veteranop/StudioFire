@@ -7,6 +7,19 @@ plain English a non-technical operator can understand.
 
 ## [Unreleased]
 
+### Changed
+- **Auto-start is now one .bat, and it doesn't leave the fiddly part to you.**
+  `scripts\install-services.bat` (run as Administrator on the on-air PC) registers
+  the three services so they start at boot and restart themselves if they crash,
+  asks for the Windows account the station should run as, then starts them and
+  reports which ones came up. Add `-check` to see exactly what it would do with no
+  changes at all. The Log On account matters because a Windows service session has
+  no drive letters, no user profile and no NAS credentials — run as LocalSystem and
+  the station comes back and finds no music. If Windows refuses the account or the
+  password the script says so instead of leaving you with services sitting Paused.
+  It also stops any console-mode stack first, so you can't end up with two engines
+  on one station.
+
 ## [1.3.1] - 2026-09-29
 
 ### Fixed
