@@ -691,13 +691,31 @@ class Feeder:
             st["queue_version"] = mutation["queue_version"]
             st["fed"].insert(0, {"id": entry["id"], "path": cached,
                                  "duration": self._duration_of(conn, src),
-                                 "title": title, "prog": "spot"})
+                                 "title": title, "prog": "spot",
+                                 # pin until P1 confirms it: tick()'s reconcile
+                                 # must not drop a just-accepted spot before it
+                                 # is observed, or eviction deletes its cached
+                                 # file and it never airs (KDPI 2026-09-29).
+                                 # The value is the pin's start time, so a pin
+                                 # that is never observed still expires
+                                 # (PIN_GRACE_SEC) instead of becoming a ghost.
+                                 "pinned": time.time()})
             self._save_state(conn, st)
         return True, title
 
     SPOT_RETRY_GRACE_SEC = 600.0   # retry a failed spot before giving up its
                                     # window — closes the ad-affidavit gap
     SPOT_WARN_INTERVAL_SEC = 60.0  # throttle the retry warning log
+    # How long a just-accepted (202) spot/manual entry may stay PINNED while P1
+    # hasn't reported it yet. The pin is what stops tick()'s reconcile from
+    # dropping a spot before it is observed (that drop let eviction delete the
+    # cached file and the spot silently never aired — KDPI 2026-09-29,
+    # H2627206). But a pin must never be permanent: if P1 restarts inside that
+    # window it will never report the entry, and an unexpiring pin would leave a
+    # ghost in 'fed' that counts toward feed_ahead and can stop the feeder
+    # topping up — a dead-air pathway. P1 observes within seconds in practice,
+    # so this is many times the real window.
+    PIN_GRACE_SEC = 120.0
 
     def insert_manual(self, conn, path: str,
                       title: str | None = None) -> tuple[bool, str]:
@@ -729,9 +747,31 @@ class Feeder:
             st = self._load_state(conn)
             st["fed"].insert(0, {"id": entry["id"], "path": cached,
                                  "duration": self._duration_of(conn, path),
-                                 "title": disp, "prog": "manual"})
+                                 "title": disp, "prog": "manual",
+                                 # pin until observed — same hazard as
+                                 # insert_spot (a cued "Insert Next" track must
+                                 # not be reconciled away before it airs), with
+                                 # the same PIN_GRACE_SEC expiry
+                                 "pinned": time.time()})
             self._save_state(conn, st)
         return True, disp
+
+    def _pin_expired(self, entry: dict, now: float) -> bool:
+        """True when a PINNED entry has outlived PIN_GRACE_SEC without P1 ever
+        reporting it — i.e. P1 restarted (or dropped it) inside the window, so
+        the pin will never be released by observation. Returning True lets the
+        caller drop it: an unexpiring pin would leave a ghost in 'fed' that
+        counts toward feed_ahead and can stop the feeder topping up (a dead-air
+        pathway), and would hold its cached file forever. Say so loudly — an
+        accepted item that never appeared is worth knowing about."""
+        started = entry.get("pinned")
+        if not started or now - float(started) <= self.PIN_GRACE_SEC:
+            return False
+        log.warning("feeder: P1 never reported a queued %s (%r) within %.0fs — "
+                    "releasing the pin and dropping it from the feed model; it "
+                    "may not have aired", entry.get("prog") or "item",
+                    (entry.get("title") or "")[:60], self.PIN_GRACE_SEC)
+        return True
 
     def fire_due_spots(self, conn) -> None:
         """Called every tick: fire any spot rule that is due (all trigger
@@ -802,12 +842,35 @@ class Feeder:
                 keep = set(status["pending_ids"])
                 if now_id:
                     keep.add(now_id)
-                st["fed"] = [e for e in st["fed"] if e["id"] in keep]
+                # Never drop a just-accepted (202) insert before P1 has been
+                # seen to hold it: a spot/manual entry is 'pinned' when queued
+                # and only unpinned once it shows up in this reconcile (pending
+                # or on air). A status snapshot that doesn't list it yet must
+                # NOT reconcile it away — that dropped it from 'fed', the
+                # eviction pass then deleted its cached file, and the spot
+                # silently never aired (KDPI 2026-09-29, H2627206). Once
+                # observed, normal reconcile retires it after it airs/ends.
+                kept = []
+                now = time.time()
+                for e in st["fed"]:
+                    if e["id"] in keep:
+                        e.pop("pinned", None)   # observed -> released
+                        kept.append(e)
+                    elif e.get("pinned") and not self._pin_expired(e, now):
+                        kept.append(e)          # accepted, not yet observed
+                st["fed"] = kept
             else:
+                # legacy engine with no pending_ids: trim played entries from
+                # the front, but keep any pinned (not-yet-observed) insert
                 pending_count = max(0, status["queue_len"]
                                     - status["current_index"] - 1)
-                if len(st["fed"]) > pending_count:
-                    st["fed"] = st["fed"][len(st["fed"]) - pending_count:]
+                now = time.time()
+                pinned = [e for e in st["fed"] if e.get("pinned")
+                          and not self._pin_expired(e, now)]
+                rest = [e for e in st["fed"] if not e.get("pinned")]
+                if len(rest) > pending_count:
+                    rest = rest[len(rest) - pending_count:]
+                st["fed"] = pinned + rest
             st["now_item_id"] = self._now_item_id(st, now_id,
                                                   status.get("now_playing"))
 

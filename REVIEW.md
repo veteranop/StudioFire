@@ -531,5 +531,44 @@ Mark chose the two-deck design over a bolt-on "tail helper" player.
 tests of song→song, song→spot, spot→song and skip mid-crossfade on the
 real sound card (WASAPI shared mode).
 
+## 12. Spots fired but never aired — 2026-09-29 (TimeTrax H2627206)
+
+**Symptom (live, KDPI v1.2.0):** after the Z:-drop fix (§ v1.2.0) spot rules
+fired again — `spot fired` INFO logged, P1 returned 202, `spot_rules.last_fired`
+advanced — but nothing aired: zero `source='spot'` rows in `play_history`, and
+the boundary after each fire played the next show/rotation item.
+
+**Root cause:** `Feeder.tick()`'s reconcile rebuilt `feeder_state["fed"]` purely
+from the engine's latest `pending_ids` snapshot. Any snapshot that didn't yet
+list a freshly-inserted spot dropped it from `fed`; the eviction pass at the end
+of the SAME tick (keep-set = `fed` paths) then deleted the spot's precached file.
+Hourly IDs/PSAs carry an OLD `cached_at` (`Precache.ensure` doesn't re-stamp a
+still-valid cache), so the 600 s eviction grace didn't protect them. P1 then hit
+the deleted file at prefetch → "unplayable at prefetch" → skipped to the next
+item. This is a *different* hole from the §8 in-process lost update (that one is
+closed by `self._lock`): here the reconcile trusted one engine snapshot as ground
+truth for what may be discarded.
+
+**Fix:** pin a just-accepted (202) insert. `insert_spot` / `insert_manual` mark
+their `fed` entry `"pinned": True`; the reconcile keeps a pinned entry the engine
+hasn't reported yet and clears the pin the first time the entry is observed (in
+`pending_ids` or as `now_id`). After that, normal reconcile retires it once it
+airs/ends — no permanent ghost, no cache leak. **Invariant: an item the engine
+has accepted (202) may not be removed from the feeder model before it is observed
+as started or ended.** The engine's version contract already rejects an
+out-of-order/lower `queue_version` push (`apply_mutation`: `new_version <=
+current` → 409), so a stale queue can't replace a newer one — that second hole
+was checked and is closed.
+
+**Test:** `tests/test_spot_airing.py` (10 checks) — drives the exact race (a tick
+whose status omits the just-fired spot) and asserts the spot survives, its cached
+file isn't evicted, and it's still retired after it airs. Fails pre-fix at the
+"survives a reconcile that didn't see it yet" check; passes after. Full suite
+(19 modules) green with a clean `PYTHONPATH`.
+
+**Left alone:** spot rule 6 (`New Underwriter`, `Z:\John\New Underwriter`) misses
+hourly on `no playable files in that folder` — the folder exists but is empty. A
+data issue for Mark/John to populate, not a code bug.
+
 ## Related
 - [[PROJECTS-INDEX]]

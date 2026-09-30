@@ -7,6 +7,15 @@ plain English a non-technical operator can understand.
 
 ## [Unreleased]
 
+### Fixed
+- **Spots (legal IDs, PSAs, ads, jingles) that fired but never actually played.**
+  A fired spot was correctly handed to the player, but a housekeeping pass could
+  briefly forget about it and then delete its ready-to-play copy from the local
+  cache before it reached the air — so the spot was silently skipped and the next
+  song/show played instead (seen on the KDPI on-air PC on 2026-09-29: rules fired
+  every hour but nothing aired). StudioFire now holds on to a just-queued spot or
+  cued track until the player confirms it, so it can't be dropped before it plays.
+
 ## [1.3.0] - 2026-09-29
 
 ### Added
