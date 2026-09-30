@@ -13,6 +13,23 @@
 </form>
 {% endblock %}
 {% block content %}
+{# render a version's groups (### heading, optional intro line, bullets). Each
+   bullet's text is split into **bold**/plain segments; Jinja auto-escapes every
+   segment, so paths like Z:\ keep their backslashes and nothing can inject HTML #}
+{% macro cl_groups(rel) %}
+  {% for g in rel.groups %}
+    {% if g.heading %}<h3 class="cl-group">{{ g.heading }}</h3>{% endif %}
+    {% if g.intro %}<p class="muted">{{ g.intro }}</p>{% endif %}
+    {% if g.entries %}
+    <ul class="cl-list">
+      {% for entry in g.entries %}
+      <li>{% for seg in entry | sf_bold %}{% if seg[1] %}<strong>{{ seg[0] }}</strong>{% else %}{{ seg[0] }}{% endif %}{% endfor %}</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+  {% endfor %}
+{% endmacro %}
+
 <div class="card">
   <h1>Station folders</h1>
   <p class="muted">Point StudioFire at the folders where your station keeps
@@ -108,6 +125,44 @@
             hidden>⬆ Install update</button>
   </div>
   <div id="upd-progress" class="muted"></div>
+</div>
+
+<div class="card" id="changelog">
+  <h1>What's new / Change log</h1>
+  <p class="muted">This station is running
+    <strong>StudioFire {{ running_version }}</strong>. Here's what changed in
+    this version and the ones before it (newest first).</p>
+  {% if not changelog.ok or not changelog.releases %}
+  <p class="muted">Change history isn't available on this install.</p>
+  {% else %}
+    {% set ns = namespace(shown=0) %}
+    {% for rel in changelog.releases if rel.released %}
+      {% set ns.shown = ns.shown + 1 %}
+      {% if ns.shown == 1 %}
+      {# newest released version — expanded, and flagged if it's the one running #}
+      <div class="cl-release">
+        <h2 class="cl-ver">Version {{ rel.version }}{% if rel.date %}
+          <span class="muted">— {{ rel.date }}</span>{% endif %}
+          {% if rel.version == running_version %}
+          <span class="src-tag">installed</span>{% endif %}</h2>
+        {{ cl_groups(rel) }}
+      </div>
+      {% else %}
+      {# older versions — collapsed, so this doubles as version history #}
+      <details class="advanced cl-release">
+        <summary>Version {{ rel.version }}{% if rel.date %} — {{ rel.date }}{% endif %}</summary>
+        {{ cl_groups(rel) }}
+      </details>
+      {% endif %}
+    {% endfor %}
+    {% for rel in changelog.releases if not rel.released and rel.groups %}
+    {# anything staged but not shipped yet — clearly not the installed notes #}
+    <details class="advanced cl-release">
+      <summary>Not yet released</summary>
+      {{ cl_groups(rel) }}
+    </details>
+    {% endfor %}
+  {% endif %}
 </div>
 
 <div class="card" style="background: #fff5f5; border-color: #ffcccc;">

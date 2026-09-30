@@ -7,6 +7,13 @@ plain English a non-technical operator can understand.
 
 ## [Unreleased]
 
+### Added
+- **A "What's new / Change log" section in Settings.** It shows the version your
+  station is running, what changed in it, and the versions before it (newest
+  first, older ones fold open) — so after an update you can see exactly what came
+  in without having to ask. Nothing to set up: it reads the change log that
+  already ships with StudioFire.
+
 ## [1.2.0] - 2026-09-29
 
 ### Fixed

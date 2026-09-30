@@ -20,7 +20,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import auth, db, spots
+from . import auth, changelog, db, spots
 from . import schedule as sched
 from .. import pathmap
 
@@ -84,6 +84,10 @@ def create_app(cfg: dict) -> FastAPI:
             except OSError:
                 return "0"
     templates.env.globals["asset_v"] = _AssetVersion()
+    # lets the changelog template render a **bold lead-in** as <strong> while
+    # every text segment is still auto-escaped by Jinja (no injection, and Z:\
+    # backslashes in the notes survive)
+    templates.env.filters["sf_bold"] = changelog.bold_segments
     app = FastAPI(title="StudioFire", docs_url=None, redoc_url=None)
     app.state.cfg = cfg
     app.state.sessions = sessions
@@ -264,7 +268,19 @@ def create_app(cfg: dict) -> FastAPI:
     def settings_page(request: Request, sess: dict = Depends(page_user)):
         # Basic (operator) can do everything except manage users; the Users
         # section is only rendered/enabled for admins (role passed to template).
-        return render(request, "settings.html", role=sess["role"])
+        # The change log is read from CHANGELOG.md on disk (tolerant: a missing
+        # file just renders "not available", never a 500).
+        return render(request, "settings.html", role=sess["role"],
+                      changelog=changelog.load(),
+                      running_version=running_version)
+
+    @app.get("/api/changelog")
+    def api_changelog(_=Depends(api_user)):
+        """The parsed release history (newest first) plus the running version.
+        Read-only; any signed-in operator can read it."""
+        cl = changelog.load()
+        return {"current": running_version, "ok": cl["ok"],
+                "error": cl["error"], "releases": cl["releases"]}
 
     @app.get("/api/settings/dirs")
     def get_dirs(conn=Depends(get_conn), _=Depends(api_user)):
