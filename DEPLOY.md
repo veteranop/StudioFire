@@ -162,15 +162,26 @@ releases API base URL.
 
 ## Production (on-air PC) — later
 
-Same layout, but run each service as an **auto-restarting Windows service via
-NSSM** (so a crash or reboot self-heals; P1 must always come back). With
-`bin\nssm.exe` in place, run as Administrator:
+**⚠️ Do NOT use Windows services for a box that plays audio. See
+`docs/AUTOSTART-CONSENSUS.md` (Rosie + Elon, locked 2026-09-29).** A service runs in
+session 0, which has **no audio endpoint**: the engine starts, mpv starts, every track
+fails with `audio output initialization failed`, and the web UI / `services.msc` /
+service logs all still look healthy. That silenced `.200` on 2026-09-29 (3,529 failed
+tracks, green health). It is a Windows platform limit, not a StudioFire bug.
+
+The supported auto-start for a station is **autologon + a logon task that starts
+`start-all.bat` in the interactive session** — audio behaves exactly as it does in
+console mode today, and the box still returns by itself after a power bump:
+
 ```
-scripts\install-services.bat
+scripts\install-autostart.bat        (as Administrator; -check to preview)
 ```
-It registers all three (auto-start, restart-on-crash, rotated service logs)
-with the working directory set correctly. `scripts\remove-services.bat` undoes
-it.
+Also set **BIOS "restore on AC power loss" = On**, or a power cut leaves the machine
+off. `scripts\remove-services.bat` undoes a service install; `scripts\remove-autostart.bat`
+undoes the autostart install.
+
+Services are acceptable **only** for helpers that never make sound — `install-services.bat`
+now refuses to run otherwise (override: `-i-understand-no-audio`).
 
 **Two things decide whether the services can actually read the music — the script
 now handles the first, and reports it if Windows refuses:**

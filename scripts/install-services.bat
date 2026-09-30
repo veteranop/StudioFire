@@ -38,8 +38,36 @@ echo.
 REM ---- must be elevated -------------------------------------------------
 fltmc >nul 2>&1
 if errorlevel 1 (
-  echo [!] This needs Administrator rights.
+  echo [X]  This needs Administrator rights.
   echo     Close this window, right-click this .bat, then "Run as administrator".
+  if not defined CHECK pause
+  exit /b 1
+)
+
+REM ---- DO NOT USE THIS ON A BOX THAT PLAYS AUDIO ------------------------
+REM A Windows service runs in session 0, which has NO audio endpoint: the engine
+REM starts, mpv starts, and every track then fails with "audio output
+REM initialization failed" - while this script reports success and services.msc
+REM shows the service Running. Proven on .200, 2026-09-29: 3,529 failed tracks
+REM and a silent station with green health. Use install-autostart.bat instead.
+if /i not "%~1"=="-i-understand-no-audio" if not defined CHECK (
+  echo.
+  echo ============================================================
+  echo  STOP - THIS SCRIPT BREAKS AUDIO ON A STATION
+  echo ============================================================
+  echo  A service runs in session 0, which has no audio device. The engine will
+  echo  start, play nothing, and this script will still tell you it succeeded.
+  echo  That is exactly what silenced .200 on 2026-09-29.
+  echo.
+  echo  For auto-start that keeps audio working, run this instead:
+  echo      scripts\install-autostart.bat
+  echo  ^(autologon + a logon task that starts start-all.bat in the session where
+  echo   audio actually works. Decision record: docs\AUTOSTART-CONSENSUS.md^)
+  echo.
+  echo  If you really want the services anyway ^(e.g. a helper box that never
+  echo  makes sound^), re-run as:
+  echo      scripts\install-services.bat -i-understand-no-audio
+  echo.
   if not defined CHECK pause
   exit /b 1
 )
@@ -66,7 +94,7 @@ echo [ok] interpreter     : %PYTHON%
 
 if "%FATAL%"=="1" (
   echo.
-  echo [!] Fix the MISSING items above and run this again.
+  echo [X]  Fix the MISSING items above and run this again.
   if not defined CHECK pause
   exit /b 1
 )
@@ -106,7 +134,7 @@ if "%SVCPASS%"=="" (
   set /p "SVCPASS=  Password: "
 )
 if "%SVCPASS%"=="" (
-  echo [!] No password given. Set it afterwards in services.msc ^(Log On tab^),
+  echo [X]  No password given. Set it afterwards in services.msc ^(Log On tab^),
   echo     or the services will sit "Paused" and the station stays off air.
 )
 :skipaccount
@@ -144,7 +172,7 @@ call :one StudioFireWorker services.worker.main
 
 if defined FAILED (
   echo.
-  echo [!] A service could not be registered - see the message above.
+  echo [X]  A service could not be registered - see the message above.
   echo     Nothing was started. The station is still off air; to get it back
   echo     right now run GO-LIVE.bat, then tell Mark.
   if not defined CHECK pause
@@ -168,7 +196,7 @@ if exist "%APP%\scripts\healthcheck.py" (
   "%PYTHON%" "%APP%\scripts\healthcheck.py"
   set "HC=!errorlevel!"
 ) else (
-  echo [!] scripts\healthcheck.py not found - skipping the live check.
+  echo [X]  scripts\healthcheck.py not found - skipping the live check.
 )
 echo.
 if "!HC!"=="0" (
@@ -205,7 +233,7 @@ echo  Undo all  : scripts\remove-services.bat
 echo  Service logs: logs\StudioFireEngine_service.log, logs\StudioFireWeb_service.log,
 echo                logs\StudioFireWorker_service.log
 echo.
-echo  [!] Console mode (start-all.bat) and service mode are not meant to run
+echo  [X]  Console mode ^(start-all.bat^) and service mode are not meant to run
 echo      together. Pick service mode on the on-air PC.
 echo.
 pause

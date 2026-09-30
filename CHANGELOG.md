@@ -7,6 +7,25 @@ plain English a non-technical operator can understand.
 
 ## [Unreleased]
 
+### Added
+- **Auto-start that keeps the station on air: `scripts\install-autostart.bat`.**
+  Run it as Administrator on the box and the station comes back by itself after a
+  power bump or a Windows restart, with the sound still working and nobody at the
+  keyboard. It turns on Windows autologon for the station account and creates two
+  scheduled tasks: one that starts `start-all.bat` shortly after that account logs
+  in, and a watchdog that checks every 5 minutes and restarts the stack if it stays
+  unhealthy twice in a row. Add `-check` to see exactly what it would do without
+  changing anything; `scripts\remove-autostart.bat` undoes it.
+
+### Changed
+- **`install-services.bat` now refuses to run on a station.** A Windows service runs
+  in session 0, which has no audio device: the engine starts, plays nothing, and the
+  old script still reported success while `services.msc` showed the service Running.
+  It now stops and points you at `install-autostart.bat` instead. If you genuinely
+  want the services on a box that never makes sound, pass `-i-understand-no-audio`.
+- `DEPLOY.md` no longer recommends services as the production setup for a station —
+  see `docs/AUTOSTART-CONSENSUS.md` for the evidence and the reasoning.
+
 ## [1.3.2] - 2026-09-29
 
 ### Changed
