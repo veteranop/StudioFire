@@ -7,6 +7,8 @@ plain English a non-technical operator can understand.
 
 ## [Unreleased]
 
+## [1.3.3] - 2026-09-29
+
 ### Added
 - **Auto-start that keeps the station on air: `scripts\install-autostart.bat`.**
   Run it as Administrator on the box and the station comes back by itself after a
