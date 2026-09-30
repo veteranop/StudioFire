@@ -7,6 +7,8 @@ plain English a non-technical operator can understand.
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-09-29
+
 ### Fixed
 - **Spots (legal IDs, PSAs, ads, jingles) that fired but never actually played.**
   A fired spot was correctly handed to the player, but a housekeeping pass could
