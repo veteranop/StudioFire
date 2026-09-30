@@ -7,6 +7,8 @@ plain English a non-technical operator can understand.
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-09-29
+
 ### Added
 - **A "What's new / Change log" section in Settings.** It shows the version your
   station is running, what changed in it, and the versions before it (newest
