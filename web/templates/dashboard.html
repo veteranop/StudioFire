@@ -175,7 +175,11 @@
     </details>
   </div>
   <div class="card">
-    <h2 id="rot-title">Now playing list</h2>
+    <div class="row" style="justify-content:space-between;margin:0 0 .4rem">
+      <h2 id="rot-title" style="margin:0">Now playing list</h2>
+      <button class="btn btn-sm" id="rot-shuffle" onclick="shuffleRotation()"
+              title="Play this playlist in a random order" disabled>🔀 Shuffle</button>
+    </div>
     <input type="text" id="rot-search" class="rot-search" autocomplete="off"
            placeholder="🔎 Search this playlist…" oninput="renderRotation()">
     <ol id="rot-list" class="queue"><li class="muted">loading…</li></ol>
@@ -290,7 +294,8 @@ function fmtLong(sec) {   // run times: "8h 12m", "47m", "3:05"
 }
 function clockAt(secFromNow) {   // "3:12 PM" — when something will end
   return new Date(Date.now() + secFromNow * 1000)
-    .toLocaleTimeString([], {hour: "numeric", minute: "2-digit"});
+    .toLocaleTimeString([], {hour: "numeric", minute: "2-digit",
+                             hour12: window.SF_HOUR12});
 }
 function esc(s) {
   return (s || "").replace(/[&<>"]/g, c =>
@@ -591,7 +596,7 @@ function logKind(e) {
 }
 function logTime(ts) {
   const d = new Date(ts);
-  return isNaN(d) ? "" : d.toLocaleTimeString([], {hour12: false});
+  return isNaN(d) ? "" : d.toLocaleTimeString([], {hour12: window.SF_HOUR12});
 }
 async function refreshHistory() {
   try {
@@ -818,6 +823,10 @@ async function refreshRotation() {
     }
     rotItems = d.items; rotNowId = d.now_item_id;
     rotPid = d.playlist ? d.playlist.id : null;
+    // Shuffle edits the base rotation permanently, so it's off while a show is
+    // on air (read-only then) and when nothing is on air at all.
+    const shBtn = document.getElementById("rot-shuffle");
+    if (shBtn) shBtn.disabled = !!d.is_show || !d.playlist;
     const sig = rotItems.map(i => i.id).join(",") + "|" + rotNowId +
                 "|" + rotIsShow;
     if (!rotBusy && sig !== rotSig) { rotSig = sig; renderRotation(); }
@@ -915,6 +924,17 @@ function renderRotation() {
     ol.scrollTop = 0;
   }
   rotLastNow = rotNowId;
+}
+async function shuffleRotation() {
+  if (rotIsShow || !rotPid) return;   // button is disabled in these cases
+  if (!confirm("Shuffle this playlist into a random order?")) return;
+  const r = await fetch("/api/rotation/shuffle", {method: "POST"});
+  if (!r.ok) {
+    alert((await r.json().catch(() => ({}))).detail || "Could not shuffle");
+    return;
+  }
+  rotSig = "";            // force a redraw in the new order
+  refreshRotation();
 }
 async function finishRotDrag(li) {
   li.classList.remove("dragging");

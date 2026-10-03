@@ -31,12 +31,14 @@
     {% block content %}{% endblock %}
   </main>
   <script>
+    // Station clock format, chosen on the Settings page. true = 12-hour (AM/PM).
+    window.SF_HOUR12 = {{ 'true' if hour12 else 'false' }};
     (function () {
       const el = document.getElementById("topclock");
       const dateEl = document.getElementById("topdate");
       function tick() {
         const d = new Date();
-        el.textContent = d.toLocaleTimeString([], {hour12: false});
+        el.textContent = d.toLocaleTimeString([], {hour12: window.SF_HOUR12});
         // e.g. "Thu, Sep 25" — the date next to the time
         dateEl.textContent = d.toLocaleDateString([],
           {weekday: "short", month: "short", day: "numeric"});

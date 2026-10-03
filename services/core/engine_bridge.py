@@ -1438,6 +1438,21 @@ def register(app: FastAPI) -> None:
         feeder.resync_rotation(conn)              # take effect on air now
         return {"ok": True}
 
+    @app.post("/api/rotation/shuffle")
+    def api_rotation_shuffle(conn=Depends(get_conn), _=Depends(api_user)):
+        """Randomly reorder the on-air rotation — the On-Air Playlist card's
+        Shuffle button. A permanent edit to the active playlist, re-synced so
+        it takes effect on air now (the current song is never interrupted).
+        Refused while a show is on air: the card is read-only then, and the
+        rotation resumes when the show ends."""
+        if feeder._load_state(conn).get("show"):
+            raise HTTPException(409, "a show is on air — the rotation shuffles "
+                                     "when it ends")
+        pid = _active_pid(conn)
+        ids = pl.shuffle_items(conn, pid)
+        feeder.resync_rotation(conn)
+        return {"ok": True, "item_ids": ids}
+
     @app.post("/api/rotation/remove")
     def api_rotation_remove(body: dict, conn=Depends(get_conn),
                             _=Depends(api_user)):

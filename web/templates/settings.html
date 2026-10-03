@@ -57,6 +57,21 @@
 </div>
 
 <div class="card">
+  <h1>Clock &amp; time format</h1>
+  <p class="muted">How times are shown across StudioFire — the clock in the top
+    bar, the On Air log, reports, and the schedule.</p>
+  <div class="row">
+    <label style="margin:0">Time format
+      <select id="tf-format" onchange="saveTimeFormat()"
+              style="display:block;margin-top:.3rem">
+        <option value="12" {% if hour12 %}selected{% endif %}>12-hour (AM / PM)</option>
+        <option value="24" {% if not hour12 %}selected{% endif %}>24-hour (military)</option>
+      </select></label>
+  </div>
+  <div id="tf-msg" class="muted" style="margin-top:.4rem"></div>
+</div>
+
+<div class="card">
   <h1>Station equipment</h1>
   <p class="muted">Gear to keep an eye on by ping (ICMP) — transmitter, Barix,
     switches, UniFi. <span class="tile-green-text">Green</span> = reachable,
@@ -231,6 +246,21 @@ async function saveDir(key, path) {
     body: JSON.stringify({key, path})});
   if (!r.ok) alert((await r.json()).detail || "Could not save");
   loadDirs();
+}
+
+async function saveTimeFormat() {
+  const fmt = document.getElementById("tf-format").value;
+  const msg = document.getElementById("tf-msg");
+  const r = await fetch("/api/settings/time_format", {method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({format: fmt})});
+  if (!r.ok) {
+    msg.textContent = (await r.json()).detail || "Could not save.";
+    return;
+  }
+  window.SF_HOUR12 = (fmt === "12");   // the top-bar clock updates next tick
+  msg.textContent = "Saved — times now show in " +
+    (fmt === "12" ? "12-hour (AM/PM)" : "24-hour") + " format.";
 }
 
 function pickerOpen(key, label, startPath) {

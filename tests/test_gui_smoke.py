@@ -72,6 +72,8 @@ def main():
 
     # ---- pages render
     check("dashboard renders", b"Now Playing" in client.get("/").content)
+    check("dashboard has the rotation Shuffle button",
+          b'id="rot-shuffle"' in client.get("/").content)
     r = client.get("/playlists")
     check("playlists page offers the file-explorer Open",
           b"Open a playlist (.lst)" in r.content)

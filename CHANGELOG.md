@@ -7,6 +7,22 @@ plain English a non-technical operator can understand.
 
 ## [Unreleased]
 
+### Added
+- **Shuffle button on the playlist editor.** Open a playlist and press the new
+  **Shuffle** button to reorder it into a random mix, so a playlist no longer
+  plays in the exact same sequence every time. The new order is saved straight
+  back to the playlist's `.lst` file, the same as any other change.
+- **Shuffle button on the On Air screen.** The playlist card on the On Air page
+  (the list of what's playing and what's next) now has its own **Shuffle**
+  button, so you can reshuffle the rotation right where you are watching it.
+  The current song keeps playing; everything coming up is shuffled and the new
+  order is saved to the playlist. The button is off while a show is on air.
+- **Choose 12-hour (AM/PM) or 24-hour (military) time.** Settings now has a
+  **Clock & time format** option. It changes every clock StudioFire shows — the
+  clock in the top bar, the On Air history, reports, the schedule calendar and
+  the show labels. It starts on 12-hour (AM/PM) and the operator can switch to
+  24-hour at any time.
+
 ## [1.3.3] - 2026-09-29
 
 ### Added

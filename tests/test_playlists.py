@@ -63,6 +63,31 @@ def main():
     check("reorder", [i["title"] for i in pl.get_items(conn, pid)]
           == ["C", "A", "B"])
 
+    # ---- shuffle (the operator's Shuffle button)
+    import random as _rnd
+    sp = pl.create_playlist(conn, "Shuffle Me")
+    sid = [pl.add_item(conn, sp, "file", rf"C:\music\{i}.mp3", f"s{i}")
+           for i in range(8)]
+    order = pl.shuffle_items(conn, sp, rng=_rnd.Random(1234))
+    check("shuffle keeps every item (permutation)",
+          len(order) == 8 and sorted(order) == sorted(sid))
+    check("shuffle persists the new order",
+          [i["id"] for i in pl.get_items(conn, sp)] == order)
+    check("shuffle actually changes the order", order != sid)
+    def shuffled_titles(name):
+        p = pl.create_playlist(conn, name)
+        for i in range(8):
+            pl.add_item(conn, p, "file", rf"C:\music\{i}.mp3", f"s{i}")
+        pl.shuffle_items(conn, p, rng=_rnd.Random(1234))
+        return [it["title"] for it in pl.get_items(conn, p)]
+    check("shuffle reproducible for the same seed+content",
+          shuffled_titles("Shuffle Rep A") == shuffled_titles("Shuffle Rep B"))
+    solo = pl.create_playlist(conn, "Solo Song")
+    only = pl.add_item(conn, solo, "file", r"C:\music\only.mp3", "only")
+    check("one-item shuffle is a no-op", pl.shuffle_items(conn, solo) == [only])
+    empty = pl.create_playlist(conn, "Empty Shuffle")
+    check("empty shuffle returns []", pl.shuffle_items(conn, empty) == [])
+
     dup = pl.duplicate_playlist(conn, pid, "Morning Drive (copy)")
     check("duplicate copies items",
           [i["title"] for i in pl.get_items(conn, dup)] == ["C", "A", "B"])
@@ -154,6 +179,26 @@ def main():
                       json={"item_ids": [999]}).status_code == 409)
     check("API 404 unknown playlist",
           client.get("/api/playlists/9999").status_code == 404)
+
+    # ---- API shuffle (the Shuffle button's endpoint)
+    spid = client.post("/api/playlists", json={"name": "Shuffle API"}).json()["id"]
+    for i in range(4):
+        client.post(f"/api/playlists/{spid}/items",
+                    json={"item_type": "file", "path": rf"C:\m\{i}.mp3",
+                          "title": f"t{i}"})
+    before = [i["id"] for i in
+              client.get(f"/api/playlists/{spid}").json()["items"]]
+    r = client.post(f"/api/playlists/{spid}/shuffle")
+    check("API shuffle 200 + returns the new order",
+          r.status_code == 200
+          and sorted(r.json()["item_ids"]) == sorted(before))
+    after = [i["id"] for i in
+             client.get(f"/api/playlists/{spid}").json()["items"]]
+    check("API shuffle persists (GET matches returned order)",
+          after == r.json()["item_ids"])
+    check("API shuffle 404 unknown playlist",
+          client.post("/api/playlists/9999/shuffle").status_code == 404)
+    client.delete(f"/api/playlists/{spid}")   # keep later backup counts stable
 
     # ---- ZaraRadio .lst import
     lst = ("3\r\n"

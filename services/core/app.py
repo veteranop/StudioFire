@@ -131,8 +131,29 @@ def create_app(cfg: dict) -> FastAPI:
     app.state.api_admin = api_admin
     app.state.get_conn = get_conn
 
+    # ---- clock display format (operator chooses military or AM/PM in Settings)
+    def time_format(conn) -> str:
+        """The station's saved clock format: '12' (AM/PM) or '24' (military).
+        Defaults to 12-hour when the operator has never chosen."""
+        v = db.get_setting(conn, "time_format")
+        return v if v in ("12", "24") else "12"
+
+    def apply_time_format(conn) -> bool:
+        """Push the saved format into the schedule module (so server-rendered
+        'when'/'next' labels match) and return it as a bool (True = 12-hour)."""
+        h12 = time_format(conn) == "12"
+        sched.set_hour12(h12)
+        return h12
+
+    _startup_conn = db.connect(cfg["db_path"])
+    try:                       # apply the saved format before the first render
+        apply_time_format(_startup_conn)
+    finally:
+        _startup_conn.close()
+
     def render(request, name, **ctx):
         ctx.setdefault("station", cfg["station_name"])
+        ctx.setdefault("hour12", sched.hour12())
         return templates.TemplateResponse(request, name, ctx)
 
     # ------------------------------------------------------------- routes
@@ -306,6 +327,23 @@ def create_app(cfg: dict) -> FastAPI:
             raise HTTPException(400, "that folder does not exist")
         db.set_setting(conn, key, path)
         return {"ok": True}
+
+    @app.get("/api/settings/time_format")
+    def get_time_format(conn=Depends(get_conn), _=Depends(api_user)):
+        """The station's clock display format: '12' (AM/PM) or '24' (military)."""
+        return {"format": time_format(conn)}
+
+    @app.post("/api/settings/time_format")
+    def set_time_format(body: dict, conn=Depends(get_conn), _=Depends(api_user)):
+        """Switch the clock display between 12-hour (AM/PM) and 24-hour
+        (military). Applies to the header clock, the On Air log, reports, the
+        schedule, and the server-rendered show labels."""
+        fmt = str(body.get("format") or "").strip()
+        if fmt not in ("12", "24"):
+            raise HTTPException(400, "format must be '12' or '24'")
+        db.set_setting(conn, "time_format", fmt)
+        sched.set_hour12(fmt == "12")   # live — affects the next label render
+        return {"ok": True, "format": fmt}
 
     # ---- user administration (admin only: the one thing Basic can't do)
     def _norm_role(r: str | None) -> str | None:

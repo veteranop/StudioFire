@@ -50,6 +50,7 @@
     <div class="row">
       <button class="btn btn-green btn-big" onclick="activateThis()">
         ▶ PUT ON AIR</button>
+      <button class="btn" onclick="shuffleThis()" title="Play this playlist in a random order">🔀 Shuffle</button>
       <button class="btn" onclick="duplicateThis()">Duplicate</button>
       <button class="btn btn-red" onclick="deleteThis()">Delete playlist</button>
     </div>
@@ -205,6 +206,22 @@ async function activateThis() {
   const r = await fetch(`/api/playlists/${PID}/activate`, {method: "POST"});
   if (r.ok) location = "/";
   else alert((await r.json()).detail || "Engine did not accept the playlist");
+}
+async function shuffleThis() {
+  if (!confirm("Shuffle this playlist into a random order?")) return;
+  const r = await fetch(`/api/playlists/${PID}/shuffle`, {method: "POST"});
+  if (!r.ok) { alert((await r.json()).detail || "Could not shuffle"); return; }
+  const d = await r.json();
+  // redraw the list in the new order without reloading the page
+  const byId = {};
+  for (const li of document.querySelectorAll("#items li[data-id]"))
+    byId[li.dataset.id] = li;
+  const ol = document.getElementById("items");
+  for (const id of d.item_ids) {
+    const li = byId[String(id)];
+    if (li) ol.appendChild(li);
+  }
+  refreshStats();
 }
 async function duplicateThis() {
   const copy = prompt("Name for the copy:", PNAME + " (copy)");

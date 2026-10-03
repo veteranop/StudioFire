@@ -633,6 +633,20 @@ def main():
               engine.status().get("now_playing")
               and not engine.status().get("emergency_mode"))
 
+        # shuffle (the On-Air Playlist card's Shuffle button): a random order,
+        # saved to the playlist permanently and re-synced on air
+        before_shuffle = [i["id"] for i in pl.get_items(conn, pid)]
+        r = client.post("/api/rotation/shuffle")
+        check("rotation shuffle accepted", r.status_code == 200)
+        sh_ids = r.json()["item_ids"]
+        check("rotation shuffle keeps every item (permutation)",
+              sorted(sh_ids) == sorted(before_shuffle))
+        check("rotation shuffle is saved to the playlist permanently",
+              [i["id"] for i in pl.get_items(conn, pid)] == sh_ids)
+        check("still on air after shuffle (re-synced, not dead)",
+              engine.status().get("now_playing")
+              and not engine.status().get("emergency_mode"))
+
         # remove a song that isn't the one playing -> saved + re-synced
         now_item = client.get("/api/rotation").json()["now_item_id"]
         victim = next(i for i in item_ids if i != now_item)

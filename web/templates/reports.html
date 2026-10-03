@@ -67,7 +67,7 @@ async function runReport() {
     const t = new Date(r.ts);
     tr.innerHTML = "<td></td><td></td><td></td>";
     tr.children[0].textContent = isNaN(t) ? r.ts
-      : t.toLocaleString([], {hour12: false});
+      : t.toLocaleString([], {hour12: window.SF_HOUR12});
     tr.children[1].textContent = r.title;
     tr.children[2].textContent = r.source;
     b.appendChild(tr);

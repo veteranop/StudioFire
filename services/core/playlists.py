@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import os
+import random
 import re
 import sqlite3
 import time
@@ -437,6 +438,19 @@ def reorder_items(conn: sqlite3.Connection, pid: int,
                      (time.time(), pid))
 
 
+def shuffle_items(conn: sqlite3.Connection, pid: int,
+                  rng: random.Random | None = None) -> list[int]:
+    """Randomly reorder a playlist's items (the operator's Shuffle button) and
+    return the new item-id order. Goes through reorder_items, so the DB order
+    and the .lst mirror stay exactly in step. A playlist of 0 or 1 items is
+    left as-is (there is nothing to shuffle)."""
+    ids = [i["id"] for i in get_items(conn, pid)]
+    if len(ids) > 1:
+        (rng or random).shuffle(ids)
+        reorder_items(conn, pid, ids)
+    return ids
+
+
 def _renumber(conn: sqlite3.Connection, pid: int) -> None:
     rows = conn.execute("SELECT id FROM playlist_items WHERE playlist_id = ? "
                         "ORDER BY position, id", (pid,)).fetchall()
@@ -756,6 +770,15 @@ def register(app: FastAPI) -> None:
         reorder_items(conn, pid, body.item_ids)
         _sync(conn, pid)
         return {"ok": True}
+
+    @app.post("/api/playlists/{pid}/shuffle")
+    def api_shuffle(pid: int, conn=Depends(get_conn), _=Depends(api_user)):
+        """Shuffle the playlist into a random order (the Shuffle button).
+        Returns the new item-id order so the page can redraw without a reload."""
+        _playlist_or_404(conn, pid)
+        ids = shuffle_items(conn, pid)
+        _sync(conn, pid)          # the .lst file follows the new order
+        return {"ok": True, "item_ids": ids}
 
     def _music_root() -> str:
         root = (app.state.cfg.get("nas_music_root") or "").strip()

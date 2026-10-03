@@ -41,18 +41,54 @@ def now_local() -> str:
     return _dt.datetime.now().strftime("%Y-%m-%dT%H:%M")
 
 
+# Clock display preference, set from the station's saved setting (app.py sets
+# this at startup and whenever the operator changes it on the Settings page) so
+# the server-rendered 'when'/'next' labels match the header clock. True =
+# 12-hour (AM/PM); False = 24-hour (military).
+_HOUR12 = True
+
+
+def hour12() -> bool:
+    """True when clock times should be shown as 12-hour (AM/PM)."""
+    return _HOUR12
+
+
+def set_hour12(flag: bool) -> None:
+    """Set the clock display preference. Called by app.py at startup and when
+    the operator switches the format in Settings."""
+    global _HOUR12
+    _HOUR12 = bool(flag)
+
+
 def _fmt_tod(tod: str | None) -> str:
-    """'18:30' -> '6:30 PM' for the plain-English label."""
+    """'18:30' -> '6:30 PM' in 12-hour mode, or '18:30' in 24-hour mode."""
     if not tod:
         return ""
     try:
-        return _dt.datetime.strptime(tod, "%H:%M").strftime("%-I:%M %p")
+        dt = _dt.datetime.strptime(tod, "%H:%M")
+    except (ValueError, TypeError):
+        return tod
+    if not _HOUR12:
+        return dt.strftime("%H:%M")
+    try:
+        return dt.strftime("%-I:%M %p")
     except ValueError:
         try:  # Windows strftime has no %-I
-            return _dt.datetime.strptime(tod, "%H:%M").strftime("%I:%M %p")\
-                .lstrip("0")
+            return dt.strftime("%I:%M %p").lstrip("0")
         except ValueError:
             return tod
+
+
+def _fmt_dt(s: str | None) -> str:
+    """A stored 'YYYY-MM-DDTHH:MM' timestamp -> plain English: the date plus the
+    time in the station's chosen format ('2026-10-03 6:30 PM' / '18:30')."""
+    if not s:
+        return ""
+    try:
+        d = _dt.datetime.strptime(s, "%Y-%m-%dT%H:%M")
+    except (ValueError, TypeError):
+        return s.replace("T", " ")
+    return d.strftime("%Y-%m-%d ") + _fmt_tod(d.strftime("%H:%M"))
 
 
 def _when_label(r: dict) -> str:
@@ -60,7 +96,7 @@ def _when_label(r: dict) -> str:
     rec = r.get("recurrence") or "once"
     if rec == "once":
         base = "Manual — press Start now" if not r.get("start_at") \
-            else r["start_at"].replace("T", " ")
+            else _fmt_dt(r["start_at"])
         return base
     if rec == "daily":
         base = f"Every day at {_fmt_tod(r.get('time_of_day'))}"
