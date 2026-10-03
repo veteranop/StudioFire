@@ -7,6 +7,8 @@ plain English a non-technical operator can understand.
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-10-03
+
 ### Added
 - **Library duplicate cleanup.** Settings now links to a **Duplicate cleanup**
   page. Press **Find duplicates** and StudioFire lists every song that appears
