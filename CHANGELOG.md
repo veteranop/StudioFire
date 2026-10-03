@@ -7,6 +7,15 @@ plain English a non-technical operator can understand.
 
 ## [Unreleased]
 
+### Added
+- **Library duplicate cleanup.** Settings now links to a **Duplicate cleanup**
+  page. Press **Find duplicates** and StudioFire lists every song that appears
+  more than once in the music library, side by side, with its size and length.
+  Tick the copies you want to keep; everything you leave unticked is **moved** —
+  never deleted — into a `_Duplicates` folder inside your music library, with a
+  manifest so any file can be put straight back. Songs used by a playlist, a
+  show or a spot, or held in a station folder, are protected and never moved.
+
 ## [1.4.0] - 2026-10-03
 
 ### Added

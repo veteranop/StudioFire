@@ -1,0 +1,173 @@
+{% extends "base.html" %}
+{% block title %}Duplicate cleanup — {{ station }}{% endblock %}
+{% block nav %}
+<nav class="nav-links">
+  <a href="/">On Air</a>
+  <a href="/playlists">Playlists</a>
+  <a href="/schedule">Schedule</a>
+  <a href="/settings" class="active">Settings</a>
+  <a href="/reports">Reports</a>
+</nav>
+<form method="post" action="/logout" class="nav-right">
+  <button type="submit" class="btn">Sign out</button>
+</form>
+{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>Duplicate cleanup</h1>
+  <p class="muted">
+    Finds songs that appear more than once in the music library (same file name,
+    ignoring a "(1)" or "- copy" on the end). <strong>Look first, then choose.</strong>
+    Anything you leave unticked is <strong>moved</strong> — not deleted — into a
+    <code>_Duplicates</code> folder inside your music library, so it can always be
+    brought back. Songs used by a playlist, a show or a spot are protected and
+    won't be moved.
+  </p>
+  <div class="row">
+    <button class="btn btn-green" id="dup-find" onclick="findDupes()">🔍 Find duplicates</button>
+    <button class="btn btn-yellow" id="dup-go" onclick="doQuarantine()" hidden>
+      🧹 Move unticked duplicates to _Duplicates</button>
+  </div>
+  <div id="dup-summary" class="muted" style="margin-top:.6rem"></div>
+</div>
+
+<div id="dup-groups"></div>
+
+<script>
+let dupGroups = [];
+
+function fmtSize(n) {
+  if (!n) return "";
+  const mb = n / (1024 * 1024);
+  return mb >= 1 ? mb.toFixed(1) + " MB" : Math.round(n / 1024) + " KB";
+}
+function fmtDur(s) {
+  if (!s) return "";
+  s = Math.round(s);
+  return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
+}
+function esc(s) {
+  return String(s == null ? "" : s).replace(/[&<>"]/g,
+    c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+}
+
+async function findDupes() {
+  const btn = document.getElementById("dup-find");
+  btn.disabled = true; btn.textContent = "Searching…";
+  document.getElementById("dup-summary").textContent = "";
+  const box = document.getElementById("dup-groups");
+  box.innerHTML = "<div class='muted' style='padding:1rem'>Reading the library index…</div>";
+  let d;
+  try {
+    d = await (await fetch("/api/duplicates")).json();
+  } catch (e) {
+    box.innerHTML = ""; document.getElementById("dup-summary").textContent =
+      "Could not read the library."; btn.disabled = false; btn.textContent =
+      "🔍 Find duplicates"; return;
+  }
+  dupGroups = d.groups || [];
+  btn.disabled = false; btn.textContent = "🔍 Find duplicates";
+  const sum = document.getElementById("dup-summary");
+  if (!dupGroups.length) {
+    box.innerHTML = "";
+    sum.textContent = "No duplicates found. Nothing to clean up. 🎉";
+    document.getElementById("dup-go").hidden = true;
+    return;
+  }
+  sum.textContent = d.group_count + " duplicate group(s), " + d.file_count +
+    " file(s). Tick the copies to KEEP; unticked copies move to the " +
+    "_Duplicates folder.";
+  renderGroups();
+  document.getElementById("dup-go").hidden = false;
+}
+
+function renderGroups() {
+  const box = document.getElementById("dup-groups");
+  box.innerHTML = "";
+  dupGroups.forEach((g, gi) => {
+    const card = document.createElement("div");
+    card.className = "card";
+    const h = document.createElement("h2");
+    h.textContent = (g.artist ? g.artist + " — " : "") + g.title;
+    const sub = document.createElement("span");
+    sub.className = "muted"; sub.textContent = "  (" + g.count + " copies)";
+    h.appendChild(sub);
+    card.appendChild(h);
+
+    const table = document.createElement("table");
+    table.className = "table";
+    table.innerHTML = "<thead><tr><th style='width:5rem'>Keep</th>" +
+      "<th>File</th><th style='width:6rem'>Size</th>" +
+      "<th style='width:5rem'>Length</th><th style='width:11rem'>Used by</th>" +
+      "</tr></thead>";
+    const tb = document.createElement("tbody");
+    g.files.forEach(f => {
+      const tr = document.createElement("tr");
+      const keepTd = document.createElement("td");
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.checked = f.suggested_keep || f.protected;
+      cb.disabled = f.protected;         // protected files can never be swept
+      cb.dataset.path = f.path;
+      cb.className = "dup-keep";
+      keepTd.appendChild(cb);
+      tr.appendChild(keepTd);
+
+      const nameTd = document.createElement("td");
+      nameTd.innerHTML = "<div>" + esc(f.name) +
+        (f.protected ? " <span class='src-tag'>protected</span>" : "") +
+        "</div><div class='muted' style='font-size:.78rem'>" + esc(f.folder) +
+        "</div>";
+      tr.appendChild(nameTd);
+
+      const sizeTd = document.createElement("td"); sizeTd.textContent = fmtSize(f.size);
+      tr.appendChild(sizeTd);
+      const durTd = document.createElement("td"); durTd.textContent = fmtDur(f.duration_sec);
+      tr.appendChild(durTd);
+      const useTd = document.createElement("td");
+      useTd.textContent = (f.used_by && f.used_by.length)
+        ? f.used_by.join(", ") : "";
+      tr.appendChild(useTd);
+      tb.appendChild(tr);
+    });
+    table.appendChild(tb);
+    card.appendChild(table);
+    box.appendChild(card);
+  });
+}
+
+async function doQuarantine() {
+  const toRemove = [...document.querySelectorAll(".dup-keep")]
+    .filter(cb => !cb.checked && !cb.disabled)
+    .map(cb => cb.dataset.path);
+  if (!toRemove.length) {
+    alert("Nothing to move — every copy in the list is ticked to keep.");
+    return;
+  }
+  if (!confirm("Move " + toRemove.length + " duplicate file(s) into the " +
+               "_Duplicates folder?\n\nThey are NOT deleted — you can put them " +
+               "back from the manifest. The station keeps playing.")) return;
+  const btn = document.getElementById("dup-go");
+  btn.disabled = true; btn.textContent = "Moving…";
+  let d;
+  try {
+    const r = await fetch("/api/duplicates/quarantine", {method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({remove: toRemove})});
+    d = await r.json();
+    if (!r.ok) throw new Error(d.detail || "cleanup failed");
+  } catch (e) {
+    alert(e.message || "Could not move the files.");
+    btn.disabled = false; btn.textContent =
+      "🧹 Move unticked duplicates to _Duplicates"; return;
+  }
+  btn.disabled = false; btn.textContent =
+    "🧹 Move unticked duplicates to _Duplicates";
+  let msg = "Moved " + d.moved.length + " file(s) to " + (d.dest || "_Duplicates") + ".";
+  if (d.skipped.length) msg += " " + d.skipped.length + " skipped (protected).";
+  if (d.errors.length) msg += " " + d.errors.length + " error(s).";
+  document.getElementById("dup-summary").textContent = msg;
+  await findDupes();
+}
+</script>
+{% endblock %}

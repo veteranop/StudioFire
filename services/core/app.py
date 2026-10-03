@@ -156,6 +156,8 @@ def create_app(cfg: dict) -> FastAPI:
         ctx.setdefault("hour12", sched.hour12())
         return templates.TemplateResponse(request, name, ctx)
 
+    app.state.render = render           # routers added later reuse this
+
     # ------------------------------------------------------------- routes
 
     from .. import updater
@@ -809,8 +811,9 @@ def create_app(cfg: dict) -> FastAPI:
                 "first_weekday": datetime.date(y, m, 1).weekday(),
                 "base": base, "days": days}
 
-    from . import engine_bridge, playlists
+    from . import duplicates, engine_bridge, playlists
     playlists.register(app)
     engine_bridge.register(app)
+    duplicates.register(app)
 
     return app
