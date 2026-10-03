@@ -17,12 +17,21 @@ REM  Scheduler task "at log on, run only when the user is logged on"
 REM  starts start-all.bat in that session - audio works, no human
 REM  needed after a power bump or a reboot.
 REM
+REM  AUTOLOGON METHOD
+REM  The password is stored as an LSA secret (restricted to
+REM  SYSTEM/administrators), not in cleartext in the registry. We do
+REM  that with scripts\autologon-lsa.ps1 - the same thing the
+REM  Sysinternals Autologon tool does, but with nothing to download.
+REM  If the Sysinternals tool is present in bin\ we will use it. The
+REM  cleartext-registry method only runs if you explicitly say YES at
+REM  the prompt afterwards.
+REM
 REM  Decision record: docs\AUTOSTART-CONSENSUS.md (Rosie + Elon, 8.7/8.7)
 REM
 REM  Usage:
 REM    scripts\install-autostart.bat                 (prompts)
-REM    scripts\install-autostart.bat -check          (no changes)
 REM    scripts\install-autostart.bat .\kdpi MyPass    (unattended)
+REM    scripts\install-autostart.bat -check          (no changes)
 REM    scripts\install-autostart.bat -no-autologon    (tasks only)
 REM
 REM  Undo: scripts\remove-autostart.bat
@@ -53,7 +62,7 @@ if errorlevel 1 (
   exit /b 1
 )
 
-REM ---- REFUSE if the session-0 services are installed ----------------
+REM ---- REFUSE if the session-0 services are installed ---------------- 
 REM Services + console mode would fight over port 8080 and the engine, and a
 REM service-hosted engine is silent anyway. Remove them first.
 set "SVCPRESENT="
@@ -66,7 +75,7 @@ if defined SVCPRESENT (
   echo      Remove them first, then run this script again:
   echo          scripts\remove-services.bat
   echo      ...and after that, start the station in console mode with
-  echo      GO-LIVE.bat before relying on it.
+  echo      start-all.bat before relying on it.
   echo.
   exit /b 1
 )
@@ -77,6 +86,7 @@ set "FATAL=0"
 if exist "%APP%\start-all.bat" (echo [ok] start-all.bat   : %APP%\start-all.bat) else (echo [X]  start-all.bat MISSING - run this from the StudioFire install root & set "FATAL=1")
 if exist "%APP%\scripts\healthcheck.py" (echo [ok] healthcheck.py  : scripts\healthcheck.py) else (echo [X]  scripts\healthcheck.py MISSING & set "FATAL=1")
 if exist "%APP%\scripts\watchdog.bat" (echo [ok] watchdog.bat    : scripts\watchdog.bat) else (echo [X]  scripts\watchdog.bat MISSING & set "FATAL=1")
+if exist "%APP%\scripts\autologon-lsa.ps1" (echo [ok] autologon-lsa  : scripts\autologon-lsa.ps1) else (echo [!]  scripts\autologon-lsa.ps1 missing - autologon will need the Sysinternals tool or the cleartext method)
 if exist "%APP%\config\config.json" (echo [ok] config          : config\config.json) else (echo [X]  config MISSING    : config\config.json & set "FATAL=1")
 if "%FATAL%"=="1" (
   echo.
@@ -123,7 +133,8 @@ if defined CHECK (
   if defined NOAUTO (
     echo  Would skip   : autologon ^(asked not to^)
   ) else (
-    echo  Would set    : autologon for %PLUSER% so the box logs itself in at boot
+    echo  Would set    : autologon for %PLUSER% so the box logs itself in at boot,
+    echo                 password stored as an LSA secret ^(not cleartext^)
   )
   echo.
   echo  Check done - nothing was changed.
@@ -131,42 +142,70 @@ if defined CHECK (
 )
 
 REM ---- autologon ---------------------------------------------------------
-REM Prefer the Sysinternals tool when it is present: it stores the password as an
-REM LSA secret. The plain registry method stores it in CLEARTEXT, which is why we
-REM warn and ask before using it.
+REM Prefer the LSA-secret methods, in this order:
+REM   1. scripts\autologon-lsa.ps1  - built in, nothing to download, LSA secret
+REM   2. Sysinternals Autologon     - if it is already in bin\
+REM   3. cleartext registry         - ONLY if you type YES at the prompt below
 if defined NOAUTO goto :tasks
 
-set "SYSAUTO="
-if exist "%APP%\bin\autologon64.exe" set "SYSAUTO=%APP%\bin\autologon64.exe"
-if not defined SYSAUTO if exist "%APP%\bin\autologon.exe" set "SYSAUTO=%APP%\bin\autologon.exe"
+if "%PLPASS%"=="" (
+  echo.
+  set /p "PLPASS=  Password for %PLNAME%: "
+)
 
-if defined SYSAUTO (
+set "AUTOLOGON_OK="
+
+if exist "%APP%\scripts\autologon-lsa.ps1" (
+  echo Enabling autologon via scripts\autologon-lsa.ps1 ^(password kept as an
+  echo LSA secret^)...
+  REM Password goes through the environment, not the command line.
+  set "STUDIOFIRE_AUTOLOGON_PW=%PLPASS%"
+  powershell -NoProfile -ExecutionPolicy Bypass -File "%APP%\scripts\autologon-lsa.ps1" -User "%PLNAME%" -Domain "%PLDOMAIN%"
+  set "AUTOLOGON_RC=!errorlevel!"
+  set "STUDIOFIRE_AUTOLOGON_PW="
+  if "!AUTOLOGON_RC!"=="0" (
+    set "AUTOLOGON_OK=1"
+    echo [ok] autologon set for %PLUSER% ^(LSA secret method^)
+  ) else (
+    echo [X]  The LSA autologon helper failed ^(exit !AUTOLOGON_RC!^).
+  )
+)
+
+if not defined AUTOLOGON_OK set "SYSAUTO="
+if not defined AUTOLOGON_OK if exist "%APP%\bin\autologon64.exe" set "SYSAUTO=%APP%\bin\autologon64.exe"
+if not defined AUTOLOGON_OK if not defined SYSAUTO if exist "%APP%\bin\autologon.exe" set "SYSAUTO=%APP%\bin\autologon.exe"
+if not defined AUTOLOGON_OK if defined SYSAUTO (
   echo Enabling autologon via Sysinternals Autologon ^(password kept as an LSA
   echo secret^)...
   "%SYSAUTO%" -accepteula "%PLNAME%" "%PLDOMAIN%" "%PLPASS%"
   if errorlevel 1 (
-    echo [X]  Sysinternals Autologon refused. Nothing else was changed.
-    echo      Check the account name/password, or run it by hand once.
-    pause
-    exit /b 1
+    echo [X]  Sysinternals Autologon refused.
+  ) else (
+    set "AUTOLOGON_OK=1"
+    echo [ok] autologon set for %PLUSER% ^(Sysinternals method^)
   )
-  echo [ok] autologon set for %PLUSER%
-  goto :tasks
 )
 
+if defined AUTOLOGON_OK goto :tasks
+
+REM ---- nobody could store it as a secret. Ask before falling back. -------
 echo.
 echo  ------------------------------------------------------------
-echo  AUTOLOGON - please read
+echo  AUTOLOGON - could not store the password as a secret
 echo  ------------------------------------------------------------
-echo  No Sysinternals Autologon found in bin\.
+echo  Neither scripts\autologon-lsa.ps1 nor the Sysinternals tool could set
+echo  autologon on this box.
+echo.
 echo  The fallback writes the Windows registry method, which stores the
 echo  password in CLEARTEXT at
 echo      HKLM\...\Winlogon\DefaultPassword
 echo  Anyone who can read the registry on this box can read that password.
 echo  Microsoft only recommends this on a physically secured machine.
 echo.
-echo  If you want the password stored as an LSA secret instead, cancel now,
-echo  put Sysinternals autologon64.exe in %APP%\bin\ and run this again.
+echo  Fix the secret method instead if you can:
+echo     - run this same .bat again as Administrator ^(the LSA helper needs
+echo       elevation^), or
+echo     - put Sysinternals autologon64.exe in %APP%\bin\ and run this again.
 echo.
 set "GO="
 set /p "GO=  Type YES to use the cleartext method anyway: "
@@ -175,9 +214,6 @@ if /i not "%GO%"=="YES" (
   echo     tasks only, and enable autologon yourself.
   pause
   exit /b 1
-)
-if "%PLPASS%"=="" (
-  set /p "PLPASS=  Password for %PLNAME%: "
 )
 reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /v AutoAdminLogon /t REG_SZ /d 1 /f >nul
 reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /v DefaultUserName /t REG_SZ /d "%PLNAME%" /f >nul
@@ -223,6 +259,11 @@ echo Verifying...
 echo ------------------------------------------------------------
 schtasks /query /tn "StudioFire-Autostart" /v /fo LIST 2>nul | findstr /i "TaskName Logon Mode Status Next Run"
 schtasks /query /tn "StudioFire-Watchdog" /v /fo LIST 2>nul | findstr /i "TaskName Logon Mode Status Next Run"
+if exist "%APP%\scripts\autologon-lsa.ps1" (
+  echo.
+  echo  Autologon state:
+  powershell -NoProfile -ExecutionPolicy Bypass -File "%APP%\scripts\autologon-lsa.ps1" -Check
+)
 echo.
 echo  Logon Mode should say "Interactive only" - that is what puts the station
 echo  in the session where audio works. If it says "Interactive/Background" or
@@ -253,8 +294,10 @@ echo      - BIOS: set "Restore on AC power loss" = On, or a power cut leaves the
 echo        machine sitting off.
 echo      - an OFF-BOX watchdog: if the only thing that knows the station is
 echo        silent lives on the silent box, you have no watchdog.
+echo        See docs\AUTOSTART-WATCHDOG.md.
 echo      - audio_device_guid: set it to the output feeding the Barix instead of
-echo        leaving it blank ^(the default device^).
+echo        leaving it blank ^(the default device^). Run scripts\set-audio-device.bat
+echo        or see docs\ON-AIR-SETUP.md.
 echo.
 echo  Undo:  scripts\remove-autostart.bat
 echo.
