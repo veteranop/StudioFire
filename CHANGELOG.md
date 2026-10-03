@@ -7,6 +7,8 @@ plain English a non-technical operator can understand.
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-10-03
+
 ### Added
 - **Shuffle button on the playlist editor.** Open a playlist and press the new
   **Shuffle** button to reorder it into a random mix, so a playlist no longer
