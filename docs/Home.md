@@ -21,6 +21,8 @@ what other projects are in the vault.
 - [[StudioFire/docs/Roadmap|Roadmap]] — phases and what's built so far
 - [[StudioFire/docs/Operations|Operations]] — running, restarting, deploying, the soak test
 - [[StudioFire/docs/Gotchas|Gotchas]] — hard-won lessons (read before touching the audio path)
+- [[StudioFire/docs/Release-and-Branches|Release & Branches]] — branch model, release process, the major-version gate
+- [[StudioFire/docs/2.0-Design-Decisions|2.0 Design Decisions]] — the 2.0 program as decided (MVP spine, local-first logging, release safety)
 - [[StudioFire/docs/Training-Guide-Best-Practices|Training Guide — Best Practices]] — how to build the operator training PDF + LMS modules
 
 ## Reference docs (repo root)
@@ -32,11 +34,13 @@ what other projects are in the vault.
 
 ## The one-paragraph version
 Four Windows services, isolated so a failure in one can't take air off:
-**P1 audio engine** (the only thing in the audio path — mpv via a named pipe,
-persisted queue, 3-tier failover, never touches the DB), **P2 core/GUI**
-(FastAPI + the feeder that pre-caches NAS files locally), **P3 indexer** (walks
-the NAS into SQLite), **P4 monitor** (not built yet). DJs just browse to P2's
-web GUI. See [[StudioFire/docs/Architecture|Architecture]].
+**P1 audio engine** (the only thing in the audio path — two mpv decks via named
+pipes, persisted queue, four-source failover, true crossfade, never touches the
+DB), **P2 core/GUI** (FastAPI + the feeder that pre-caches NAS files locally;
+playlists, scheduling, spots, reports, library search and the Help manual live
+here), **P3 indexer** (walks the NAS into SQLite), **P4 monitor** (not built
+yet — the equipment ICMP pinger is the shipped early slice). DJs just browse to
+P2's web GUI. See [[StudioFire/docs/Architecture|Architecture]].
 
 ## Related
 - [[PROJECTS-INDEX]]

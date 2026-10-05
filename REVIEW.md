@@ -45,9 +45,11 @@ monotonic version; P1 rejects stale versions (409) and P2 re-syncs. Only P2
 writes SQLite; P1 is DB-agnostic so it can run even if P2/DB/NAS are all down.
 
 ### The "never silent" guarantee (P1)
-- **3-tier failover** on any "can't start next track": pre-cached queue →
-  emergency-folder loop → a baked-in ffmpeg tone (`av://lavfi`) that exists even
-  if every file on disk is gone.
+- **Four-source failover** on any "can't start next track": pre-cached queue item
+  → emergency-folder loop → cached rotation music in the precache dir (scanned
+  fresh) → a baked-in ffmpeg tone (`av://lavfi`) that exists even if every file on
+  disk is gone. (The tier-3 rotation fallback became load-bearing once the feeder
+  began queuing P1 only a few tracks deep — see §8/§13.)
 - **1 s watchdog**: mpv liveness (ping) + **position-advancing** check (catches
   silent hangs where mpv is "alive" but frozen) → restarts mpv.
 - Queue state, emergency_mode, and a JSONL **play journal** (as-aired truth) are
@@ -570,5 +572,43 @@ file isn't evicted, and it's still retired after it airs. Fails pre-fix at the
 hourly on `no playable files in that folder` — the folder exists but is empty. A
 data issue for Mark/John to populate, not a code bug.
 
+## 13. Status update to v1.5 — 2026-10-05 (docs pass, M2627808 / #724)
+
+Reconciling the original §1–§7 snapshot (an "as-of" external-review capture) with
+what has shipped since. The snapshot is left intact; this section is the delta.
+
+**Released since the snapshot:** v1.2.0 (Z:-drop resolver), v1.3.0 (What's new in
+Settings), v1.3.1 (spot-airing pin fix, §12), v1.3.2/v1.3.3 (auto-start as one
+`.bat`; then autologon + logon task), v1.4.0 (playlist & On-Air **Shuffle**;
+**12/24-hour clock**), v1.5.0 (library **duplicate cleanup**). Current live line
+is **v1.5.0**.
+
+**§5 tuning-list items now resolved:**
+- *Item 8 — "Crossfade (Phase 3) not done — butt-cut only."* **Done:** two-deck
+  true crossfade (§11), `engine.crossfade_sec` default 4. The P1 "3-tier" wording
+  in §2.1 was also corrected to the real four-source chain.
+- *Item 7 — "NSSM documented but not scripted."* **Superseded.** The production
+  auto-start for an audio host is **autologon + an at-logon task**
+  (`scripts\install-autostart.bat`), because a service in **session 0 has no audio
+  endpoint** — proven live on `.200` (3,529 silent tracks with green health).
+  `install-services.bat` now refuses to run on an audio box. Evidence +
+  consensus: `docs/AUTOSTART-CONSENSUS.md`; runbook: `docs/ON-AIR-SETUP.md`.
+- *Item 3 — torture/soak gate.* The two-deck rewrite re-ran `torture.py` (T1–T5,
+  2.0 s dead-air gate: 5/5, longest silence 1.04–1.78 s) and `test_supervisor_bench`.
+  The **72-hour soak** remains the human-run go-live gate (§8/§9/§11).
+
+**Self-update (§10) shipped** and is the live update channel (`services/updater.py`,
+Settings → Software updates; `tests/test_updater.py`, 27 checks). Online DB backup +
+auto-rollback. 1.0.x boxes still need one manual installer upgrade to bootstrap it.
+
+**Now in flight — StudioFire 2.0** (branch `v2-dev`): reports (incl. a **local**
+music air-log export), a thin music-identity layer, duration fixes, and a
+human-reviewed playlist generator. The vision, the locked consensus (8.7), the
+**2.0.0 MVP spine**, the **local-first logging principle** and the **§6
+release-safety** rules are in `docs/2.0-Design-Decisions.md`; the branch/release
+model and the major-version gate are in `docs/Release-and-Branches.md`.
+
 ## Related
+- [[StudioFire/docs/2.0-Design-Decisions|2.0 Design Decisions]]
+- [[StudioFire/docs/Release-and-Branches|Release & Branches]]
 - [[PROJECTS-INDEX]]

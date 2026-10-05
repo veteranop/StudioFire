@@ -50,5 +50,27 @@ Hard-won lessons. Read before touching the audio path or the indexer.
   the `.bat` — `start cmd /k` can't spawn windows from P2's no-console process.
   See [[StudioFire/docs/Operations|Operations]].
 
+## Deploy / audio session (the biggest one)
+- **A Windows service runs in session 0, which has NO audio endpoint.** Run the
+  engine as a service and mpv launches, `GET /health` returns `ok`,
+  `services.msc` shows Running — and **every track fails** with
+  `audio output initialization failed`. Proven live on `.200` (2026-09-29): 3,529
+  silent "plays" with green health. There is no supported way to give a WASAPI
+  app an endpoint in session 0. **Never run an audio host as a service** — use
+  autologon + an at-logon task (`scripts\install-autostart.bat`). HTTP 200 is not
+  proof of on-air; listen to the stream. Full evidence:
+  `docs/AUTOSTART-CONSENSUS.md`; runbook: `docs/ON-AIR-SETUP.md`.
+
+## Feeder concurrency (P2)
+- **One writer of feeder state.** `Feeder.tick()` and every insert/edit path
+  share `self._lock` (RLock); a read-modify-write of `feeder_state` without it
+  was a real lost-update that silently dropped cued spots/tracks. Slow NAS
+  copies happen *before* taking the lock, never inside it.
+- **Pin invariant:** an item the engine has accepted (202) must not be removed
+  from the feeder model before it is observed as started or ended — otherwise the
+  same-tick eviction pass deletes its precached file and P1 skips it at prefetch
+  ("unplayable at prefetch"). This is how hourly IDs "fired but never aired."
+
 ## Related
+- [[StudioFire/docs/Operations|Operations]]
 - [[PROJECTS-INDEX]]
