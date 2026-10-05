@@ -7,6 +7,11 @@ plain English a non-technical operator can understand.
 
 ## [Unreleased]
 
+### Added
+- **Help menu.** A new **Help** link in the top bar opens the StudioFire
+  Operator's Manual, built into the app so it works with no internet — a
+  plain-English guide for running the station, one click away on every screen.
+
 ## [1.5.0] - 2026-10-03
 
 ### Added

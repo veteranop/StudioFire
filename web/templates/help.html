@@ -1,0 +1,197 @@
+{% extends "base.html" %}
+{% block title %}Help — {{ station }}{% endblock %}
+{% block nav %}
+<nav class="nav-links">
+  <a href="/">On Air</a>
+  <a href="/playlists">Playlists</a>
+  <a href="/schedule">Schedule</a>
+  <a href="/settings">Settings</a>
+  <a href="/reports">Reports</a>
+  <a href="/help" class="active">Help</a>
+</nav>
+<form method="post" action="/logout" class="nav-right">
+  <button type="submit" class="btn">Sign out</button>
+</form>
+{% endblock %}
+{% block content %}
+<style>
+  .help-wrap { display:grid; grid-template-columns: 210px 1fr; gap:1.5rem; align-items:start; }
+  @media (max-width: 900px){ .help-wrap { grid-template-columns: 1fr; } .help-toc { position:static !important; } }
+  .help-toc { position:sticky; top:1rem; background:var(--panel); border:1px solid var(--border);
+    border-radius:14px; padding:1rem 1.1rem; }
+  .help-toc h2 { margin:0 0 .6rem; font-size:1rem; }
+  .help-toc a { display:block; color:var(--text); text-decoration:none; padding:.28rem 0;
+    font-weight:600; font-size:.95rem; }
+  .help-toc a:hover { color:#4fae63; }
+  .help-body h1 { margin-top:0; }
+  .help-body h2 { margin:2rem 0 .5rem; padding-top:.4rem; border-top:1px solid var(--border);
+    font-size:1.35rem; }
+  .help-body h3 { margin:1.1rem 0 .3rem; font-size:1.08rem; }
+  .help-body p, .help-body li { line-height:1.6; }
+  .help-body .lead { color:var(--muted); }
+  .help-callout { background:#1b2a1e; border:1px solid #2f5a37; border-left:6px solid #1f9d55;
+    border-radius:10px; padding:.9rem 1.1rem; margin:1rem 0; }
+  .help-callout.warn { background:#2a2415; border-color:#5a4a1a; border-left-color:#d69e2e; }
+  .help-callout.stop { background:#2a1b1b; border-color:#5a2a2a; border-left-color:#c53030; }
+  .help-key { display:inline-block; background:#26303d; border:1px solid var(--border);
+    border-radius:6px; padding:.05rem .45rem; font-weight:700; font-size:.9rem; }
+  .help-body table { width:100%; border-collapse:collapse; margin:.6rem 0 1rem; }
+  .help-body th, .help-body td { text-align:left; padding:.5rem .6rem;
+    border-bottom:1px solid var(--border); vertical-align:top; }
+  .help-body th { color:var(--muted); font-size:.85rem; text-transform:uppercase;
+    letter-spacing:.4px; }
+  .help-top { display:inline-block; margin:.2rem 0 0; font-size:.9rem; color:var(--muted); }
+</style>
+
+<div class="help-wrap">
+  <nav class="help-toc">
+    <h2>Operator's Manual</h2>
+    <a href="#start">Start here</a>
+    <a href="#onair">The On Air screen</a>
+    <a href="#music">Playing music</a>
+    <a href="#spots">Spots, IDs &amp; underwriters</a>
+    <a href="#schedule">The schedule</a>
+    <a href="#reports">Reports — what aired</a>
+    <a href="#settings">Settings</a>
+    <a href="#cleanup">Duplicate cleanup</a>
+    <a href="#trouble">If something looks wrong</a>
+    <a href="#contact">Who to call</a>
+  </nav>
+
+  <div class="help-body">
+    <h1>StudioFire — Operator's Manual</h1>
+    <p class="lead">A plain-English guide for running {{ station }}. No IT
+      knowledge needed. If you can read this page, you can run the station.</p>
+
+    <div class="help-callout" id="start">
+      <strong>Start here — the one thing to remember.</strong>
+      StudioFire is built so the music <em>never</em> stops. If the screen looks
+      wrong, the music is almost certainly still playing. Nothing you can click on
+      these pages will make {{ station }} go silent — the worst case is you change
+      what's playing next. When in doubt, look at the green <strong>ON AIR</strong>
+      light on the On Air screen. Green means you're fine.
+    </div>
+
+    <h2 id="onair">The On Air screen</h2>
+    <p>This is the page you'll leave open. It answers one question: <em>what is
+      playing, and is the station OK?</em></p>
+    <table>
+      <tr><th>What you see</th><th>What it means</th></tr>
+      <tr><td><strong>ON AIR</strong> (green)</td><td>The automation is running and
+        feeding the transmitter. All good.</td></tr>
+      <tr><td><strong>OFF AIR</strong></td><td>The engine isn't feeding audio.
+        See <a href="#trouble">If something looks wrong</a>.</td></tr>
+      <tr><td><strong>Program Output</strong> meters (L / R)</td><td>The sound level
+        leaving the studio. If the bars stop moving, no audio is playing.</td></tr>
+      <tr><td><strong>Now playing</strong> + <strong>Next up</strong></td><td>The
+        current track and what follows.</td></tr>
+      <tr><td><strong>Studio health</strong> pill</td><td>Green = healthy. Click it
+        for the detail behind it.</td></tr>
+    </table>
+    <p>Safe buttons on this screen: <span class="help-key">Shuffle</span> reshuffles
+      the current list, and <span class="help-key">Restart</span> restarts the
+      StudioFire services if you're asked to. Neither can leave the station silent —
+      if audio ever needs a moment, filler plays automatically.</p>
+
+    <h2 id="music">Playing music</h2>
+    <p>A <strong>playlist</strong> is a list of songs. You build it once, save it,
+      and play it whenever you want. To put music on air:</p>
+    <ol>
+      <li>Open <strong>Playlists</strong> in the top bar.</li>
+      <li>Click the playlist you want, then <span class="help-key">Play</span> — it
+        goes on air and starts with the first song.</li>
+      <li>Use <span class="help-key">Shuffle</span> to reorder it into a random mix
+        if you don't want the same order every time.</li>
+      <li>Add songs by searching the library and clicking <em>Add</em>; drag to
+        reorder; <span class="help-key">Save</span> when done.</li>
+    </ol>
+    <p><strong>Folders that rotate.</strong> A playlist can hold a whole
+      <em>folder</em> instead of single songs. Choose <strong>Rotate through
+      folder</strong> to play every file once before any repeats (fair for
+      underwriters), or <strong>Newest from folder</strong> to always take the
+      latest file.</p>
+
+    <h2 id="spots">Spots, IDs &amp; underwriters</h2>
+    <p>"Spots" are everything that isn't music: legal station <strong>IDs</strong>,
+      <strong>underwriting</strong> credits, <strong>PSAs</strong> and
+      <strong>promos</strong>. They're scheduled as <em>rules</em> — "play this
+      folder every hour," "play this underwriter's credit twice a day."</p>
+    <ul>
+      <li>Set up or edit spot rules on the <strong>Schedule</strong> page.</li>
+      <li>Underwriting is <strong>never called advertising</strong> — {{ station }}
+        is non-commercial. The wording matters; leave it as written.</li>
+      <li>Legal IDs must air every hour. The <strong>Reports</strong> page has a
+        Legal ID report that flags any hour that missed one.</li>
+    </ul>
+
+    <h2 id="schedule">The schedule</h2>
+    <p>The <strong>Schedule</strong> page is where time-based things live: shows
+      that start at a set hour, and spot rules that fire on a clock. Set the day
+      and time, choose what plays, and save. StudioFire handles the timing.</p>
+
+    <h2 id="reports">Reports — what aired</h2>
+    <p>The <strong>Reports</strong> page is your proof of what actually played.
+      Pick a date range and run it. It can export a CSV you can open in Excel or
+      hand to an underwriter. This is the record you'd use to show that a credit,
+      ID or PSA really aired.</p>
+
+    <h2 id="settings">Settings</h2>
+    <p>Everything you configure lives under <strong>Settings</strong>. The common
+      items:</p>
+    <table>
+      <tr><th>Setting</th><th>What it does</th></tr>
+      <tr><td>Users &amp; passwords</td><td>Add operators, change roles
+        (admin vs operator), reset passwords.</td></tr>
+      <tr><td>Folders</td><td>Where each kind of audio lives (shows, IDs, PSAs,
+        jingles, underwriters).</td></tr>
+      <tr><td>Clock</td><td>12-hour or 24-hour display.</td></tr>
+      <tr><td>Software updates</td><td>Installs new StudioFire versions. See the
+        note below.</td></tr>
+      <tr><td>Backup / restore</td><td>Save a copy of your setup, or restore
+        one.</td></tr>
+    </table>
+    <div class="help-callout warn">
+      <strong>About updates.</strong> <span class="help-key">Install update</span>
+      only installs the same version series you're already on (1.x). A whole new
+      major version (like 2.0) is treated separately and can never install by
+      accident — it needs an admin to type the version number in on purpose. So
+      it's safe to click the normal update button.
+    </div>
+
+    <h2 id="cleanup">Duplicate cleanup</h2>
+    <p>Over time the library collects the same song more than once. Settings →
+      <strong>Duplicate cleanup</strong> finds them, shows them side by side, and
+      <em>moves</em> the copies you don't want into a <code>_Duplicates</code>
+      folder — never deletes them. Songs used by a playlist, show or spot are
+      protected and left alone.</p>
+
+    <h2 id="trouble">If something looks wrong</h2>
+    <p>Breathe. StudioFire is designed to fail safely. Here's what to do:</p>
+    <table>
+      <tr><th>What you see</th><th>What to do</th></tr>
+      <tr><td><strong>"EMERGENCY FILLER IS ON AIR"</strong> (yellow banner)</td>
+        <td>The normal playlist couldn't continue, so StudioFire switched to safe
+          music automatically. <strong>You are still on air.</strong> Fix the
+          playlist when you can — there's no rush.</td></tr>
+      <tr><td><strong>"AUDIO ENGINE NOT RESPONDING"</strong> (red banner)</td>
+        <td>The web page lost contact with the audio engine. The music may still
+          be playing. Try <span class="help-key">Restart</span>; if it persists,
+          call support.</td></tr>
+      <tr><td>Meters flat, no sound, <strong>OFF AIR</strong></td>
+        <td>Check the on-air PC is powered and the studio gear is on, then call
+          support. Don't unplug anything while it's running.</td></tr>
+      <tr><td>Page won't load</td><td>Wait a few seconds and reload. Visit the
+        on-air PC and check its screen.</td></tr>
+    </table>
+
+    <h2 id="contact">Who to call</h2>
+    <p>{{ station }} is supported by <strong>VeteranOp</strong>. If anything looks
+      wrong, call or message your support contact — include the time it started
+      and a photo of the screen if you can. Never improvise on the on-air machine.</p>
+
+    <p class="help-top">Manual for StudioFire v{{ running_version }}.
+      Open <strong>Help</strong> any time from the top bar — this page works with
+      no internet.</p>
+  </div>
+</div>
+{% endblock %}

@@ -622,6 +622,11 @@ def create_app(cfg: dict) -> FastAPI:
     def reports_page(request: Request, sess: dict = Depends(page_user)):
         return render(request, "reports.html", role=sess["role"])
 
+    @app.get("/help", response_class=HTMLResponse)
+    def help_page(request: Request, sess: dict = Depends(page_user)):
+        return render(request, "help.html", role=sess["role"],
+                      running_version=running_version)
+
     @app.get("/api/reports")
     def api_reports(start: str = "", end: str = "", kind: str = "all",
                     conn=Depends(get_conn), _=Depends(api_user)):
