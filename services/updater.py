@@ -83,6 +83,15 @@ HEALTH_TIMEOUT = 120.0     # seconds for a restarted service to come back
 KEEP_BACKUPS = 3
 LOCK_STALE_SEC = 45 * 60
 
+# §6.3: whether this build exposes ANY way to install a major upgrade from the
+# app. It does NOT in the 1.x line — the gate here is purely defensive (detect a
+# major, inform an admin, and never let the everyday button cross one). The full
+# admin major-install experience is deferred to a later release and only after
+# 2.0 is proven on Mark's home PC with a 72-hour burn-in. apply(major=True) and
+# the --major CLI flag remain as the plumbing that that later release will drive;
+# nothing in this build calls them.
+MAJOR_INSTALL_ENABLED = False  # flip only after 2.0 is proven (home-PC 72h burn-in)
+
 
 class UpdateError(Exception):
     """A step failed; message is operator-readable."""
@@ -196,9 +205,18 @@ def _get(url: str, timeout: float = 15.0) -> bytes:
         return r.read()
 
 
-def fetch_release(tag: str | None = None) -> dict:
-    """The latest (or a specific) published release:
+def _normalize_release(rel: dict) -> dict:
+    """GitHub's release JSON -> our shape:
     {version, tag, name, notes, zip_url, html_url, published_at}."""
+    return {"version": ".".join(map(str, parse_version(rel["tag_name"]))),
+            "tag": rel["tag_name"], "name": rel.get("name") or rel["tag_name"],
+            "notes": rel.get("body") or "",
+            "zip_url": rel["zipball_url"], "html_url": rel.get("html_url"),
+            "published_at": rel.get("published_at")}
+
+
+def fetch_release(tag: str | None = None) -> dict:
+    """The latest (or a specific) published release (see _normalize_release)."""
     url = f"{api_base()}/releases/" + (f"tags/{tag}" if tag else "latest")
     try:
         rel = json.loads(_get(url))
@@ -209,26 +227,70 @@ def fetch_release(tag: str | None = None) -> dict:
         raise UpdateError(f"GitHub said {exc.code}")
     except (urllib.error.URLError, OSError, ValueError) as exc:
         raise UpdateError(f"can't reach GitHub ({exc})")
-    return {"version": ".".join(map(str, parse_version(rel["tag_name"]))),
-            "tag": rel["tag_name"], "name": rel.get("name") or rel["tag_name"],
-            "notes": rel.get("body") or "",
-            "zip_url": rel["zipball_url"], "html_url": rel.get("html_url"),
-            "published_at": rel.get("published_at")}
+    return _normalize_release(rel)
+
+
+def list_releases() -> list[dict]:
+    """Every published release (normalized), newest-of-each-major visible.
+    Hits /releases (not /releases/latest) so check() can tell a within-major
+    update apart from a higher-major one (§6.3). Skips drafts and
+    pre-releases, exactly as /releases/latest does. Raises UpdateError only on
+    a transport/HTTP error — an empty list is a valid 'no releases'."""
+    url = f"{api_base()}/releases?per_page=100"
+    try:
+        raw = json.loads(_get(url))
+    except urllib.error.HTTPError as exc:
+        raise UpdateError(f"GitHub said {exc.code}")
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        raise UpdateError(f"can't reach GitHub ({exc})")
+    out = []
+    for rel in raw if isinstance(raw, list) else []:
+        if not isinstance(rel, dict) or rel.get("draft") or rel.get("prerelease"):
+            continue
+        try:
+            out.append(_normalize_release(rel))
+        except (KeyError, TypeError):
+            continue
+    return out
 
 
 def check() -> dict:
-    """Compare this box's VERSION with the latest release. Never raises."""
+    """Compare this box's VERSION with GitHub's releases. Never raises.
+
+    Two availabilities are returned (the §6.3 major-version gate):
+      - update_available / latest: the newest release WITHIN this box's
+        current major (1.x -> 1.y). This feeds the everyday 'Install update'
+        button, unchanged.
+      - major_available: {version, tag, notes, html_url} of the newest release
+        with a STRICTLY higher major, or None. It NEVER feeds the everyday
+        button — installing it is a separate, admin-only, typed-confirm path.
+    On a network error: error is set, both availabilities False/None.
+    """
     current = read_version()
+    cur_major = parse_version(current)[0]
     out = {"current": current, "checked_at": time.time(),
            "dev_checkout": is_dev_checkout()}
     try:
-        rel = fetch_release()
+        rels = list_releases()
     except UpdateError as exc:
-        out.update(error=str(exc), latest=None, update_available=False)
+        out.update(error=str(exc), latest=None, update_available=False,
+                   major_available=None)
         return out
-    out.update(error=None, latest=rel,
-               update_available=parse_version(rel["version"])
-               > parse_version(current))
+    within = [r for r in rels if parse_version(r["version"])[0] == cur_major]
+    higher = [r for r in rels if parse_version(r["version"])[0] > cur_major]
+    newest_within = max(within, key=lambda r: parse_version(r["version"]),
+                        default=None)
+    newest_major = max(higher, key=lambda r: parse_version(r["version"]),
+                       default=None)
+    out.update(
+        error=None, latest=newest_within,
+        update_available=bool(newest_within)
+        and parse_version(newest_within["version"]) > parse_version(current),
+        major_available=({"version": newest_major["version"],
+                          "tag": newest_major["tag"],
+                          "notes": newest_major["notes"],
+                          "html_url": newest_major["html_url"]}
+                         if newest_major else None))
     return out
 
 
@@ -556,10 +618,33 @@ def _take_lock() -> str:
     return lock
 
 
+def _restore_db(bdir: str) -> None:
+    """Put the update's DB snapshot back over the live DB (SQLite backup API,
+    WAL-safe). Used only on a MAJOR-update rollback: a major migrated the DB,
+    so restoring the old code alone would run 1.x against a 2.x schema."""
+    bak = os.path.join(bdir, "studiofire.db")
+    live = os.path.join(data_dir(), "studiofire.db")
+    if not os.path.isfile(bak):
+        return
+    src = sqlite3.connect(bak)
+    dst = sqlite3.connect(live)
+    try:
+        src.backup(dst)
+    finally:
+        dst.close()
+        src.close()
+
+
 def apply(tag: str | None = None, force: bool = False,
-          allow_git: bool = False) -> int:
+          allow_git: bool = False, major: bool = False) -> int:
     """Install the latest (or `tag`) release. Returns 0 on success/no-op,
-    1 on failure (anything already changed is rolled back)."""
+    1 on failure (anything already changed is rolled back).
+
+    `major=False` (the default) REFUSES to cross a major version: if the
+    resolved target's major differs from this box's, it raises before
+    installing anything (§6.3 defense in depth — even apply(tag='v2.x') is
+    refused). A deliberate cross-major install passes major=True, and its
+    rollback restores the database as well as the code."""
     if is_dev_checkout() and not allow_git:
         _write_state(state="failed", message="this is a developer (git) "
                      "checkout — update it with git, not the updater")
@@ -582,6 +667,9 @@ def apply(tag: str | None = None, force: bool = False,
     try:
         rel = fetch_release(tag)
         _write_state(to_version=rel["version"])
+        if parse_version(rel["version"])[0] != parse_version(current)[0] \
+                and not major:
+            raise UpdateError("crossing a major version needs --major")
         if not force and parse_version(rel["version"]) <= \
                 parse_version(current):
             _step("done", f"already up to date ({current})")
@@ -620,6 +708,8 @@ def apply(tag: str | None = None, force: bool = False,
             _step("rolling_back", f"{exc} — restoring {current}…")
             try:
                 install_tree(os.path.join(bdir, "code"))
+                if major:              # a major migrated the DB — put it back
+                    _restore_db(bdir)  # too, so old code meets its old schema
                 if restarted:
                     restart(restarted)
                     ok, why = wait_healthy(restarted, current)
@@ -650,14 +740,17 @@ def apply(tag: str | None = None, force: bool = False,
             pass
 
 
-def spawn_detached_apply(tag: str | None = None) -> None:
+def spawn_detached_apply(tag: str | None = None, major: bool = False) -> None:
     """Start `apply` in a process that is NOT a child of the caller (the web
     GUI is one of the services the update restarts). Created through WMI so
     it's outside the caller's process tree and any NSSM job; falls back to a
-    plain detached process."""
+    plain detached process. `major=True` passes --major (a deliberate
+    cross-major install; the GUI gates this admin-only + typed-confirm)."""
     args = [sys.executable, "-m", "services.updater", "apply"]
     if tag:
         args += ["--tag", tag]
+    if major:
+        args += ["--major"]
     cmdline = subprocess.list2cmdline(args)
     ps = ("$r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create "
           "-Arguments @{CommandLine=" + _ps_quote(cmdline) +
@@ -694,18 +787,29 @@ def main(argv: list[str] | None = None) -> int:
                    help="install even if it isn't newer (e.g. a rollback)")
     a.add_argument("--allow-git", action="store_true",
                    help="allow running on a git checkout (testing only)")
+    a.add_argument("--major", action="store_true",
+                   help="allow crossing a major version (e.g. 1.x -> 2.0); "
+                        "without it, apply refuses to cross a major")
     args = ap.parse_args(argv)
     if args.cmd == "check":
         r = check()
         if r.get("error"):
             print(f"StudioFire {r['current']} — can't check: {r['error']}")
             return 1
-        latest = r["latest"]["version"]
-        print(f"StudioFire {r['current']} — latest release {latest}: "
-              + ("UPDATE AVAILABLE" if r["update_available"]
-                 else "up to date"))
+        if r.get("latest"):
+            latest = r["latest"]["version"]
+            print(f"StudioFire {r['current']} — latest release {latest}: "
+                  + ("UPDATE AVAILABLE" if r["update_available"]
+                     else "up to date"))
+        else:
+            print(f"StudioFire {r['current']} — no release within this major")
+        if r.get("major_available"):
+            m = r["major_available"]
+            print(f"  A MAJOR version update is available: {m['version']} "
+                  f"({m['tag']}). Major upgrades are scheduled by VeteranOp — "
+                  f"contact support; this build cannot install one.")
         return 0
-    return apply(args.tag, args.force, args.allow_git)
+    return apply(args.tag, args.force, args.allow_git, args.major)
 
 
 if __name__ == "__main__":

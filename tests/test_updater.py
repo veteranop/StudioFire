@@ -51,24 +51,29 @@ class FakeGitHub(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def _rel_json(self, tag, port):
+        return {"tag_name": tag, "name": f"StudioFire {tag}",
+                "body": RELEASES[tag]["notes"],
+                "zipball_url": f"http://127.0.0.1:{port}/zip/{tag}",
+                "html_url": "https://example.invalid", "published_at": "x"}
+
     def do_GET(self):
         port = self.server.server_address[1]
+        path = self.path.split("?")[0]
         if self.path.startswith("/zip/"):
             tag = self.path[5:]
             return self._send(200, RELEASES[tag]["zip"], "application/zip")
-        if self.path == "/releases/latest":
+        if path == "/releases":                 # the §6.3 list endpoint
+            return self._send(200, [self._rel_json(t, port) for t in RELEASES])
+        if path == "/releases/latest":
             tag = LATEST["tag"]
-        elif self.path.startswith("/releases/tags/"):
-            tag = self.path[len("/releases/tags/"):]
+        elif path.startswith("/releases/tags/"):
+            tag = path[len("/releases/tags/"):]
         else:
             tag = None
         if tag not in RELEASES:
             return self._send(404, {"message": "Not Found"})
-        return self._send(200, {
-            "tag_name": tag, "name": f"StudioFire {tag}",
-            "body": RELEASES[tag]["notes"],
-            "zipball_url": f"http://127.0.0.1:{port}/zip/{tag}",
-            "html_url": "https://example.invalid", "published_at": "x"})
+        return self._send(200, self._rel_json(tag, port))
 
     def log_message(self, *a):
         pass
@@ -171,9 +176,15 @@ def main():
     check("check: newer release offered with its notes",
           c["update_available"] and c["latest"]["version"] == "1.1.0"
           and "fade" in c["latest"]["notes"] and c["error"] is None)
-    LATEST["tag"] = "nope"
-    check("check: offline/no release is reported, never raised",
-          updater.check()["error"] is not None)
+    # offline: check() reports it (never raises). check() now lists /releases,
+    # so simulate "offline" by pointing at a dead port, not an unknown tag.
+    saved_api = updater.API_BASE
+    updater.API_BASE = "http://127.0.0.1:9"      # nothing listening there
+    off = updater.check()
+    check("check: offline is reported, never raised",
+          off["error"] is not None and off["update_available"] is False
+          and off["major_available"] is None)
+    updater.API_BASE = saved_api
 
     # ---- a good update: web-only change
     LATEST["tag"] = "v1.1.0"
@@ -286,6 +297,52 @@ def main():
     rc = updater.apply(tag="v1.0.5", force=True)
     check("--tag + --force installs an older release (manual rollback)",
           rc == 0 and read(st, "VERSION").strip() == "1.0.5")
+
+    # ---- §6.3 major-version gate ---------------------------------------
+    RELEASES.clear()
+    shutil.rmtree(st, ignore_errors=True)
+    st = make_station("1.5.0")
+    use_station(st)
+    make_release("v1.6.0", notes="within-major fix")
+    make_release("v2.0.0", notes="the big one")
+    LATEST["tag"] = "v2.0.0"              # GitHub's 'latest' can be the major
+    c = updater.check()
+    check("gate: everyday button offers the newest WITHIN this major (1.6.0)",
+          c["update_available"] and c["latest"]["version"] == "1.6.0"
+          and c["error"] is None)
+    check("gate: a higher major is reported separately (not on the button)",
+          c["major_available"] and c["major_available"]["version"] == "2.0.0"
+          and c["major_available"]["tag"] == "v2.0.0"
+          and "big" in c["major_available"]["notes"])
+
+    before = read(st, "VERSION").strip()
+    restarts.clear()
+    rc = updater.apply(tag="v2.0.0")                   # no major=True
+    s = updater.read_state()
+    check("gate: apply(tag=v2.0.0) without --major refuses, installs nothing",
+          rc == 1 and s["state"] == "failed" and "major" in s["message"]
+          and read(st, "VERSION").strip() == before and restarts == [])
+    rc = updater.apply()                               # bare apply -> 'latest'
+    check("gate: bare apply() never crosses a major either",
+          rc == 1 and "major" in updater.read_state()["message"]
+          and read(st, "VERSION").strip() == before)
+
+    restarts.clear()
+    rc = updater.apply(tag="v2.0.0", major=True)       # deliberate cross
+    check("gate: apply(tag=v2.0.0, major=True) installs across the major",
+          rc == 0 and read(st, "VERSION").strip() == "2.0.0")
+
+    # no higher major present -> major_available is None, within-major works
+    RELEASES.clear()
+    shutil.rmtree(st, ignore_errors=True)
+    st = make_station("1.5.0")
+    use_station(st)
+    make_release("v1.5.1", notes="patch")
+    LATEST["tag"] = "v1.5.1"
+    c = updater.check()
+    check("gate: no higher major -> major_available is None",
+          c["major_available"] is None and c["update_available"]
+          and c["latest"]["version"] == "1.5.1")
 
     shutil.rmtree(st, ignore_errors=True)
     srv.shutdown()

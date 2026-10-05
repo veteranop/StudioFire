@@ -751,6 +751,16 @@ def create_app(cfg: dict) -> FastAPI:
                 "check_error": chk.get("error"),
                 "dev_checkout": updater.is_dev_checkout(),
                 "can_install": sess["role"] == "admin",
+                # §6.3 major-version gate — DETECT + INFORM ONLY. This 1.x build
+                # exposes NO way to install a major (no button, no endpoint; see
+                # updater.MAJOR_INSTALL_ENABLED). A higher major is surfaced to
+                # admins as a muted notice so they know to contact VeteranOp
+                # before upgrading. major_available is data only; can_major is
+                # just admin-visibility of that notice. The full admin major-
+                # install experience is deferred to a later release (after 2.0
+                # is proven on a home-PC 72-hour burn-in).
+                "major_available": chk.get("major_available"),
+                "can_major": sess["role"] == "admin",
                 "state": updater.read_state()}
 
     @app.get("/api/update")
@@ -761,6 +771,15 @@ def create_app(cfg: dict) -> FastAPI:
     def api_update_check(sess: dict = Depends(api_user)):
         upd["check"] = updater.check()
         return _update_view(sess)
+
+    # NOTE (§6.3 scope, 2026-10-05): there is intentionally NO
+    # /api/update/install-major (or pre-flight) endpoint in the 1.x line. The
+    # gate here is purely defensive — detect a major, inform an admin, and never
+    # expose a way to install one. The everyday /api/update/install below only
+    # ever targets the within-major release (check()'s update_available), so it
+    # cannot cross a major even if asked. The full admin major-install
+    # experience is deferred to a later release (after 2.0 is proven on a
+    # home-PC 72-hour burn-in).
 
     @app.post("/api/update/install")
     def api_update_install(sess: dict = Depends(api_admin)):

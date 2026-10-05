@@ -11,10 +11,14 @@ WAL mode makes concurrent readers + one writer safe across P2/P3/P4.
 from __future__ import annotations
 
 import logging
+import os
 import sqlite3
 import time
 
 log = logging.getLogger("core.db")
+
+# §6.4: how many pre-migration DB snapshots to keep (the last N).
+BACKUP_KEEP = 5
 
 # Each entry: (version, sql script). Append-only — never edit a shipped one.
 MIGRATIONS: list[tuple[int, str]] = [
@@ -286,6 +290,67 @@ def connect(db_path: str) -> sqlite3.Connection:
     return conn
 
 
+def _integrity_ok(conn: sqlite3.Connection) -> bool:
+    row = conn.execute("PRAGMA integrity_check").fetchone()
+    return bool(row) and str(row[0]).strip().lower() == "ok"
+
+
+def _prune_backups(bdir: str) -> None:
+    """Keep only the last BACKUP_KEEP pre-migration snapshots (by mtime)."""
+    try:
+        files = [f for f in os.listdir(bdir)
+                 if f.startswith("pre-migration-") and f.endswith(".db")]
+    except OSError:
+        return
+    files.sort(key=lambda f: os.path.getmtime(os.path.join(bdir, f)))
+    for f in files[:-BACKUP_KEEP]:
+        try:
+            os.remove(os.path.join(bdir, f))
+        except OSError:
+            pass
+
+
+def _pre_migration_backup(db_path: str, old: int, new: int) -> str:
+    """§6.4: before any pending migration runs, snapshot the DB into
+    <dirname(db)>/backups/pre-migration-v<old>-to-v<new>-<stamp>.db with the
+    SQLite backup API, then verify the COPY with PRAGMA integrity_check. If the
+    copy or the check fails, raise (and remove the partial file) so the caller
+    does NOT migrate — the live DB is left untouched. Prunes to BACKUP_KEEP."""
+    bdir = os.path.join(os.path.dirname(os.path.abspath(db_path)), "backups")
+    os.makedirs(bdir, exist_ok=True)
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    base = os.path.join(bdir, f"pre-migration-v{old}-to-v{new}-{stamp}")
+    dst_path, n = base + ".db", 1
+    while os.path.exists(dst_path):     # a retry within the same second
+        n += 1
+        dst_path = f"{base}-{n}.db"
+    src = sqlite3.connect(db_path)
+    dst = sqlite3.connect(dst_path)
+    try:
+        src.backup(dst)
+        ok = _integrity_ok(dst)
+    except sqlite3.Error as exc:
+        dst.close()
+        src.close()
+        _rm(dst_path)
+        raise RuntimeError(f"pre-migration backup failed ({exc})")
+    dst.close()
+    src.close()
+    if not ok:
+        _rm(dst_path)
+        raise RuntimeError("pre-migration backup failed its integrity check")
+    _prune_backups(bdir)
+    log.info("pre-migration backup written: %s", dst_path)
+    return dst_path
+
+
+def _rm(path: str) -> None:
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
 def migrate(db_path: str) -> None:
     conn = connect(db_path)
     try:
@@ -293,6 +358,11 @@ def migrate(db_path: str) -> None:
                         (version INTEGER NOT NULL)""")
         row = conn.execute("SELECT version FROM schema_version").fetchone()
         current = row["version"] if row else 0
+        # §6.4: back up + verify the DB BEFORE touching the schema, but only
+        # when there is actually a pending migration. A failed/unverifiable
+        # backup aborts the whole migrate (raises) — never migrate blind.
+        if MIGRATIONS and MIGRATIONS[-1][0] > current:
+            _pre_migration_backup(db_path, current, MIGRATIONS[-1][0])
         for version, script in MIGRATIONS:
             if version <= current:
                 continue
