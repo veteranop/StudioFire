@@ -625,7 +625,8 @@ def create_app(cfg: dict) -> FastAPI:
     @app.get("/help", response_class=HTMLResponse)
     def help_page(request: Request, sess: dict = Depends(page_user)):
         return render(request, "help.html", role=sess["role"],
-                      running_version=running_version)
+                      running_version=running_version,
+                      changelog=changelog.load())
 
     @app.get("/api/reports")
     def api_reports(start: str = "", end: str = "", kind: str = "all",

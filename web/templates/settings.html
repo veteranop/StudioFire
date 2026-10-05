@@ -14,22 +14,7 @@
 </form>
 {% endblock %}
 {% block content %}
-{# render a version's groups (### heading, optional intro line, bullets). Each
-   bullet's text is split into **bold**/plain segments; Jinja auto-escapes every
-   segment, so paths like Z:\ keep their backslashes and nothing can inject HTML #}
-{% macro cl_groups(rel) %}
-  {% for g in rel.groups %}
-    {% if g.heading %}<h3 class="cl-group">{{ g.heading }}</h3>{% endif %}
-    {% if g.intro %}<p class="muted">{{ g.intro }}</p>{% endif %}
-    {% if g.entries %}
-    <ul class="cl-list">
-      {% for entry in g.entries %}
-      <li>{% for seg in entry | sf_bold %}{% if seg[1] %}<strong>{{ seg[0] }}</strong>{% else %}{{ seg[0] }}{% endif %}{% endfor %}</li>
-      {% endfor %}
-    </ul>
-    {% endif %}
-  {% endfor %}
-{% endmacro %}
+{% from "_changelog.html" import cl_groups with context %}
 
 <div class="card">
   <h1>Station folders</h1>
