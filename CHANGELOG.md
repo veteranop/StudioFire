@@ -8,9 +8,13 @@ plain English a non-technical operator can understand.
 ## [Unreleased]
 
 ### Added
-- **Help menu.** A new **Help** link in the top bar opens the StudioFire
-  Operator's Manual, built into the app so it works with no internet — a
-  plain-English guide for running the station, one click away on every screen.
+- **Help menu and a built-in manual.** A new **Help** link in the top bar opens
+  the StudioFire Operator's Manual — a plain-English guide to running the
+  station: the On Air screen, playing music, spots and IDs, reports, settings,
+  and what to do if something looks wrong. It is built into the app, so it works
+  with no internet, and it is on every screen.
+- **"What's new" inside Help.** The manual's **What's new** section shows what
+  changed in the version you are running and the ones before it (newest first).
 
 ## [1.5.0] - 2026-10-03
 
