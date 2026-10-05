@@ -7,6 +7,8 @@ plain English a non-technical operator can understand.
 
 ## [Unreleased]
 
+## [1.5.1] - 2026-10-05
+
 ### Added
 - **Help menu and a built-in manual.** A new **Help** link in the top bar opens
   the StudioFire Operator's Manual — a plain-English guide to running the
