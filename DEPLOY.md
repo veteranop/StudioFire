@@ -88,11 +88,23 @@ Every installed station updates itself from **GitHub Releases** on
 station only ever sees **published releases**. Pushing to `main` alone
 changes nothing on air.
 
-1. Write the operator-facing notes under `## [Unreleased]` in
+Releases are cut from `main` only, and `scripts/release.py` now **refuses a MAJOR-version bump
+without an explicit `--major` flag** (added 2026-10-05) — so a stray 2.x can never reach the
+published-releases channel by accident.
+
+**Release checklist:**
+
+1. **Update the Operator's Guide** if the release changes anything an operator can see (a button, a
+   screen, a behaviour) — content **and** the version/date on the cover. Regenerate with
+   `scripts/build_studiofire_operator_guide.py` →
+   `VeteranOp/Clients/dropin/Documents/StudioFire-Operators-Guide.{html,pdf}`.
+   **Hard rule (Mark 2026-10-05): a release is not done until the Operator's Guide reflects it.**
+   Prefer real screenshots over mock screens.
+2. Write the operator-facing notes under `## [Unreleased]` in
    `CHANGELOG.md`, in plain English. Operators read them before they press
    Install.
-2. Merge to `main` and push.
-3. Run: `python scripts/release.py 1.1.0 --dry-run`, check the notes, then
+3. Merge to `main` and push.
+4. Run: `python scripts/release.py 1.1.0 --dry-run`, check the notes, then
    run it again without `--dry-run`.
    The script checks that `main` is clean and in sync and that the version
    is newer. It then runs the whole test suite, turns `[Unreleased]` into
