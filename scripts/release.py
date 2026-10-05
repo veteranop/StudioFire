@@ -76,6 +76,8 @@ def main() -> int:
     ap.add_argument("version", help="new version, e.g. 1.1.0")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--no-tests", action="store_true")
+    ap.add_argument("--major", action="store_true",
+                    help="allow a MAJOR-version publish (crosses the 2.0 gate)")
     args = ap.parse_args()
 
     if not os.path.isdir(os.path.join(ROOT, ".git")):
@@ -101,6 +103,19 @@ def main() -> int:
     newest = max([parse_version(cur)] + [parse_version(t) for t in tags])
     if parse_version(new) <= newest:
         fail(f"{new} is not newer than {'.'.join(map(str, newest))}")
+
+    # 2b. never cross a MAJOR version by accident. The installed 1.x updater has
+    # no notion of major versions, so a published 2.x would be offered to every
+    # station behind the everyday "Install update" button. Require explicit intent.
+    if parse_version(new)[0] > parse_version(cur)[0] and not args.major:
+        fail(
+            f"{new} is a MAJOR bump (current is {cur}). Refusing to publish a new "
+            "major without --major.\n"
+            "    The everyday in-app update button must never offer a new major.\n"
+            "    Ship and confirm-install the major-version gate (see 2.0 Update.md "
+            "§6.2/§6.3) on the 1.x line at every station BEFORE any 2.x release exists.\n"
+            "    If you really mean to publish a new major, re-run with --major."
+        )
 
     # 3. release notes from the changelog
     with open(CHANGELOG, encoding="utf-8") as f:
