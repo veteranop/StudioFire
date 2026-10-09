@@ -23,6 +23,36 @@ log = logging.getLogger("core.config")
 GA_MEASUREMENT_ID_DEFAULT = "G-3BK3GZDSJN"  # StudioFire GA4 property (VeteranOp)
 
 
+# Now-playing push (#747): off-box, feature-flagged, fire-and-forget pusher
+# that mirrors StudioFire's current title to the stream CDN's metadata ingest
+# (e.g. Icecast `updinfo`) so the public player shows song info. OFF by
+# default; the real transport is gated on StreamGuys' written answer — until
+# then the only transport is "dryrun" (logs, no I/O). See
+# docs/NOWPLAYING-CONSENSUS.md. HARD RULE: the auth secret is NEVER read from
+# config.json — only from the env var named by `auth_env`. Keep
+# config.example.json free of any real credential.
+NOWPLAYING_AUTH_ENV_DEFAULT = "STUDIOFIRE_NOWPLAYING_AUTH"
+
+
+def _load_nowplaying_push(cfg: dict) -> dict:
+    np = cfg.get("nowplaying_push", {}) or {}
+    auth_env = str(np.get("auth_env", NOWPLAYING_AUTH_ENV_DEFAULT))
+    # Secret is env-sourced only. Even if someone drops an "auth" key into
+    # config.json it is deliberately ignored — secrets never live in git.
+    auth = os.environ.get(auth_env) or None
+    return {
+        "enabled": bool(np.get("enabled", False)),
+        "transport": str(np.get("transport", "dryrun")),
+        "endpoint": str(np.get("endpoint", "")),
+        "mount": str(np.get("mount", "")),
+        "auth_env": auth_env,
+        "auth": auth,
+        "timeout_sec": float(np.get("timeout_sec", 4.0)),
+        "min_interval_sec": float(np.get("min_interval_sec", 5.0)),
+        "include_spots": bool(np.get("include_spots", False)),
+    }
+
+
 def load_config(path: str | None = None) -> dict:
     cfg = {}
     p = path or os.path.join(ROOT, "config", "config.json")
@@ -71,4 +101,5 @@ def load_config(path: str | None = None) -> dict:
         "engine_url": "http://%s:%d" % (engine.get("ipc_host", "127.0.0.1"),
                                         int(engine.get("ipc_port", 7701))),
         "journal_path": os.path.join(logs_dir, "play_journal.jsonl"),
+        "nowplaying_push": _load_nowplaying_push(cfg),
     }
