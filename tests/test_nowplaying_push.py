@@ -8,6 +8,7 @@ bounded queue to a fake transport without ever raising.
 
 Run: python tests/test_nowplaying_push.py
 """
+import json
 import os
 import queue
 import sys
@@ -19,6 +20,7 @@ sys.path.insert(0, ROOT)
 
 from services.core import db                                   # noqa: E402
 from services.core.config import load_config                   # noqa: E402
+from services.core.engine_bridge import ingest_journal         # noqa: E402
 from services.core.nowplaying_push import (                    # noqa: E402
     DryRunTransport, NowPlayingPusher, Transport, build_transport)
 
@@ -277,6 +279,64 @@ def test_drop_on_full():
     check("drop-on-full: no exception raised", True)
 
 
+# ------------------------------------------ ingest wiring (step 3)
+
+def write_journal(path, events):
+    with open(path, "w", encoding="utf-8") as f:
+        for e in events:
+            f.write(json.dumps(e) + "\n")
+
+
+def test_ingest_surfaces_only_track_starts():
+    conn = fresh_conn()
+    jdir = tempfile.mkdtemp(prefix="sf-np-j-")
+    jpath = os.path.join(jdir, "play_journal.jsonl")
+    write_journal(jpath, [
+        {"id": "7000-1", "ts": "t", "event": "engine_start"},
+        {"id": "7001-1", "ts": "t", "event": "track_start", "path": "/a.mp3",
+         "title": "A", "source": "playlist"},
+        {"id": "7002-1", "ts": "t", "event": "track_end", "path": "/a.mp3"},
+        {"id": "7003-1", "ts": "t", "event": "track_start", "path": "/b.mp3",
+         "title": "B", "source": "playlist"},
+    ])
+    out = []
+    n = ingest_journal(conn, jpath, out)
+    check("ingest: all rows ingested", n == 4)
+    check("ingest: only track_starts surfaced",
+          [e["id"] for e in out] == ["7001-1", "7003-1"])
+    check("ingest: surfaced events carry title", out[0]["title"] == "A")
+    out2 = []
+    ingest_journal(conn, jpath, out2)
+    check("ingest: re-ingest surfaces nothing (dedupe)", out2 == [])
+
+
+def test_ingest_to_pusher_end_to_end():
+    conn = fresh_conn()
+    jdir = tempfile.mkdtemp(prefix="sf-np-e2e-")
+    jpath = os.path.join(jdir, "play_journal.jsonl")
+    write_journal(jpath, [
+        {"id": "8001-1", "ts": "t", "event": "track_start", "path": "/a.mp3",
+         "title": "A - 1", "source": "playlist"},
+        {"id": "8002-1", "ts": "t", "event": "track_start", "path": "/b.mp3",
+         "title": "B - 2", "source": "playlist"},
+    ])
+    ft = FakeTransport()
+    p = pusher(transport=ft)
+    p.start()
+    try:
+        out = []
+        ingest_journal(conn, jpath, out)
+        # engine says /b.mp3 is live → only that one is pushed
+        p.on_ingested(conn, out, now_playing="/b.mp3")
+        payload = ft.received.get(timeout=3.0)
+        check("e2e: ingest→pusher delivered the current track",
+              payload["song"] == "B - 2")
+        check("e2e: no stale second delivery",
+              ft.received.empty())
+    finally:
+        p.stop()
+
+
 if __name__ == "__main__":
     test_config_defaults_off_and_env_secret()
     test_config_ignores_committed_auth()
@@ -293,4 +353,6 @@ if __name__ == "__main__":
     test_worker_drains_to_transport()
     test_worker_never_raises_on_transport_error()
     test_drop_on_full()
+    test_ingest_surfaces_only_track_starts()
+    test_ingest_to_pusher_end_to_end()
     print(f"\nPASS — {passed} checks")

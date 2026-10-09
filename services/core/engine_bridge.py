@@ -37,6 +37,7 @@ from . import db as coredb
 from . import playlists as pl
 from . import schedule as sched
 from . import spots as spotmod
+from .nowplaying_push import NowPlayingPusher
 
 log = logging.getLogger("core.bridge")
 
@@ -1084,8 +1085,16 @@ class Feeder:
 
 # ----------------------------------------------------------- journal ingest
 
-def ingest_journal(conn: sqlite3.Connection, journal_path: str) -> int:
-    """Tail P1's journal into play_history, deduped by journal id."""
+def ingest_journal(conn: sqlite3.Connection, journal_path: str,
+                   events_out: list | None = None) -> int:
+    """Tail P1's journal into play_history, deduped by journal id.
+
+    If `events_out` is given, the freshly-inserted `track_start` events from
+    the *active* journal tail are appended to it (full event dicts) so the P2
+    feeder can hand them to the now-playing pusher. Only genuinely-new rows
+    (INSERT, not IGNORE) surface, and only from the active file — rotated
+    siblings are historical and never pushed.
+    """
     state_raw = coredb.get_setting(conn, "journal_ingest")
     try:
         state = json.loads(state_raw) if state_raw else {}
@@ -1099,7 +1108,8 @@ def ingest_journal(conn: sqlite3.Connection, journal_path: str) -> int:
         return 0  # engine hasn't written yet
     if size < offset:
         # active file rotated out from under us: re-ingest rotated siblings
-        # (INSERT OR IGNORE makes this idempotent), then restart at 0
+        # (INSERT OR IGNORE makes this idempotent), then restart at 0. These
+        # are historical — deliberately NOT surfaced to the pusher.
         base, ext = os.path.splitext(journal_path)
         folder = os.path.dirname(journal_path)
         prefix = os.path.basename(base) + "."
@@ -1108,13 +1118,14 @@ def ingest_journal(conn: sqlite3.Connection, journal_path: str) -> int:
                 ingested += _ingest_lines(conn,
                                           os.path.join(folder, name), 0)[0]
         offset = 0
-    n, offset = _ingest_lines(conn, journal_path, offset)
+    n, offset = _ingest_lines(conn, journal_path, offset, events_out)
     ingested += n
     coredb.set_setting(conn, "journal_ingest", json.dumps({"offset": offset}))
     return ingested
 
 
-def _ingest_lines(conn, path: str, offset: int) -> tuple[int, int]:
+def _ingest_lines(conn, path: str, offset: int,
+                  events_out: list | None = None) -> tuple[int, int]:
     count = 0
     try:
         with open(path, "rb") as f:
@@ -1141,6 +1152,10 @@ def _ingest_lines(conn, path: str, offset: int) -> tuple[int, int]:
                          ev.get("path"), ev.get("title"), ev.get("source"),
                          json.dumps(extra) if extra else None))
                 count += cur.rowcount
+                # surface only newly-inserted track_start rows (rowcount==1)
+                if (events_out is not None and cur.rowcount
+                        and ev.get("event") == "track_start"):
+                    events_out.append(ev)
     except OSError:
         pass
     return count, offset
@@ -1161,8 +1176,12 @@ def register(app: FastAPI) -> None:
     engine = EngineClient(cfg["engine_url"])
     precache = Precache(cfg["precache_dir"])
     feeder = Feeder(cfg, engine, precache)
+    # now-playing push (#747): P2-only, feature-flagged OFF by default,
+    # enqueue-only off the feeder thread. Does nothing unless enabled.
+    pusher = NowPlayingPusher.from_config(cfg)
     app.state.engine = engine
     app.state.feeder = feeder
+    app.state.nowplaying_pusher = pusher
 
     @app.get("/api/engine/status")
     def api_engine_status(_=Depends(api_user)):
@@ -1759,7 +1778,15 @@ def register(app: FastAPI) -> None:
             try:
                 feeder.tick(conn)
                 feeder.fire_due_spots(conn)
-                ingest_journal(conn, cfg["journal_path"])
+                new_starts: list = []
+                ingest_journal(conn, cfg["journal_path"], new_starts)
+                # hand the just-ingested track_starts to the now-playing
+                # pusher — ENQUEUE ONLY (a dedicated worker does any I/O). This
+                # call is a cheap no-op when the flag is off and must never
+                # block the feeder tick (which also feeds P1's precache).
+                if new_starts:
+                    now_playing = (engine.status() or {}).get("now_playing")
+                    pusher.on_ingested(conn, new_starts, now_playing)
             except Exception:
                 log.exception("feeder tick failed")  # next tick tries again
             finally:
@@ -1767,9 +1794,11 @@ def register(app: FastAPI) -> None:
 
     @app.on_event("startup")
     def start_loop():
+        pusher.start()  # no-op unless nowplaying_push.enabled
         if cfg.get("feeder_enabled", True):
             threading.Thread(target=loop, name="feeder", daemon=True).start()
 
     @app.on_event("shutdown")
     def stop_loop():
         stop.set()
+        pusher.stop()
