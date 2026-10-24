@@ -33,6 +33,7 @@ import logging
 import queue
 import threading
 import time
+import unicodedata
 import urllib.parse
 import urllib.request
 from abc import ABC, abstractmethod
@@ -105,8 +106,34 @@ class IcecastUpdinfoTransport(Transport):
                                     "song": song})
         return f"{self.endpoint}/admin/metadata?{q}"
 
+    @staticmethod
+    def fold(song: str) -> str:
+        """ASCII-fold the title before publishing.
+
+        Icecast's `updinfo` does not reliably carry UTF-8: measured 2026-10-24
+        against a real Icecast 2.4.4, `Björk – Jóga` came back out of
+        `status-json.xsl` as `BjÃ¶rk â\\x80\\x93 JÃ³ga` — i.e. the server stored the
+        UTF-8 bytes as Latin-1 and every listener would see mojibake. A station
+        library is full of names like Björk, Mötley Crüe, Sinéad O'Connor, so
+        the push folds to ASCII ("Bjork - Joga") rather than trusting the server
+        to be charset-correct. A missing umlaut reads fine; `BjÃ¶rk` does not.
+
+        Em/en dashes are turned into " - " FIRST so the artist/title separator
+        survives the fold instead of being deleted with the accent.
+        """
+        try:
+            text = song
+            for dash in ("\u2014", "\u2013"):
+                text = text.replace(dash, "-")
+            text = unicodedata.normalize("NFKD", text)
+            text = text.encode("ascii", "ignore").decode("ascii")
+            return " ".join(text.split())
+        except Exception:
+            return song.encode("ascii", "ignore").decode("ascii").strip()
+
     def send(self, payload: dict, timeout: float) -> None:
-        song = (payload or {}).get("song")
+        raw_song = (payload or {}).get("song")
+        song = self.fold(raw_song) if raw_song else ""
         if not song:
             return
         if not self.endpoint or not self.mount or not self.auth:

@@ -25,6 +25,9 @@ plain English a non-technical operator can understand.
   website player shows what is playing and the streaming host has a record of
   what it carried. **Off by default**, and it needs the streaming host's admin
   credentials before it can do anything; it never blocks or delays audio.
+  Accented names are simplified before they go out (Björk appears as
+  "Bjork") because the streaming server garbles anything else — a plain
+  spelling reads correctly, a mangled one does not.
 
 ## [1.5.1] - 2026-10-05
 

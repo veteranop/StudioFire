@@ -82,9 +82,19 @@ def main():
     check("ampersand survived encoding", "Seven+Seas" in sent["path"]
           and "Echo+%26+The+Bunnymen" in sent["path"])
 
+    # non-ASCII: Icecast mangles UTF-8 (measured on real 2.4.4), so the push
+    # folds to ASCII and keeps the dash as the artist/title separator
+    check("fold keeps the artist/title separator",
+          IcecastUpdinfoTransport.fold("Björk – Jóga") == "Bjork - Joga")
+    check("fold handles an em dash and a missing accent",
+          IcecastUpdinfoTransport.fold("Sinéad O'Connor — Nothing Compares 2 U")
+          == "Sinead O'Connor - Nothing Compares 2 U")
+    check("fold leaves plain ASCII untouched",
+          IcecastUpdinfoTransport.fold("Alice Cooper - No More Mr. Nice Guy")
+          == "Alice Cooper - No More Mr. Nice Guy")
     tr.send({"song": "Björk – Jóga"}, 3.0)
-    check("non-ASCII is percent-encoded, not mangled",
-          "Bj%C3%B6rk" in SEEN[-1]["path"])
+    check("non-ASCII title is folded on the wire, never sent as mojibake",
+          "song=Bjork+-+Joga" in SEEN[-1]["path"])
 
     # empty song => no request at all (an ID with no title must not blank the
     # player for the listener)
