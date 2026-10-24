@@ -50,6 +50,36 @@ embedded Python runtime with all dependencies pre-installed.
 `installer\payload\` and `installer\Output\` are gitignored build artifacts;
 re-run step 3 only when Python/deps need refreshing.
 
+## Code signing (SmartScreen)
+
+An unsigned `StudioFire-Setup-<version>.exe` shows **"Windows protected your PC"
+/ Unknown publisher** on a customer's first run — the single biggest trust hit on
+an on-air install. Sign it with an OV or EV Authenticode certificate (an EV cert
+builds SmartScreen reputation immediately; an OV cert accrues it over time).
+
+Signing is **opt-in** in `StudioFire.iss` so a dev box with no certificate still
+builds. Set `STUDIOFIRE_SIGN_TOOL` and define the matching SignTool for ISCC
+(`$f` is substituted with each file to sign):
+
+```bat
+set STUDIOFIRE_SIGN_TOOL=studiofire
+"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" ^
+  /Sstudiofire="signtool.exe sign /fd sha256 /tr http://timestamp.digicert.com /td sha256 /f C:\keys\veteranop-codesign.pfx /p %CERT_PW% $f" ^
+  installer\StudioFire.iss
+```
+
+With `STUDIOFIRE_SIGN_TOOL` unset, no `SignTool`/`SignedUninstaller` directives
+are emitted and the build is byte-for-byte the unsigned one.
+
+Verify what you shipped:
+
+```bat
+signtool verify /pa /v installer\Output\StudioFire-Setup-<version>.exe
+```
+
+Keep the `.pfx` (and its password) **out of the repo** — it is a private key. It
+belongs in the password manager / a CI secret, never in `installer\`.
+
 ## How the bundled runtime works
 
 `build_payload.py` patches the embedded distribution's `python312._pth` to add

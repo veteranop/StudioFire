@@ -1,0 +1,68 @@
+name: tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: test suite (windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+
+      # The suite has two shapes: pytest-style tests and standalone scripts that
+      # are run directly (each prints "<AREA> OK (N checks)" and exits non-zero on
+      # failure). Both must pass.
+      #
+      # Excluded from CI on purpose — they need a real audio stack, mpv.exe, or an
+      # interactive desktop: test_control, test_engine_bridge, test_fader,
+      # test_feeder_concurrency, test_gui_smoke, test_spot_airing, test_stale_mpv,
+      # test_supervisor_bench, ipc_smoke, playback_smoke, torture, demo_feed.
+      # Those run on the on-air box during a soak.
+
+      - name: pytest collection
+        run: python -m pytest tests/ -q
+
+      - name: Standalone test scripts
+        shell: pwsh
+        run: |
+          $scripts = @(
+            "test_changelog",
+            "test_core_foundation",
+            "test_duplicates",
+            "test_indexer",
+            "test_journal",
+            "test_pathmap",
+            "test_playlists",
+            "test_queue_store",
+            "test_schedule",
+            "test_spots",
+            "test_time_format",
+            "test_updater"
+          )
+          $failed = @()
+          foreach ($s in $scripts) {
+            Write-Host "=== tests/$s.py"
+            python "tests/$s.py"
+            if ($LASTEXITCODE -ne 0) { $failed += $s }
+          }
+          if ($failed.Count -gt 0) {
+            Write-Host "::error::failing test scripts: $($failed -join ', ')"
+            exit 1
+          }
