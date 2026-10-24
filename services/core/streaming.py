@@ -34,6 +34,7 @@ import urllib.request
 from fastapi import Depends, HTTPException
 
 from . import db
+from . import nowplaying_file
 from .nowplaying_push import DryRunTransport, NowPlayingPusher
 
 log = logging.getLogger("core.streaming")
@@ -97,6 +98,7 @@ def read_settings(conn) -> dict:
         "endpoint": db.get_setting(conn, K_ENDPOINT) or "",
         "mount": db.get_setting(conn, K_MOUNT) or "/live",
         "transport": db.get_setting(conn, K_TRANSPORT) or "icecast",
+        "np_file": db.get_setting(conn, nowplaying_file.K_PATH) or "",
     }
 
 
@@ -270,11 +272,30 @@ def status(app, conn) -> dict:
         "credential_set": bool(sec.get("user") or sec.get("password")),
         "configured": configured(cfg, conn),
         "push": (pusher.status() if pusher is not None else None),
+        "np_file": st["np_file"],
+        "file": nowplaying_file.status(),
         "on_air_path": now_playing,
         "probe": (probe_mount(st["endpoint"], st["mount"] or "/live", 2.5)
                   if st["endpoint"]
                   else {"ok": False, "error": "no target URL configured"}),
     }
+
+
+def _probe_file(path: str) -> tuple:
+    """Can we actually write there? Creates and removes a tiny file in the SAME
+    directory, so a read-only share or a wrong UNC is caught at save time rather
+    than at 3 a.m. on the next track change."""
+    if not path:
+        return True, None          # clearing the setting is always valid
+    folder = os.path.dirname(path.replace("/", "\\")) or "."
+    probe = os.path.join(folder, ".sf-np-probe.tmp")
+    try:
+        with open(probe, "w", encoding="ascii") as fh:
+            fh.write("ok")
+        os.remove(probe)
+        return True, None
+    except OSError as exc:
+        return False, str(exc)
 
 
 # ------------------------------------------------------------------- routes
@@ -294,6 +315,15 @@ def register(app) -> None:
         endpoint = (body.get("endpoint") or "").strip().rstrip("/")
         mount = (body.get("mount") or "/live").strip()
         _validate(endpoint, mount)
+        # probe the now-playing file BEFORE writing anything, so a bad path
+        # cannot leave the rest of the section half-saved
+        np_file = (body.get("np_file") or "").strip()
+        file_check = {"path": np_file, "ok": None, "error": None}
+        if "np_file" in body:
+            probe_ok, probe_err = _probe_file(np_file)
+            file_check = {"path": np_file, "ok": probe_ok, "error": probe_err}
+            if not probe_ok:
+                raise HTTPException(400, f"cannot write that file: {probe_err}")
         db.set_setting(conn, K_ENDPOINT, endpoint)
         db.set_setting(conn, K_MOUNT, mount)
         db.set_setting(conn, K_TRANSPORT, "icecast")
@@ -306,11 +336,28 @@ def register(app) -> None:
                 raise HTTPException(400, "set both the username and the "
                                          "password, or leave both blank")
             save_secret(app.state.cfg, user, password)
+        if "np_file" in body:
+            nowplaying_file.set_path(conn, np_file)
         res = reload_pusher(app, conn)
         log.info("streaming settings saved: enabled=%s endpoint=%r mount=%r "
-                 "credential=%s", bool(body.get("enabled")), endpoint, mount,
-                 "updated" if (user or password) else "unchanged")
-        return {"ok": True, **res}
+                 "credential=%s np_file=%r", bool(body.get("enabled")), endpoint,
+                 mount, "updated" if (user or password) else "unchanged", np_file)
+        return {"ok": True, **res, "file": file_check}
+
+    @app.post("/api/streaming/file/write")
+    def api_streaming_file_write(conn=Depends(get_conn), _=Depends(api_admin)):
+        """Write whatever is on air right now into the now-playing file — the
+        operator's 'does the encoder see it' button."""
+        path = nowplaying_file.get_path(conn)
+        if not path:
+            return {"ok": False, "detail": "No now-playing file configured."}
+        engine = getattr(app.state, "engine", None)
+        try:
+            status_now = engine.status() if engine else {}
+        except Exception:
+            status_now = {}
+        ok = nowplaying_file.write_current(conn, status_now)
+        return {"ok": ok, "path": path, **nowplaying_file.status()}
 
     @app.post("/api/streaming/test")
     def api_streaming_test(conn=Depends(get_conn), _=Depends(api_admin)):

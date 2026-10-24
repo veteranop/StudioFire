@@ -113,7 +113,16 @@
       <input id="st-pass" type="password" autocomplete="new-password">
       <small class="muted" id="st-pass-hint">Leave blank to keep the saved one</small></label>
   </div>
+  <div class="row" style="flex-wrap:wrap;gap:.6rem">
+    <label style="flex:1;min-width:320px">Now-playing file (for the stream encoder)
+      <input id="st-npfile" autocomplete="off"
+             placeholder="\\192.168.6.222\StudioFire\...\Current\CurrentSong.txt">
+      <small class="muted">StudioFire writes the current song here on every track
+        change. Point this at the file your encoder (e.g. BUTT) polls — full
+        UNC path, not a drive letter.</small></label>
+  </div>
   <button class="btn btn-green" onclick="saveStreaming()">Save</button>
+  <button class="btn" onclick="writeNowPlayingFile()">Write the current song now</button>
   <button class="btn" onclick="testStreaming()">Send a test title</button>
   <div id="st-msg" class="muted" style="margin-top:.4rem"></div>
   {% endif %}
@@ -725,6 +734,20 @@ function renderStreaming(d) {
                         (pr.listeners === null || pr.listeners === undefined)
                           ? "—" : String(pr.listeners)));
   box.appendChild(stRow("Sending via", p.transport || "—"));
+
+  const f = d.file || {};
+  let fileVal;
+  if (!d.np_file) {
+    fileVal = "not configured — nothing is being written";
+  } else if (f.ok === true) {
+    fileVal = f.title + "  (" + f.at + ")  ✓ written";
+  } else if (f.ok === false) {
+    fileVal = "⚠ " + (f.error || "last write failed");
+  } else {
+    fileVal = d.np_file + "  (no write yet this session)";
+  }
+  box.appendChild(stRow("Now-playing file", fileVal,
+                        f.ok === false ? "tile-red-text" : ""));
   if (p.transport === "DryRunTransport") {
     box.appendChild(stRow("Note", "DryRun — the push is built but has no " +
                                   "credential to send with.", "tile-red-text"));
@@ -745,6 +768,7 @@ async function loadStreaming() {
     document.getElementById("st-endpoint").value = d.endpoint || "";
     document.getElementById("st-mount").value = d.mount || "/live";
     document.getElementById("st-user").value = d.user || "";
+    document.getElementById("st-npfile").value = d.np_file || "";
     const hint = document.getElementById("st-pass-hint");
     hint.textContent = d.credential_set
       ? "Saved — leave blank to keep it" : "Not set yet";
@@ -762,6 +786,7 @@ async function saveStreaming() {
     mount: document.getElementById("st-mount").value,
     user: document.getElementById("st-user").value,
     password: document.getElementById("st-pass").value,
+    np_file: document.getElementById("st-npfile").value,
   };
   const r = await fetch("/api/streaming/settings", {
     method: "POST", headers: {"Content-Type": "application/json"},
@@ -773,6 +798,18 @@ async function saveStreaming() {
     ? "Saved — the push is live using " + d.transport + "."
     : "Saved, but it will not send until a target URL and a username/password " +
       "are set. Currently: " + d.transport + ".";
+  loadStreaming();
+}
+
+async function writeNowPlayingFile() {
+  const msg = document.getElementById("st-msg");
+  msg.textContent = "Writing the current song to the file…";
+  const r = await fetch("/api/streaming/file/write", {method: "POST"});
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) { msg.textContent = d.detail || "Could not write the file."; return; }
+  msg.textContent = d.ok
+    ? "Written to " + d.path + " — check the encoder, it should publish it shortly."
+    : (d.detail || "Nothing written — is there a song on air?");
   loadStreaming();
 }
 

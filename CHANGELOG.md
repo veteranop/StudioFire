@@ -8,6 +8,18 @@ plain English a non-technical operator can understand.
 ## [Unreleased]
 
 ### Added
+- **Now-playing file for the stream encoder (the song titles on the website).**
+  StudioFire now writes the song that is on air into a plain text file every time
+  the track changes. Point it at the file your streaming encoder already watches
+  — for KDPI that is BUTT on the stream PC — and the website player starts showing
+  song titles with nothing else to set up. Configure it under **Settings →
+  Streaming → Now-playing file**; use the full network path
+  (`\server\share\...`) rather than a drive letter, and press **Write the
+  current song now** to test it without waiting for the next track. The live
+  monitor shows the last title written and flags a failed write. If the file
+  cannot be written the station keeps playing and the monitor says why — nothing
+  about this can affect the audio. Accented names are simplified (Björk appears
+  as "Bjork") because the streaming server garbles anything else.
 - **SoundExchange royalty report.** StudioFire can now build the monthly report a
   station owes SoundExchange for its internet stream, from the records it already
   keeps of what actually aired. Run it for a calendar month and it writes three

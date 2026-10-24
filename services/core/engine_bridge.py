@@ -38,6 +38,7 @@ from . import playlists as pl
 from . import schedule as sched
 from . import spots as spotmod
 from .nowplaying_push import NowPlayingPusher
+from . import nowplaying_file
 
 log = logging.getLogger("core.bridge")
 
@@ -1801,6 +1802,13 @@ def register(app: FastAPI) -> None:
                     p_now = app.state.nowplaying_pusher
                     now_playing = (engine.status() or {}).get("now_playing")
                     p_now.on_ingested(conn, new_starts, now_playing)
+                    # ...and the same events feed the now-playing TEXT FILE that
+                    # the station's BUTT encoder polls. Independent of the HTTP
+                    # push flag (the station uses the file, not the push), and
+                    # bounded/never-raising so a missing share cannot stall the
+                    # tick that also feeds P1's precache.
+                    nowplaying_file.write_now_playing(conn, new_starts,
+                                                      now_playing)
             except Exception:
                 log.exception("feeder tick failed")  # next tick tries again
             finally:
@@ -1810,6 +1818,15 @@ def register(app: FastAPI) -> None:
     def start_loop():
         # no-op unless enabled; reads app.state so a runtime swap is respected
         app.state.nowplaying_pusher.start()
+        # a restart must not leave the encoder publishing last hour's title
+        try:
+            _c = coredb.connect(cfg["db_path"])
+            try:
+                nowplaying_file.write_current(_c, engine.status() or {})
+            finally:
+                _c.close()
+        except Exception:
+            log.warning("startup now-playing file write failed", exc_info=True)
         if cfg.get("feeder_enabled", True):
             threading.Thread(target=loop, name="feeder", daemon=True).start()
 
