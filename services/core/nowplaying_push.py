@@ -16,20 +16,25 @@ DESIGN LAWS (non-negotiable — enforced here):
     always preferable to any disruption.
   * **Feature-flagged, OFF by default.** When disabled this module does
     nothing; the air log is wholly independent of it.
-  * **Transport is pluggable and GATED.** Only `DryRunTransport` (logs, zero
-    I/O) exists until StreamGuys answers (endpoint/auth/entitlement). The real
-    `IcecastUpdinfoTransport`/`HttpJsonTransport` are a later dispatch.
+  * **Transport is pluggable and GATED.** `DryRunTransport` (logs, zero I/O) is
+    still the default. `IcecastUpdinfoTransport` is built and unit-tested
+    against a local fake mount, but the feature flag stays OFF until StreamGuys
+    supplies the admin credential for the mount — config alone cannot enable a
+    network push by accident.
 
 Stdlib only — no new dependencies.
 """
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import queue
 import threading
 import time
+import urllib.parse
+import urllib.request
 from abc import ABC, abstractmethod
 
 from . import db as coredb
@@ -70,12 +75,69 @@ class DryRunTransport(Transport):
                  payload.get("journal_id"))
 
 
+class IcecastUpdinfoTransport(Transport):
+    """Publish the on-air title to an Icecast 2 mount (`updinfo`).
+
+    This is the transport StreamGuys named on 2026-10-09 ("send metadata to an
+    Icecast 2 server"). The mount is Icecast 2.4.0-kh10 and its admin endpoint
+    answers **401** unauthenticated — verified live 2026-10-24:
+
+        GET http://peridot.streamguys.com:5110/admin/metadata -> 401
+
+    so the shape of the call is known and only the credential is outstanding.
+    Config supplies `endpoint` (scheme://host:port), `mount` (e.g. `/live`) and
+    `auth` (`user:password`, env-sourced — never in config.json).
+
+    Failure policy: this class may raise; the worker in `NowPlayingPusher`
+    catches everything. A lost title update is cosmetic; it must never touch
+    the audio path.
+    """
+
+    def __init__(self, endpoint: str, mount: str, auth: str | None,
+                 timeout: float = 4.0):
+        self.endpoint = (endpoint or "").rstrip("/")
+        self.mount = mount or ""
+        self.auth = auth or ""
+        self.timeout = timeout
+
+    def build_url(self, song: str) -> str:
+        q = urllib.parse.urlencode({"mount": self.mount, "mode": "updinfo",
+                                    "song": song})
+        return f"{self.endpoint}/admin/metadata?{q}"
+
+    def send(self, payload: dict, timeout: float) -> None:
+        song = (payload or {}).get("song")
+        if not song:
+            return
+        if not self.endpoint or not self.mount or not self.auth:
+            raise RuntimeError("icecast updinfo transport is not configured "
+                               "(endpoint/mount/auth missing)")
+        req = urllib.request.Request(self.build_url(song),
+                                     headers={"User-Agent": "StudioFire-nowplaying/1"})
+        token = base64.b64encode(self.auth.encode()).decode()
+        req.add_header("Authorization", "Basic " + token)
+        budget = min(float(timeout or self.timeout), self.timeout)
+        with urllib.request.urlopen(req, timeout=budget) as resp:
+            body = resp.read(256)
+        # Icecast answers "Metadata update successful"; anything that is not a
+        # 2xx has already raised, so this is only for the log.
+        log.debug("icecast updinfo ok: %r -> %r", song, body[:80])
+
+
 def build_transport(np_cfg: dict) -> Transport:
     """Factory: `config.transport` selects. Real transports are gated on the
-    vendor answer, so anything but 'dryrun' currently falls back to DryRun
-    (with a warning) rather than attempting a network path that isn't ratified.
-    """
+    vendor's answer, so an unconfigured one falls back to DryRun (with a
+    warning) rather than attempting a network path that isn't ratified."""
     name = (np_cfg or {}).get("transport", "dryrun")
+    if name in ("icecast", "icecast-updinfo"):
+        cfg = np_cfg or {}
+        if cfg.get("endpoint") and cfg.get("mount") and cfg.get("auth"):
+            return IcecastUpdinfoTransport(cfg["endpoint"], cfg["mount"],
+                                           cfg["auth"],
+                                           float(cfg.get("timeout_sec", 4.0)))
+        log.warning("nowplaying transport 'icecast' selected but endpoint/mount/"
+                    "auth are not all set — using DryRunTransport")
+        return DryRunTransport()
     if name == "dryrun":
         return DryRunTransport()
     log.warning("nowplaying transport %r not available yet (gated on "
