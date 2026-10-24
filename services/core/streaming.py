@@ -51,7 +51,13 @@ MASK = "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
 # ------------------------------------------------------------------ settings
 
 def _data_dir(cfg: dict) -> str:
-    return cfg.get("paths", {}).get("data_dir") or os.path.join("data")
+    """config.load_config() exposes `data_dir` at the TOP level (there is no
+    cfg["paths"] in the loaded dict — that is the on-disk JSON shape, not the
+    loaded one). Resolve it the same way the rest of core does, or the secret
+    lands in a relative `data/` next to whatever the process CWD happens to be."""
+    return (cfg.get("data_dir")
+            or (cfg.get("paths") or {}).get("data_dir")
+            or os.path.join("data"))
 
 
 def secret_path(cfg: dict) -> str:
@@ -177,7 +183,7 @@ _PROBE_CACHE: dict = {}
 PROBE_TTL_SEC = 5.0
 
 
-def probe_mount(endpoint: str, mount: str, timeout: float = 5.0) -> dict:
+def probe_mount(endpoint: str, mount: str, timeout: float = 2.5) -> dict:
     """What the stream host says and what a listener actually receives.
 
     Two independent reads, because they disagree in interesting ways:
@@ -265,7 +271,7 @@ def status(app, conn) -> dict:
         "configured": configured(cfg, conn),
         "push": (pusher.status() if pusher is not None else None),
         "on_air_path": now_playing,
-        "probe": (probe_mount(st["endpoint"], st["mount"] or "/live")
+        "probe": (probe_mount(st["endpoint"], st["mount"] or "/live", 2.5)
                   if st["endpoint"]
                   else {"ok": False, "error": "no target URL configured"}),
     }
@@ -324,7 +330,9 @@ def register(app) -> None:
         try:
             tr.send({"song": title}, 5.0)
         except Exception as exc:                       # network/auth failure
+            pusher.note_test(title, False, f"{type(exc).__name__}: {exc}")
             return {"ok": False, "sent": True, "detail": f"{type(exc).__name__}: {exc}"}
+        pusher.note_test(title, True)
         st = read_settings(conn)
-        probe = probe_mount(st["endpoint"], st["mount"] or "/live")
+        probe = probe_mount(st["endpoint"], st["mount"] or "/live", 2.5)
         return {"ok": True, "sent": True, "title": title, "mount": probe}

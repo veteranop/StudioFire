@@ -202,7 +202,8 @@ class NowPlayingPusher:
         # because a stale read is always acceptable for a display)
         self._last: dict = {"state": "idle", "title": None, "at": None,
                             "ok": None, "error": None,
-                            "queued": 0, "sent": 0, "failed": 0}
+                            "queued": 0, "sent": 0, "failed": 0,
+                            "test": False}
 
     @classmethod
     def from_config(cls, cfg: dict) -> "NowPlayingPusher":
@@ -322,17 +323,30 @@ class NowPlayingPusher:
                 self.transport.send(payload, self.timeout_sec)
                 self._last.update(state="sent", ok=True, error=None,
                                   at=time.strftime("%Y-%m-%d %H:%M:%S"),
-                                  title=payload.get("song"),
+                                  title=payload.get("song"), test=False,
                                   sent=self._last.get("sent", 0) + 1)
             except Exception as exc:
                 # silent no-op on failure (per the design law): log and move on
                 log.warning("nowplaying push failed (non-fatal)", exc_info=True)
                 self._last.update(state="error", ok=False, error=str(exc),
                                   at=time.strftime("%Y-%m-%d %H:%M:%S"),
-                                  title=payload.get("song"),
+                                  title=payload.get("song"), test=False,
                                   failed=self._last.get("failed", 0) + 1)
             finally:
                 self._q.task_done()
+
+    def note_test(self, title: str, ok: bool, error: str | None = None) -> None:
+        """Record a manual 'Send a test title' so the Settings monitor shows it.
+        The test does not go through the queue (an operator wants the answer
+        now, not behind the current track), so its result has to be written
+        here or the panel would say 'nothing sent yet' right after a test."""
+        self._last.update(state="sent" if ok else "error", ok=ok,
+                          error=error, title=title, test=True,
+                          at=time.strftime("%Y-%m-%d %H:%M:%S"))
+        if ok:
+            self._last["sent"] = self._last.get("sent", 0) + 1
+        else:
+            self._last["failed"] = self._last.get("failed", 0) + 1
 
     # ------------------------------------------------------------ telemetry
 

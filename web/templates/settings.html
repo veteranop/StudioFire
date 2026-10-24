@@ -94,8 +94,9 @@
     down or slow cannot affect what goes to air.</p>
   {% if role == 'admin' %}
   <div class="row" style="align-items:center">
-    <label style="margin:0"><input type="checkbox" id="st-enabled" style="margin-right:.4rem">
-      Send the on-air title to the stream</label>
+    <label style="margin:0;display:flex;align-items:center;gap:.5rem">
+      <input type="checkbox" id="st-enabled" style="margin:0">
+      <span>Send the on-air title to the stream</span></label>
   </div>
   <div class="row" style="flex-wrap:wrap;gap:.6rem">
     <label style="flex:2;min-width:280px">Target URL
@@ -701,6 +702,7 @@ function renderStreaming(d) {
   const last = p.title || "—";
   let lastVal = last;
   if (p.at) lastVal += "  (" + p.at + ")";
+  if (p.test) lastVal += "  (test)";
   if (p.state === "error") lastVal += "  ⚠ " + (p.error || "failed");
   else if (p.state === "sent") lastVal += "  ✓ sent";
   else if (p.state === "idle") lastVal = "nothing sent yet this session";
