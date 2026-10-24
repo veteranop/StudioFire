@@ -197,6 +197,12 @@ class NowPlayingPusher:
         self._last_jid_key: tuple[int, int] = (-1, -1)  # (-1,-1) ⇒ nothing seen
         self._last_title: str | None = None
         self._last_push_mono: float | None = None
+        # telemetry for the Settings > Streaming monitor (read by another
+        # thread via status(); plain dict of primitives, updated under no lock
+        # because a stale read is always acceptable for a display)
+        self._last: dict = {"state": "idle", "title": None, "at": None,
+                            "ok": None, "error": None,
+                            "queued": 0, "sent": 0, "failed": 0}
 
     @classmethod
     def from_config(cls, cfg: dict) -> "NowPlayingPusher":
@@ -296,6 +302,8 @@ class NowPlayingPusher:
                 "song": ev.get("title")}
 
     def _enqueue(self, payload: dict) -> None:
+        self._last["queued"] = self._last.get("queued", 0) + 1
+        self._last["title"] = payload.get("song")
         try:
             self._q.put_nowait(payload)
         except queue.Full:
@@ -312,11 +320,32 @@ class NowPlayingPusher:
                 continue
             try:
                 self.transport.send(payload, self.timeout_sec)
-            except Exception:
+                self._last.update(state="sent", ok=True, error=None,
+                                  at=time.strftime("%Y-%m-%d %H:%M:%S"),
+                                  title=payload.get("song"),
+                                  sent=self._last.get("sent", 0) + 1)
+            except Exception as exc:
                 # silent no-op on failure (per the design law): log and move on
                 log.warning("nowplaying push failed (non-fatal)", exc_info=True)
+                self._last.update(state="error", ok=False, error=str(exc),
+                                  at=time.strftime("%Y-%m-%d %H:%M:%S"),
+                                  title=payload.get("song"),
+                                  failed=self._last.get("failed", 0) + 1)
             finally:
                 self._q.task_done()
+
+    # ------------------------------------------------------------ telemetry
+
+    def status(self) -> dict:
+        """What the Settings > Streaming panel shows about OUR side of the
+        push: is the worker alive, which transport, last title/result."""
+        return {
+            "enabled": self.enabled,
+            "worker_alive": bool(self._thread and self._thread.is_alive()),
+            "transport": type(self.transport).__name__,
+            "queue_depth": self._q.qsize(),
+            **self._last,
+        }
 
     # ------------------------------------------------------ marker (durable)
 

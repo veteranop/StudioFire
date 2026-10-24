@@ -28,6 +28,17 @@ plain English a non-technical operator can understand.
   Accented names are simplified before they go out (Björk appears as
   "Bjork") because the streaming server garbles anything else — a plain
   spelling reads correctly, a mangled one does not.
+- **Streaming settings and monitor (Settings → Streaming).** A new section where
+  the target streaming address, the mount name and the stream host's
+  username/password are entered once, with a switch to turn the title sending on
+  or off. Below it, a **live monitor** answers the only question that matters:
+  what a listener actually sees. It shows the last title StudioFire sent and
+  whether it succeeded, what the streaming host reports, what a listener's player
+  receives, and how many people are listening right now — refreshed every few
+  seconds. A **Send a test title** button pushes one test through the same path a
+  real track uses, so "does it work?" is answered without waiting for a song
+  change. The password is write-only: it is never shown back on screen.
+
 
 ## [1.5.1] - 2026-10-05
 

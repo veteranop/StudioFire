@@ -85,6 +85,41 @@
   </details>
 </div>
 
+<div class="card">
+  <h1>Streaming &amp; song metadata</h1>
+  <p class="muted">Send the on-air artist and title to your streaming host, so the
+    website player shows what is playing and the host keeps a record of what it
+    carried (the listening half of a SoundExchange report). StudioFire sends from
+    the playout log &mdash; it never touches the audio, and a stream host that is
+    down or slow cannot affect what goes to air.</p>
+  {% if role == 'admin' %}
+  <div class="row" style="align-items:center">
+    <label style="margin:0"><input type="checkbox" id="st-enabled" style="margin-right:.4rem">
+      Send the on-air title to the stream</label>
+  </div>
+  <div class="row" style="flex-wrap:wrap;gap:.6rem">
+    <label style="flex:2;min-width:280px">Target URL
+      <input id="st-endpoint" autocomplete="off"
+             placeholder="http://peridot.streamguys.com:5110">
+      <small class="muted">Your stream host's address &mdash; no path after it</small></label>
+    <label style="flex:1;min-width:130px">Mount
+      <input id="st-mount" autocomplete="off" placeholder="/live"></label>
+  </div>
+  <div class="row" style="flex-wrap:wrap;gap:.6rem">
+    <label style="flex:1;min-width:190px">Username
+      <input id="st-user" autocomplete="off" placeholder="from your stream host"></label>
+    <label style="flex:1;min-width:190px">Password
+      <input id="st-pass" type="password" autocomplete="new-password">
+      <small class="muted" id="st-pass-hint">Leave blank to keep the saved one</small></label>
+  </div>
+  <button class="btn btn-green" onclick="saveStreaming()">Save</button>
+  <button class="btn" onclick="testStreaming()">Send a test title</button>
+  <div id="st-msg" class="muted" style="margin-top:.4rem"></div>
+  {% endif %}
+  <h2 style="margin-top:1.1rem">Live monitor</h2>
+  <div id="st-monitor" class="muted">Checking&hellip;</div>
+</div>
+
 {% if role == 'admin' %}
 <div class="card">
   <h1>Users</h1>
@@ -604,7 +639,147 @@ async function updInstall() {
   if (!updPoll) updPoll = setInterval(updRefresh, 3000);
 }
 
+
+// ---- Streaming & song metadata (#747) -------------------------------------
+let streamPoll = null;
+
+function stRow(label, value, cls) {
+  const row = document.createElement("div");
+  row.className = "dirrow";
+  const a = document.createElement("div");
+  a.innerHTML = "<strong>" + label + "</strong>";
+  const b = document.createElement("div");
+  b.className = "dirval";
+  const code = document.createElement("span");
+  code.textContent = value;
+  if (cls) code.className = cls;
+  b.appendChild(code);
+  row.appendChild(a);
+  row.appendChild(b);
+  return row;
+}
+
+function renderStreaming(d) {
+  const box = document.getElementById("st-monitor");
+  if (!box) return;
+  box.innerHTML = "";
+  box.className = "";
+  const p = d.push || {};
+  const pr = d.probe || {};
+
+  let verdict, cls;
+  if (!d.enabled) {
+    verdict = "Off — nothing is being sent to the stream.";
+    cls = "muted";
+  } else if (!d.credential_set || !d.endpoint) {
+    verdict = "On, but not configured yet — add the target URL and the " +
+              "username/password your stream host gave you.";
+    cls = "tile-red-text";
+  } else if (!pr.ok) {
+    verdict = "Cannot reach the stream host" +
+      (pr.error ? " (" + pr.error + ")" : "") + " — nothing is being published.";
+    cls = "tile-red-text";
+  } else if (!pr.icy_title && !pr.server_title) {
+    verdict = "Reachable, but the mount is publishing no song title.";
+    cls = "tile-red-text";
+  } else if (pr.icy_title) {
+    verdict = "Working — listeners see: " + pr.icy_title;
+    cls = "";
+  } else {
+    verdict = "The stream host reports a title but listeners get none yet.";
+    cls = "tile-red-text";
+  }
+
+  const head = document.createElement("div");
+  head.style.marginBottom = ".5rem";
+  const strong = document.createElement("strong");
+  strong.textContent = verdict;
+  if (cls) strong.className = cls;
+  head.appendChild(strong);
+  box.appendChild(head);
+
+  const last = p.title || "—";
+  let lastVal = last;
+  if (p.at) lastVal += "  (" + p.at + ")";
+  if (p.state === "error") lastVal += "  ⚠ " + (p.error || "failed");
+  else if (p.state === "sent") lastVal += "  ✓ sent";
+  else if (p.state === "idle") lastVal = "nothing sent yet this session";
+  box.appendChild(stRow("StudioFire last sent", lastVal,
+                        p.state === "error" ? "tile-red-text" : ""));
+
+  box.appendChild(stRow("Stream host reports", pr.server_title || "—"));
+  box.appendChild(stRow("Listener sees", pr.icy_title || "—",
+                        pr.icy_title ? "" : "muted"));
+  box.appendChild(stRow("Listeners now",
+                        (pr.listeners === null || pr.listeners === undefined)
+                          ? "—" : String(pr.listeners)));
+  box.appendChild(stRow("Sending via", p.transport || "—"));
+  if (p.transport === "DryRunTransport") {
+    box.appendChild(stRow("Note", "DryRun — the push is built but has no " +
+                                  "credential to send with.", "tile-red-text"));
+  }
+  if (pr.server_title && p.title && pr.server_title !== p.title) {
+    box.appendChild(stRow("Note", "Host title differs from the last one sent — " +
+                                  "normal for a second or two after a track change."));
+  }
+}
+
+async function loadStreaming() {
+  const r = await fetch("/api/streaming/status");
+  if (!r.ok) return;
+  const d = await r.json();
+  const en = document.getElementById("st-enabled");
+  if (en) {
+    en.checked = !!d.enabled;
+    document.getElementById("st-endpoint").value = d.endpoint || "";
+    document.getElementById("st-mount").value = d.mount || "/live";
+    document.getElementById("st-user").value = d.user || "";
+    const hint = document.getElementById("st-pass-hint");
+    hint.textContent = d.credential_set
+      ? "Saved — leave blank to keep it" : "Not set yet";
+  }
+  renderStreaming(d);
+  if (!streamPoll) streamPoll = setInterval(loadStreaming, 5000);
+}
+
+async function saveStreaming() {
+  const msg = document.getElementById("st-msg");
+  msg.textContent = "Saving…";
+  const body = {
+    enabled: document.getElementById("st-enabled").checked,
+    endpoint: document.getElementById("st-endpoint").value,
+    mount: document.getElementById("st-mount").value,
+    user: document.getElementById("st-user").value,
+    password: document.getElementById("st-pass").value,
+  };
+  const r = await fetch("/api/streaming/settings", {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(body)});
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) { msg.textContent = d.detail || "Could not save."; return; }
+  document.getElementById("st-pass").value = "";
+  msg.textContent = d.configured
+    ? "Saved — the push is live using " + d.transport + "."
+    : "Saved, but it will not send until a target URL and a username/password " +
+      "are set. Currently: " + d.transport + ".";
+  loadStreaming();
+}
+
+async function testStreaming() {
+  const msg = document.getElementById("st-msg");
+  msg.textContent = "Sending a test title…";
+  const r = await fetch("/api/streaming/test", {method: "POST"});
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) { msg.textContent = d.detail || "Test failed."; return; }
+  if (!d.sent) { msg.textContent = d.detail || "Nothing sent."; return; }
+  msg.textContent = d.ok
+    ? "Test sent — check the player; the stream host accepts titles from us."
+    : "Sent, but the host refused it: " + (d.detail || "unknown error");
+  loadStreaming();
+}
+
 loadDirs();
+loadStreaming();
 loadLstDir();
 loadUsers();
 loadDevices();

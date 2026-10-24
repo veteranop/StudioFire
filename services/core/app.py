@@ -836,9 +836,10 @@ def create_app(cfg: dict) -> FastAPI:
                 "first_weekday": datetime.date(y, m, 1).weekday(),
                 "base": base, "days": days}
 
-    from . import duplicates, engine_bridge, playlists
+    from . import duplicates, engine_bridge, playlists, streaming
     playlists.register(app)
     engine_bridge.register(app)
     duplicates.register(app)
+    streaming.register(app)      # Settings > Streaming: config + live monitor
 
     return app

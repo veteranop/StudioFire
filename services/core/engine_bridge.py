@@ -1178,7 +1178,17 @@ def register(app: FastAPI) -> None:
     feeder = Feeder(cfg, engine, precache)
     # now-playing push (#747): P2-only, feature-flagged OFF by default,
     # enqueue-only off the feeder thread. Does nothing unless enabled.
-    pusher = NowPlayingPusher.from_config(cfg)
+    # Settings live in the DB (Settings > Streaming) with a config.json fallback,
+    # so build from the merged view — `streaming.merged_np_config` is the ONE
+    # place precedence is decided (DB > config.json > env/secret file).
+    from . import streaming as _streaming
+    # NOTE: app.state.get_conn is a *generator* dependency (Depends), so open our
+    # own connection here — calling it returns a generator, not a connection.
+    _c0 = coredb.connect(cfg["db_path"])
+    try:
+        pusher = NowPlayingPusher(_streaming.merged_np_config(cfg, _c0))
+    finally:
+        _c0.close()
     app.state.engine = engine
     app.state.feeder = feeder
     app.state.nowplaying_pusher = pusher
@@ -1785,8 +1795,12 @@ def register(app: FastAPI) -> None:
                 # call is a cheap no-op when the flag is off and must never
                 # block the feeder tick (which also feeds P1's precache).
                 if new_starts:
+                    # read the pusher from app.state, not the closure: Settings >
+                    # Streaming can swap in a re-configured pusher at runtime and
+                    # the next tick must pick it up
+                    p_now = app.state.nowplaying_pusher
                     now_playing = (engine.status() or {}).get("now_playing")
-                    pusher.on_ingested(conn, new_starts, now_playing)
+                    p_now.on_ingested(conn, new_starts, now_playing)
             except Exception:
                 log.exception("feeder tick failed")  # next tick tries again
             finally:
@@ -1794,11 +1808,12 @@ def register(app: FastAPI) -> None:
 
     @app.on_event("startup")
     def start_loop():
-        pusher.start()  # no-op unless nowplaying_push.enabled
+        # no-op unless enabled; reads app.state so a runtime swap is respected
+        app.state.nowplaying_pusher.start()
         if cfg.get("feeder_enabled", True):
             threading.Thread(target=loop, name="feeder", daemon=True).start()
 
     @app.on_event("shutdown")
     def stop_loop():
         stop.set()
-        pusher.stop()
+        app.state.nowplaying_pusher.stop()
