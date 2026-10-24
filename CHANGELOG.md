@@ -7,6 +7,8 @@ plain English a non-technical operator can understand.
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-10-24
+
 ### Added
 - **Now-playing file for the stream encoder (the song titles on the website).**
   StudioFire now writes the song that is on air into a plain text file every time
@@ -50,7 +52,6 @@ plain English a non-technical operator can understand.
   seconds. A **Send a test title** button pushes one test through the same path a
   real track uses, so "does it work?" is answered without waiting for a song
   change. The password is write-only: it is never shown back on screen.
-
 
 ## [1.5.1] - 2026-10-05
 
