@@ -85,6 +85,51 @@
   </details>
 </div>
 
+<div class="card">
+  <h1>Streaming &amp; song metadata</h1>
+  <p class="muted">Send the on-air artist and title to your streaming host, so the
+    website player shows what is playing and the host keeps a record of what it
+    carried (the listening half of a SoundExchange report). StudioFire sends from
+    the playout log &mdash; it never touches the audio, and a stream host that is
+    down or slow cannot affect what goes to air.</p>
+  {% if role == 'admin' %}
+  <div class="row" style="align-items:center">
+    <label style="margin:0;display:flex;align-items:center;gap:.5rem">
+      <input type="checkbox" id="st-enabled" style="margin:0">
+      <span>Send the on-air title to the stream</span></label>
+  </div>
+  <div class="row" style="flex-wrap:wrap;gap:.6rem">
+    <label style="flex:2;min-width:280px">Target URL
+      <input id="st-endpoint" autocomplete="off"
+             placeholder="http://peridot.streamguys.com:5110">
+      <small class="muted">Your stream host's address &mdash; no path after it</small></label>
+    <label style="flex:1;min-width:130px">Mount
+      <input id="st-mount" autocomplete="off" placeholder="/live"></label>
+  </div>
+  <div class="row" style="flex-wrap:wrap;gap:.6rem">
+    <label style="flex:1;min-width:190px">Username
+      <input id="st-user" autocomplete="off" placeholder="from your stream host"></label>
+    <label style="flex:1;min-width:190px">Password
+      <input id="st-pass" type="password" autocomplete="new-password">
+      <small class="muted" id="st-pass-hint">Leave blank to keep the saved one</small></label>
+  </div>
+  <div class="row" style="flex-wrap:wrap;gap:.6rem">
+    <label style="flex:1;min-width:320px">Now-playing file (for the stream encoder)
+      <input id="st-npfile" autocomplete="off"
+             placeholder="\\192.168.6.222\StudioFire\...\Current\CurrentSong.txt">
+      <small class="muted">StudioFire writes the current song here on every track
+        change. Point this at the file your encoder (e.g. BUTT) polls — full
+        UNC path, not a drive letter.</small></label>
+  </div>
+  <button class="btn btn-green" onclick="saveStreaming()">Save</button>
+  <button class="btn" onclick="writeNowPlayingFile()">Write the current song now</button>
+  <button class="btn" onclick="testStreaming()">Send a test title</button>
+  <div id="st-msg" class="muted" style="margin-top:.4rem"></div>
+  {% endif %}
+  <h2 style="margin-top:1.1rem">Live monitor</h2>
+  <div id="st-monitor" class="muted">Checking&hellip;</div>
+</div>
+
 {% if role == 'admin' %}
 <div class="card">
   <h1>Users</h1>
@@ -135,6 +180,11 @@
             hidden>⬆ Install update</button>
   </div>
   <div id="upd-progress" class="muted"></div>
+  <!-- §6.3 major-version gate: DETECT + INFORM ONLY. Admins see a muted,
+       non-clickable note when a higher major exists; operators see nothing.
+       There is no button, input or endpoint to install a major in this
+       release — major upgrades are scheduled by VeteranOp. -->
+  <div id="upd-major" class="muted" hidden style="margin-top:.7rem"></div>
 </div>
 
 <div class="card" id="changelog">
@@ -543,6 +593,27 @@ function updRender(u) {
   } else prog.textContent = "";
   if (busy && !updPoll) updPoll = setInterval(updRefresh, 3000);
   if (!busy && updPoll) { clearInterval(updPoll); updPoll = null; }
+  updRenderMajor(u);
+}
+
+// ---- §6.3 major-version gate: DETECT + INFORM ONLY (no install path).
+// When a higher major is available, admins see a muted, non-clickable note
+// inside the Software updates card; operators see nothing. There is NO button,
+// input, or endpoint to install a major in this release — major upgrades are
+// scheduled by VeteranOp (deferred until 2.0 is proven on a 72-hour burn-in).
+function updRenderMajor(u) {
+  const note = document.getElementById("upd-major");
+  if (!note) return;
+  if (u.major_available && u.can_major) {
+    note.hidden = false;
+    note.innerHTML = "<span class='tile-red-text'>&#9888;</span> A new major " +
+      "version (" + updEsc(u.major_available.version) + ") is available. " +
+      "Major upgrades are scheduled by VeteranOp — contact support before " +
+      "upgrading.";
+  } else {
+    note.hidden = true;
+    note.textContent = "";
+  }
 }
 async function updRefresh() {
   try {
@@ -578,7 +649,185 @@ async function updInstall() {
   if (!updPoll) updPoll = setInterval(updRefresh, 3000);
 }
 
+
+// ---- Streaming & song metadata (#747) -------------------------------------
+let streamPoll = null;
+
+function stRow(label, value, cls) {
+  const row = document.createElement("div");
+  row.className = "dirrow";
+  const a = document.createElement("div");
+  a.innerHTML = "<strong>" + label + "</strong>";
+  const b = document.createElement("div");
+  b.className = "dirval";
+  const code = document.createElement("span");
+  code.textContent = value;
+  if (cls) code.className = cls;
+  b.appendChild(code);
+  row.appendChild(a);
+  row.appendChild(b);
+  return row;
+}
+
+function renderStreaming(d) {
+  const box = document.getElementById("st-monitor");
+  if (!box) return;
+  box.innerHTML = "";
+  box.className = "";
+  const p = d.push || {};
+  const pr = d.probe || {};
+
+  let verdict, cls;
+  if (!d.enabled) {
+    verdict = "Off — nothing is being sent to the stream.";
+    cls = "muted";
+  } else if (!d.credential_set || !d.endpoint) {
+    verdict = "On, but not configured yet — add the target URL and the " +
+              "username/password your stream host gave you.";
+    cls = "tile-red-text";
+  } else if (p.state === "error") {
+    // the push is the thing that matters: if the host refused us, say that
+    // first and name the likely cause, not the state of the mount
+    const why = (p.error || "unknown error");
+    verdict = /401|auth/i.test(why)
+      ? "The stream host refused the update — it did not accept the " +
+        "username/password. Everything else is working: the host answers us."
+      : "The stream host refused the last update: " + why;
+    cls = "tile-red-text";
+  } else if (!pr.ok) {
+    verdict = "Cannot reach the stream host" +
+      (pr.error ? " (" + pr.error + ")" : "") + " — nothing is being published.";
+    cls = "tile-red-text";
+  } else if (!pr.icy_title && !pr.server_title) {
+    verdict = "Reachable, but the mount is publishing no song title.";
+    cls = "tile-red-text";
+  } else if (pr.icy_title) {
+    verdict = "Working — listeners see: " + pr.icy_title;
+    cls = "";
+  } else {
+    verdict = "The stream host reports a title but listeners get none yet.";
+    cls = "tile-red-text";
+  }
+
+  const head = document.createElement("div");
+  head.style.marginBottom = ".5rem";
+  const strong = document.createElement("strong");
+  strong.textContent = verdict;
+  if (cls) strong.className = cls;
+  head.appendChild(strong);
+  box.appendChild(head);
+
+  const last = p.title || "—";
+  let lastVal = last;
+  if (p.at) lastVal += "  (" + p.at + ")";
+  if (p.test) lastVal += "  (test)";
+  if (p.state === "error") lastVal += "  ⚠ " + (p.error || "failed");
+  else if (p.state === "sent") lastVal += "  ✓ sent";
+  else if (p.state === "idle") lastVal = "nothing sent yet this session";
+  box.appendChild(stRow("StudioFire last sent", lastVal,
+                        p.state === "error" ? "tile-red-text" : ""));
+
+  box.appendChild(stRow("Stream host reports", pr.server_title || "—"));
+  box.appendChild(stRow("Listener sees", pr.icy_title || "—",
+                        pr.icy_title ? "" : "muted"));
+  box.appendChild(stRow("Listeners now",
+                        (pr.listeners === null || pr.listeners === undefined)
+                          ? "—" : String(pr.listeners)));
+  box.appendChild(stRow("Sending via", p.transport || "—"));
+
+  const f = d.file || {};
+  let fileVal;
+  if (!d.np_file) {
+    fileVal = "not configured — nothing is being written";
+  } else if (f.ok === true) {
+    fileVal = f.title + "  (" + f.at + ")  ✓ written";
+  } else if (f.ok === false) {
+    fileVal = "⚠ " + (f.error || "last write failed");
+  } else {
+    fileVal = d.np_file + "  (no write yet this session)";
+  }
+  box.appendChild(stRow("Now-playing file", fileVal,
+                        f.ok === false ? "tile-red-text" : ""));
+  if (p.transport === "DryRunTransport") {
+    box.appendChild(stRow("Note", "DryRun — the push is built but has no " +
+                                  "credential to send with.", "tile-red-text"));
+  }
+  if (pr.server_title && p.title && pr.server_title !== p.title) {
+    box.appendChild(stRow("Note", "Host title differs from the last one sent — " +
+                                  "normal for a second or two after a track change."));
+  }
+}
+
+async function loadStreaming() {
+  const r = await fetch("/api/streaming/status");
+  if (!r.ok) return;
+  const d = await r.json();
+  const en = document.getElementById("st-enabled");
+  if (en) {
+    en.checked = !!d.enabled;
+    document.getElementById("st-endpoint").value = d.endpoint || "";
+    document.getElementById("st-mount").value = d.mount || "/live";
+    document.getElementById("st-user").value = d.user || "";
+    document.getElementById("st-npfile").value = d.np_file || "";
+    const hint = document.getElementById("st-pass-hint");
+    hint.textContent = d.credential_set
+      ? "Saved — leave blank to keep it" : "Not set yet";
+  }
+  renderStreaming(d);
+  if (!streamPoll) streamPoll = setInterval(loadStreaming, 5000);
+}
+
+async function saveStreaming() {
+  const msg = document.getElementById("st-msg");
+  msg.textContent = "Saving…";
+  const body = {
+    enabled: document.getElementById("st-enabled").checked,
+    endpoint: document.getElementById("st-endpoint").value,
+    mount: document.getElementById("st-mount").value,
+    user: document.getElementById("st-user").value,
+    password: document.getElementById("st-pass").value,
+    np_file: document.getElementById("st-npfile").value,
+  };
+  const r = await fetch("/api/streaming/settings", {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(body)});
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) { msg.textContent = d.detail || "Could not save."; return; }
+  document.getElementById("st-pass").value = "";
+  msg.textContent = d.configured
+    ? "Saved — the push is live using " + d.transport + "."
+    : "Saved, but it will not send until a target URL and a username/password " +
+      "are set. Currently: " + d.transport + ".";
+  loadStreaming();
+}
+
+async function writeNowPlayingFile() {
+  const msg = document.getElementById("st-msg");
+  msg.textContent = "Writing the current song to the file…";
+  const r = await fetch("/api/streaming/file/write", {method: "POST"});
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) { msg.textContent = d.detail || "Could not write the file."; return; }
+  msg.textContent = d.ok
+    ? "Written to " + d.path + " — check the encoder, it should publish it shortly."
+    : (d.detail || "Nothing written — is there a song on air?");
+  loadStreaming();
+}
+
+async function testStreaming() {
+  const msg = document.getElementById("st-msg");
+  msg.textContent = "Sending a test title…";
+  const r = await fetch("/api/streaming/test", {method: "POST"});
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) { msg.textContent = d.detail || "Test failed."; return; }
+  if (!d.sent) { msg.textContent = d.detail || "Nothing sent."; return; }
+  msg.textContent = d.ok
+    ? "Test sent — check the player; the stream host accepts titles from us."
+    : "Sent, but the host refused it: " + (d.detail || "unknown error");
+  loadStreaming();
+}
+
 loadDirs();
+loadStreaming();
 loadLstDir();
 loadUsers();
 loadDevices();

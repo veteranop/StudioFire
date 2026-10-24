@@ -7,6 +7,51 @@ plain English a non-technical operator can understand.
 
 ## [Unreleased]
 
+### Added
+- **Now-playing file for the stream encoder (the song titles on the website).**
+  StudioFire now writes the song that is on air into a plain text file every time
+  the track changes. Point it at the file your streaming encoder already watches
+  — for KDPI that is BUTT on the stream PC — and the website player starts showing
+  song titles with nothing else to set up. Configure it under **Settings →
+  Streaming → Now-playing file**; use the full network path
+  (`\server\share\...`) rather than a drive letter, and press **Write the
+  current song now** to test it without waiting for the next track. The live
+  monitor shows the last title written and flags a failed write. If the file
+  cannot be written the station keeps playing and the monitor says why — nothing
+  about this can affect the audio. Accented names are simplified (Björk appears
+  as "Bjork") because the streaming server garbles anything else.
+- **SoundExchange royalty report.** StudioFire can now build the monthly report a
+  station owes SoundExchange for its internet stream, from the records it already
+  keeps of what actually aired. Run it for a calendar month and it writes three
+  files: the report itself (service, artist, title, album, ISRC, label and
+  performances, in the order the regulation asks for them), a full track log —
+  every song with the exact time it started, kept as the evidence behind the
+  report — and a short warnings file listing anything it could not fill in.
+  Advertisements, station IDs, PSAs and underwriting are left out by design. Two
+  things it will never invent: it does not guess a song's ISRC or record label,
+  and it does not use "how many times it played" in place of "how many people
+  heard it" — the listener totals have to come from the streaming host.
+  Command: `python -m services.core.sx_report --month 2026-09 --out reports`.
+- **Song titles can be published to the stream.** StudioFire can send the
+  on-air artist and title to the streaming server as each track starts, so the
+  website player shows what is playing and the streaming host has a record of
+  what it carried. **Off by default**, and it needs the streaming host's admin
+  credentials before it can do anything; it never blocks or delays audio.
+  Accented names are simplified before they go out (Björk appears as
+  "Bjork") because the streaming server garbles anything else — a plain
+  spelling reads correctly, a mangled one does not.
+- **Streaming settings and monitor (Settings → Streaming).** A new section where
+  the target streaming address, the mount name and the stream host's
+  username/password are entered once, with a switch to turn the title sending on
+  or off. Below it, a **live monitor** answers the only question that matters:
+  what a listener actually sees. It shows the last title StudioFire sent and
+  whether it succeeded, what the streaming host reports, what a listener's player
+  receives, and how many people are listening right now — refreshed every few
+  seconds. A **Send a test title** button pushes one test through the same path a
+  real track uses, so "does it work?" is answered without waiting for a song
+  change. The password is write-only: it is never shown back on screen.
+
+
 ## [1.5.1] - 2026-10-05
 
 ### Added
