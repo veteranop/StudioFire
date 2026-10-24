@@ -12,6 +12,19 @@
 #define AppVersion Trim(FileRead(VerHandle))
 #expr FileClose(VerHandle)
 
+; --- Authenticode code signing (OPT-IN) ------------------------------------
+; An unsigned setup .exe triggers SmartScreen ("Windows protected your PC" /
+; "Unknown publisher"), so customer installs look like malware. Signing needs a
+; real OV/EV code-signing certificate; this build stays unsigned unless a
+; SignTool is defined on the ISCC command line:
+;
+;   set STUDIOFIRE_SIGN_TOOL=studiofire
+;   ISCC /Sstudiofire="signtool.exe sign /fd sha256 /tr http://timestamp.digicert.com /td sha256 /f path\to\cert.pfx /p %CERT_PW% $f" installer\StudioFire.iss
+;
+; $f is substituted by Inno with each file to sign (the setup .exe and, with
+; SignedUninstaller=yes, the generated uninstaller). Details: installer\README.md.
+#define SignToolName GetEnv("STUDIOFIRE_SIGN_TOOL")
+
 [Setup]
 AppId={{7E1C33F4-5B8A-4B0E-9C3D-2A9A1F0D5B21}
 AppName={#AppName}
@@ -28,6 +41,15 @@ Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
 UninstallDisplayName={#AppName} radio automation
+
+; Signing only kicks in when a SignTool was supplied on the ISCC command line
+; (see the #define SignToolName block above); otherwise the build is unchanged.
+#if SignToolName != ""
+SignTool={#SignToolName}
+SignedUninstaller=yes
+SignToolRetryCount=3
+SignToolMinimumTimeBetween=2000
+#endif
 
 [Tasks]
 Name: "services"; Description: "Install as auto-restarting Windows services (production on-air PC — starts at boot, self-heals on crash)"; Flags: unchecked
