@@ -676,6 +676,15 @@ function renderStreaming(d) {
     verdict = "On, but not configured yet — add the target URL and the " +
               "username/password your stream host gave you.";
     cls = "tile-red-text";
+  } else if (p.state === "error") {
+    // the push is the thing that matters: if the host refused us, say that
+    // first and name the likely cause, not the state of the mount
+    const why = (p.error || "unknown error");
+    verdict = /401|auth/i.test(why)
+      ? "The stream host refused the update — it did not accept the " +
+        "username/password. Everything else is working: the host answers us."
+      : "The stream host refused the last update: " + why;
+    cls = "tile-red-text";
   } else if (!pr.ok) {
     verdict = "Cannot reach the stream host" +
       (pr.error ? " (" + pr.error + ")" : "") + " — nothing is being published.";
