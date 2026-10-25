@@ -110,6 +110,24 @@ published-releases channel by accident.
    is newer. It then runs the whole test suite, turns `[Unreleased]` into
    `[1.1.0] - <date>`, writes `VERSION`, commits, tags `v1.1.0`, pushes,
    and publishes the GitHub release (it needs the `gh` CLI, logged in).
+5. **Same-day docs sweep — the manual and the website rot independently of the repo.**
+   Nothing in `git status` or the test suite notices either one.
+   - `git fetch` + `git checkout v2-dev && git merge --ff-only main && git push`
+     so the long-lived branch carries the release.
+   - `gh release view vX.Y.Z --json assets` — if `assets` is empty the marketing
+     download button has no binary behind it. Releases v1.1.0→v1.6.0 are
+     source-only; do not let any page promise an installer until one is attached.
+   - Operator's Guide: bump `GUIDE_VERSION` **and re-read** the operator-visible
+     sections — a guide at the right version with stale content is the failure mode
+     that actually happened (v1.6.0 shipped streaming docs but no SoundExchange
+     section, and mislabelled `.200` as the on-air PC). Rebuild, then open the PDF
+     and look at the changed pages.
+   - studiofire.io (`VeteranOp/Active-Revenue/StudioFire-Website/`): rewrite the
+     "What's new" cards; the version labels fill themselves from the GitHub API.
+     Deploy with `deploy_studiofire_io.py`, then prove it with
+     `diff -q` between the fetched public page and `site/index.html` — a `curl`
+     without a full Chrome UA + `Accept: text/html` gets a ModSecurity 406 and
+     looks like the site is down.
 
 The `VERSION` file inside a tagged release **must** match its tag. The
 updater refuses a release where they differ, so always release with the
