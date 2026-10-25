@@ -53,3 +53,13 @@ config/drive-map.bat
 
 # local config backups (may contain this machine's paths)
 config/*.bak-*
+
+# local ops notes, client feature-request scratch and script indexes (this repo is PUBLIC)
+lessons_learned.md
+Update_Notes.txt
+*-script-index.md
+_inbox/
+_deploy/
+
+# editor state
+.vscode/
