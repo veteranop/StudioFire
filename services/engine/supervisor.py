@@ -401,11 +401,17 @@ class EngineSupervisor:
         if reason not in ("eof", "error"):
             return                       # 'stop'/'quit'/'redirect': we did it
         path = deck.path
+        # the NAS source behind this cache copy (feeder/insert entries carry
+        # it) — so a decode failure names the actual song, not an opaque cache
+        # hash like precache\52f18e826ca534a4.mp3 that no operator can action
+        # (KDPI 2026-10: same bad file retried ~every rotation lap, unnamed)
+        src = (deck.entry or {}).get("src")
         self._journal.append("track_end", path=path, reason=reason,
-                             error=msg.get("file_error"))
+                             error=msg.get("file_error"),
+                             **({"src": src} if src else {}))
         if reason == "error":
-            log.error("decode/play error on deck %s %s: %s", deck.name, path,
-                      msg.get("file_error"))
+            log.error("decode/play error on deck %s %s (source: %s): %s",
+                      deck.name, path, src or "unknown", msg.get("file_error"))
         role = deck.role
         if role == "fading":             # the old song's tail finished
             deck.reset()

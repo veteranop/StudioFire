@@ -4,6 +4,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}{{ station }}{% endblock %}</title>
+  <link rel="icon" type="image/png" sizes="256x256" href="/static/sf_icon_dark.png?v={{ asset_v }}">
+  <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png?v={{ asset_v }}">
+  <link rel="shortcut icon" href="/static/sf_icon_dark.ico?v={{ asset_v }}">
+  <link rel="apple-touch-icon" href="/static/sf_icon_dark.png?v={{ asset_v }}">
   <link rel="stylesheet" href="/static/style.css?v={{ asset_v }}">
   {% if ga_id %}
   <!-- GA4 product telemetry (see core/config.py); async + fail-silent, so an

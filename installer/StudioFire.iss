@@ -40,6 +40,9 @@ OutputBaseFilename=StudioFire-Setup-{#AppVersion}
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
+; brand icon for the installer itself and every shortcut it creates
+SetupIconFile=..\web\static\sf_icon_dark.ico
+UninstallDisplayIcon={app}\web\static\sf_icon_dark.ico
 UninstallDisplayName={#AppName} radio automation
 
 ; Signing only kicks in when a SignTool was supplied on the ISCC command line
@@ -54,12 +57,14 @@ SignToolMinimumTimeBetween=2000
 [Tasks]
 Name: "services"; Description: "Install as auto-restarting Windows services (production on-air PC — starts at boot, self-heals on crash)"; Flags: unchecked
 Name: "firewall"; Description: "Open Windows Firewall port 8080 so DJs on the LAN can reach the web GUI"
+Name: "desktopicons"; Description: "Put Start StudioFire and Quit StudioFire shortcuts on the desktop"
 
 [Files]
 Source: "..\services\*"; DestDir: "{app}\services"; Flags: recursesubdirs ignoreversion; Excludes: "__pycache__\*"
 Source: "..\web\*"; DestDir: "{app}\web"; Flags: recursesubdirs ignoreversion
 Source: "..\scripts\*.py"; DestDir: "{app}\scripts"; Flags: ignoreversion; Excludes: "__pycache__\*"
 Source: "..\scripts\*.bat"; DestDir: "{app}\scripts"; Flags: ignoreversion
+Source: "..\scripts\*.ps1"; DestDir: "{app}\scripts"; Flags: ignoreversion
 Source: "..\start-all.bat"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\stop-all.bat"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\restart-all.bat"; DestDir: "{app}"; Flags: ignoreversion
@@ -87,11 +92,13 @@ Name: "{app}\logs"
 Name: "{app}\precache"
 
 [Icons]
-Name: "{autoprograms}\{#AppName}\Start {#AppName}"; Filename: "{app}\start-all.bat"; WorkingDir: "{app}"
-Name: "{autoprograms}\{#AppName}\Stop {#AppName}"; Filename: "{app}\stop-all.bat"; WorkingDir: "{app}"
-Name: "{autoprograms}\{#AppName}\Health check"; Filename: "{app}\healthcheck.bat"; WorkingDir: "{app}"
-Name: "{autoprograms}\{#AppName}\Update {#AppName} from GitHub"; Filename: "{app}\update.bat"; WorkingDir: "{app}"
-Name: "{autoprograms}\{#AppName}\{#AppName} web GUI"; Filename: "http://localhost:8080"
+Name: "{autoprograms}\{#AppName}\Start {#AppName}"; Filename: "{app}\start-all.bat"; WorkingDir: "{app}"; IconFilename: "{app}\web\static\sf_icon_dark.ico"
+Name: "{autoprograms}\{#AppName}\Stop {#AppName}"; Filename: "{app}\stop-all.bat"; WorkingDir: "{app}"; IconFilename: "{app}\web\static\sf_icon_dark.ico"
+Name: "{autoprograms}\{#AppName}\Health check"; Filename: "{app}\healthcheck.bat"; WorkingDir: "{app}"; IconFilename: "{app}\web\static\sf_icon_dark.ico"
+Name: "{autoprograms}\{#AppName}\Update {#AppName} from GitHub"; Filename: "{app}\update.bat"; WorkingDir: "{app}"; IconFilename: "{app}\web\static\sf_icon_dark.ico"
+Name: "{autoprograms}\{#AppName}\{#AppName} web GUI"; Filename: "http://localhost:8080"; IconFilename: "{app}\web\static\sf_icon_dark.ico"
+Name: "{commondesktop}\Start StudioFire"; Filename: "{app}\start-all.bat"; WorkingDir: "{app}"; IconFilename: "{app}\web\static\sf_icon_dark.ico"; Tasks: desktopicons
+Name: "{commondesktop}\Quit StudioFire"; Filename: "{app}\stop-all.bat"; WorkingDir: "{app}"; IconFilename: "{app}\web\static\sf_icon_dark.ico"; Tasks: desktopicons
 
 [Run]
 Filename: "netsh"; Parameters: "advfirewall firewall add rule name=""StudioFire Web"" dir=in action=allow protocol=TCP localport=8080"; Tasks: firewall; Flags: runhidden

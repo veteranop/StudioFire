@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#121722"/>
+      <stop offset="1" stop-color="#0b0d12"/>
+    </linearGradient>
+    <linearGradient id="barShort" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#6d88ff"/>
+      <stop offset="1" stop-color="#3f5be0"/>
+    </linearGradient>
+    <linearGradient id="barTall" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#31205f"/>
+      <stop offset="1" stop-color="#1d1240"/>
+    </linearGradient>
+    <linearGradient id="flame" x1="0.3" y1="0" x2="0.7" y2="1">
+      <stop offset="0" stop-color="#ff9a4d"/>
+      <stop offset="0.45" stop-color="#ff6a1a"/>
+      <stop offset="1" stop-color="#e2491f"/>
+    </linearGradient>
+
+    <!-- the eighth note is punched THROUGH the flame so the tile shows behind it -->
+    <mask id="noteCut">
+      <rect x="0" y="0" width="1024" height="1024" fill="#ffffff"/>
+      <g fill="#000000">
+        <ellipse cx="636" cy="662" rx="45" ry="33" transform="rotate(-15 636 662)"/>
+        <rect x="673" y="472" width="15" height="212" rx="7.5"/>
+        <path d="M 688 472 C 728 484 754 510 750 550 C 738 516 718 496 688 486 Z"/>
+      </g>
+    </mask>
+  </defs>
+
+  <rect x="0" y="0" width="1024" height="1024" rx="210" ry="210" fill="url(#tile)"/>
+
+  <!-- equalizer bars: short in front, tall behind -->
+  <rect x="380" y="356" width="132" height="432" rx="66" ry="66"
+        fill="url(#barTall)" stroke="#7c5cff" stroke-width="7"/>
+  <rect x="248" y="492" width="132" height="296" rx="66" ry="66" fill="url(#barShort)"/>
+
+  <!-- flame, with the note cut out -->
+  <path mask="url(#noteCut)" fill="url(#flame)" d="
+      M 662 300
+      C 692 378 730 414 762 468
+      C 800 532 812 578 812 618
+      C 812 710 748 782 660 782
+      C 572 782 508 710 508 618
+      C 508 558 534 506 570 462
+      C 578 510 596 538 620 550
+      C 636 550 648 538 652 518
+      C 660 456 654 364 662 300 Z"/>
+</svg>
