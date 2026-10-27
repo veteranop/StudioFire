@@ -7,6 +7,8 @@ plain English a non-technical operator can understand.
 
 ## [Unreleased]
 
+## [1.6.1] - 2026-10-27
+
 ### Added
 - **A proper StudioFire icon, everywhere.** StudioFire now has a dark-theme logo
   icon — on the app window and taskbar, as the web favicon and the phone/tablet
