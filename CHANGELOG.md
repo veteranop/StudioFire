@@ -7,6 +7,33 @@ plain English a non-technical operator can understand.
 
 ## [Unreleased]
 
+### Added
+- **A proper StudioFire icon, everywhere.** StudioFire now has a dark-theme logo
+  icon — on the app window and taskbar, as the web favicon and the phone/tablet
+  home-screen icon, in the Start menu, on the installer itself and on every
+  shortcut the installer creates. An existing install picks it up for app
+  shortcuts the next time StudioFire is updated; the installer creates them fresh.
+- **Start StudioFire and Quit StudioFire shortcuts on the desktop.** The desktop
+  can now carry two shortcuts, both wearing the StudioFire icon. **Start
+  StudioFire** brings the playout stack up and is safe to press if it is already
+  running. **Quit StudioFire** stops the stack — the station goes off air until
+  somebody starts it again, so it is deliberately a two-step, plain-named icon
+  rather than something buried in a menu. The installer offers both as an optional
+  task; on an existing install, run
+  `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\make-desktop-icons.ps1`
+  once (add `-AllUsers` for the shared desktop, `-Remove` to take them off).
+
+### Changed
+- **The play journal names the source file.** When a track ends or fails, the
+  journal now records the library path on the NAS as well as the local
+  pre-cached copy. A song that will not play can be named in plain words
+  instead of guessed at from an opaque hash.
+- **Documentation caught up with the software.** The manual built into the app
+  (Help) now covers the now-playing file and song titles on the website player,
+  the monthly SoundExchange report of use, and the two desktop shortcuts — with
+  the warning that one of them stops the station. The Operator's Guide carries
+  the same material.
+
 ## [1.6.0] - 2026-10-24
 
 ### Added

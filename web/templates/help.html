@@ -53,6 +53,8 @@
     <a href="#spots">Spots, IDs &amp; underwriters</a>
     <a href="#schedule">The schedule</a>
     <a href="#reports">Reports — what aired</a>
+    <a href="#streaming">Song titles &amp; streaming</a>
+    <a href="#royalty">The royalty report</a>
     <a href="#settings">Settings</a>
     <a href="#cleanup">Duplicate cleanup</a>
     <a href="#whats-new">What's new</a>
@@ -72,6 +74,17 @@
       these pages will make {{ station }} go silent — the worst case is you change
       what's playing next. When in doubt, look at the green <strong>ON AIR</strong>
       light on the On Air screen. Green means you're fine.
+    </div>
+
+    <div class="help-callout warn">
+      <strong>The two desktop icons — one starts the station, one stops it.</strong>
+      The computer's desktop now has <strong>Start StudioFire</strong> and
+      <strong>Quit StudioFire</strong> shortcuts, both with the StudioFire icon.
+      <em>Start</em> is safe to double-click if the station is already running — it
+      simply makes sure everything is up. <strong>Quit StudioFire stops the
+      station</strong>: no music goes to the transmitter until someone starts it
+      again. Do not click Quit unless VeteranOp has asked you to, and never use it
+      while the station is meant to be on air.
     </div>
 
     <h2 id="onair">The On Air screen</h2>
@@ -137,6 +150,73 @@
       hand to an underwriter. This is the record you'd use to show that a credit,
       ID or PSA really aired.</p>
 
+    <h2 id="streaming">Song titles &amp; streaming</h2>
+    <p>The player on the station website can show the song that is playing. StudioFire
+      makes that happen by writing the current artist and title into a small text
+      file every time the track changes; your streaming encoder reads that file
+      and sends it to the stream host. Nothing is typed by hand.</p>
+    <p>You set it up once, in <strong>Settings → Streaming &amp; song metadata</strong>:</p>
+    <ol>
+      <li>In the <strong>Now-playing file</strong> box, type the <em>full path</em> of
+        the file your encoder watches — for example
+        <code>C:\StudioFire\Current\CurrentSong.txt</code>. Always the whole path,
+        never just a drive letter like <code>Z:</code>.</li>
+      <li>Press <span class="help-key">Save</span>. StudioFire checks straight away
+        that it can write to that file and tells you if it can't, so a wrong path is
+        caught in daylight instead of at 3 a.m.</li>
+      <li>Press <span class="help-key">Write the current song now</span> to test it
+        without waiting for the next song, then watch the <strong>Live monitor</strong>
+        underneath — within a few seconds it should show what is on air, and the
+        website player should show the same thing.</li>
+    </ol>
+    <table>
+      <tr><th>What you see</th><th>What it means</th></tr>
+      <tr><td><strong>✓ written</strong> with a time</td><td>The file was updated
+        with the song now on air. All good.</td></tr>
+      <tr><td><strong>⚠</strong> (red)</td><td>The file could not be written — usually
+        a wrong path, or a shared folder that is offline. The station is still on
+        air; fix the path when you can and call support if it keeps failing.</td></tr>
+      <tr><td><strong>Listener sees</strong></td><td>What a listener is actually being
+        shown right now, straight from the stream host.</td></tr>
+    </table>
+    <div class="help-callout warn">
+      <strong>None of this can affect the audio.</strong> The song title is a small
+      text file updated after each track starts. If it can't be written the music
+      keeps playing and the monitor simply tells you why. Accented names are
+      simplified on the way out (Björk is sent as "Bjork") because the streaming
+      server garbles anything else.
+    </div>
+    <p>The optional switch <strong>Send the on-air title to the stream</strong> is a
+      second way to publish titles, direct to the stream host. It stays off until an
+      admin turns it on and supplies the stream host's username and password — if
+      your encoder already watches the file, you don't need it.</p>
+
+    <h2 id="royalty">The royalty report — SoundExchange</h2>
+    <p>The station is on FM <em>and</em> streamed on the internet, and the internet
+      stream adds one regular piece of paperwork: a <strong>Report of Use</strong>
+      for <strong>SoundExchange</strong>, listing every song that went out on the
+      stream during the month. StudioFire builds it from the air log it already
+      keeps — nothing has to be typed up by hand.</p>
+    <ul>
+      <li>A month is chosen and the report is run by VeteranOp (or whoever looks
+        after the server). You don't run it from these pages.</li>
+      <li>You get <strong>three files</strong>: the report itself (service, artist,
+        title, album, ISRC, label and performances), a <strong>track log</strong>
+        with the exact time every song started — the evidence behind the report —
+        and a short <strong>warnings</strong> list of anything it could not fill in.</li>
+      <li>Reports are due <strong>45 days after the month ends</strong> — August is
+        due by 14 October. Put it on the same monthly list as the playlist backup.</li>
+      <li>Keep a copy: the regulation asks for three years.</li>
+    </ul>
+    <div class="help-callout">
+      <strong>What it leaves out, and will never invent.</strong> Advertisements,
+      station IDs, PSAs and underwriting are not in the report — they aren't
+      licensed sound recordings. It will never guess a song's ISRC or record label
+      (those come from the tags inside each song file, and stay blank when a file
+      has no tag), and it never uses "how many times it played" in place of "how
+      many people heard it". That listener total has to come from the stream host.
+    </div>
+
     <h2 id="settings">Settings</h2>
     <p>Everything you configure lives under <strong>Settings</strong>. The common
       items:</p>
@@ -147,6 +227,12 @@
       <tr><td>Folders</td><td>Where each kind of audio lives (shows, IDs, PSAs,
         jingles, underwriters).</td></tr>
       <tr><td>Clock</td><td>12-hour or 24-hour display.</td></tr>
+      <tr><td>Streaming &amp; song metadata</td><td>The song titles on the website
+        player, and the live monitor of what listeners are shown. See
+        <a href="#streaming">Song titles &amp; streaming</a>.</td></tr>
+      <tr><td>Station equipment</td><td>Pings the studio gear and shows green
+        (reachable) or red (not responding). Red is your cue to call support with
+        the name of the device.</td></tr>
       <tr><td>Software updates</td><td>Installs new StudioFire versions. See the
         note below.</td></tr>
       <tr><td>Backup / restore</td><td>Save a copy of your setup, or restore
