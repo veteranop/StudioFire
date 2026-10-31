@@ -1409,14 +1409,16 @@ def register(app: FastAPI) -> None:
                         "timing": _timing(items),
                         "items": _with_inserts(items)}
             base = coredb.get_setting(conn, "active_playlist_id")
-            row = conn.execute("SELECT id, name FROM playlists WHERE id = ?",
-                               (int(base),)).fetchone() if base else None
+            row = conn.execute(
+                "SELECT id, name, shuffled_at FROM playlists WHERE id = ?",
+                (int(base),)).fetchone() if base else None
             if row is None:
                 return {"playlist": None, "items": [], "now_item_id": None,
                         "is_show": False, "timing": None}
             items = _fmt(pl.get_items(conn, row["id"]),
                          pl.item_durations(conn, row["id"]))
-            return {"playlist": {"id": row["id"], "name": row["name"]},
+            return {"playlist": {"id": row["id"], "name": row["name"],
+                                 "shuffled_at": row["shuffled_at"]},
                     "is_show": False, "now_item_id": now_item_id,
                     "timing": _timing(items),
                     "items": _with_inserts(items)}
@@ -1481,7 +1483,8 @@ def register(app: FastAPI) -> None:
         pid = _active_pid(conn)
         ids = pl.shuffle_items(conn, pid)
         feeder.resync_rotation(conn)
-        return {"ok": True, "item_ids": ids}
+        return {"ok": True, "item_ids": ids,
+                "shuffled_at": pl.shuffled_at(conn, pid)}
 
     @app.post("/api/rotation/remove")
     def api_rotation_remove(body: dict, conn=Depends(get_conn),

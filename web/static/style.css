@@ -353,6 +353,16 @@ input {
 .daypick input { width: auto; margin: 0; }
 .rep-tag { background: #26374d; color: #bcd6ff; text-transform: capitalize; }
 .stop-tag { background: #4a3320; color: #f3c969; }
+.rot-shufflebadge {
+  font-size: .7rem; font-weight: 800; letter-spacing: .5px;
+  color: #0f1a12; background: #74d99a; padding: .12rem .45rem;
+  border-radius: 5px; vertical-align: middle;
+}
+.rot-shuffled-msg {
+  font-size: .82rem; font-weight: 700; color: #2c6e3c;
+  margin-left: .5rem;
+}
+
 .rot-showbadge {
   font-size: .7rem; font-weight: 800; letter-spacing: .5px;
   color: #fff; background: var(--red); padding: .12rem .45rem;

@@ -271,6 +271,16 @@ ALTER TABLE playlists ADD COLUMN source_path TEXT;
 -- fills it in the first time the song is cached for air).
 ALTER TABLE playlist_items ADD COLUMN duration_sec REAL;
 """),
+    (12, """
+-- When the running order last came from Shuffle (epoch seconds), NULL when it
+-- did not. The operator's complaint (John, 2026-10-28) was that shuffle looked
+-- like it did nothing: the reorder is invisible in a list you have already
+-- read, and the button gave no feedback. Persisting it lets the On Air card
+-- and the playlist page show "Shuffled" next to the name, so the state is
+-- visible after a reload instead of only at the instant it was pressed.
+-- Cleared by a manual reorder: the order then came from the operator, not us.
+ALTER TABLE playlists ADD COLUMN shuffled_at REAL;
+"""),
 ]
 
 SCHEMA_VERSION = MIGRATIONS[-1][0]

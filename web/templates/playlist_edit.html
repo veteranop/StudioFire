@@ -16,7 +16,10 @@
 {% block content %}
 <div class="grid2">
   <div class="card">
-    <h1>{{ playlist.name }}</h1>
+    <h1>{{ playlist.name }}
+      <span id="pl-shuffled" class="rot-shufflebadge"
+            {% if not playlist.shuffled_at %}style="display:none"{% endif %}
+            title="The running order came from Shuffle">🔀 Shuffled</span></h1>
     <p id="pl-stats" class="pl-stats">…</p>
     {% if playlist.source_path %}
     <p class="muted" title="Every change on this page saves straight back to this file.">
@@ -52,6 +55,7 @@
       <button class="btn btn-green btn-big" onclick="activateThis()">
         ▶ PUT ON AIR</button>
       <button class="btn" onclick="shuffleThis()" title="Play this playlist in a random order">🔀 Shuffle</button>
+      <span id="pl-shuffled-msg" class="rot-shuffled-msg"></span>
       <button class="btn" onclick="duplicateThis()">Duplicate</button>
       <button class="btn btn-red" onclick="deleteThis()">Delete playlist</button>
     </div>
@@ -213,6 +217,15 @@ async function shuffleThis() {
   const r = await fetch(`/api/playlists/${PID}/shuffle`, {method: "POST"});
   if (!r.ok) { alert((await r.json()).detail || "Could not shuffle"); return; }
   const d = await r.json();
+  // Show that it happened: a badge that stays, and a sentence that fades.
+  const badge = document.getElementById("pl-shuffled");
+  if (badge) badge.style.display = "";
+  const msg = document.getElementById("pl-shuffled-msg");
+  if (msg) {
+    msg.textContent = "✓ Shuffled — the running order is now random.";
+    clearTimeout(window._plShuffleMsgT);
+    window._plShuffleMsgT = setTimeout(() => { msg.textContent = ""; }, 8000);
+  }
   // redraw the list in the new order without reloading the page
   const byId = {};
   for (const li of document.querySelectorAll("#items li[data-id]"))

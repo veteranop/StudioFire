@@ -178,6 +178,9 @@
   <div class="card">
     <div class="row" style="justify-content:space-between;margin:0 0 .4rem">
       <h2 id="rot-title" style="margin:0">Now playing list</h2>
+      <span id="rot-shuffled" class="rot-shufflebadge" style="display:none"
+            title="The running order on air came from Shuffle">🔀 Shuffled</span>
+      <span id="rot-shuffled-msg" class="rot-shuffled-msg"></span>
       <button class="btn btn-sm" id="rot-shuffle" onclick="shuffleRotation()"
               title="Play this playlist in a random order" disabled>🔀 Shuffle</button>
     </div>
@@ -822,6 +825,17 @@ async function refreshRotation() {
       b.className = "rot-showbadge"; b.textContent = "SHOW ON AIR";
       t.append(" ", b);
     }
+    // The order on air came from Shuffle - say so, and keep saying it after a
+    // reload. John, 2026-10-28: "it usually doesn't show me a box ... so I
+    // don't think it works".
+    const sBadge = document.getElementById("rot-shuffled");
+    if (sBadge) {
+      sBadge.style.display = (d.playlist && d.playlist.shuffled_at) ? "" : "none";
+      if (d.playlist && d.playlist.shuffled_at) {
+        sBadge.title = "The running order on air came from Shuffle at " +
+          new Date(d.playlist.shuffled_at * 1000).toLocaleTimeString();
+      }
+    }
     rotItems = d.items; rotNowId = d.now_item_id;
     rotPid = d.playlist ? d.playlist.id : null;
     // Shuffle edits the base rotation permanently, so it's off while a show is
@@ -928,12 +942,25 @@ function renderRotation() {
 }
 async function shuffleRotation() {
   if (rotIsShow || !rotPid) return;   // button is disabled in these cases
-  if (!confirm("Shuffle this playlist into a random order?")) return;
+  if (!confirm("Shuffle this playlist into a random order?\n\n" +
+               "The order on air changes after the song that is playing."))
+    return;
   const r = await fetch("/api/rotation/shuffle", {method: "POST"});
   if (!r.ok) {
     alert((await r.json().catch(() => ({}))).detail || "Could not shuffle");
     return;
   }
+  const d = await r.json().catch(() => ({}));
+  // Say it happened, in words, next to the playlist name - an icon alone is
+  // what he already could not tell apart from nothing happening.
+  const msg = document.getElementById("rot-shuffled-msg");
+  if (msg) {
+    msg.textContent = "✓ Shuffled — the running order is now random.";
+    clearTimeout(window._rotShuffleMsgT);
+    window._rotShuffleMsgT = setTimeout(() => { msg.textContent = ""; }, 8000);
+  }
+  const badge = document.getElementById("rot-shuffled");
+  if (badge) badge.style.display = "";
   rotSig = "";            // force a redraw in the new order
   refreshRotation();
 }

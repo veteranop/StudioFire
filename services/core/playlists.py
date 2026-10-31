@@ -434,8 +434,10 @@ def reorder_items(conn: sqlite3.Connection, pid: int,
                 "UPDATE playlist_items SET position = ? "
                 "WHERE id = ? AND playlist_id = ?", (pos, item_id, pid))
         _renumber(conn, pid)
-        conn.execute("UPDATE playlists SET updated_at = ? WHERE id = ?",
-                     (time.time(), pid))
+        # A manual reorder means the order is the operator's, not ours — the
+        # "Shuffled" badge must stop claiming otherwise.
+        conn.execute("UPDATE playlists SET updated_at = ?, shuffled_at = NULL "
+                     "WHERE id = ?", (time.time(), pid))
 
 
 def shuffle_items(conn: sqlite3.Connection, pid: int,
@@ -443,12 +445,28 @@ def shuffle_items(conn: sqlite3.Connection, pid: int,
     """Randomly reorder a playlist's items (the operator's Shuffle button) and
     return the new item-id order. Goes through reorder_items, so the DB order
     and the .lst mirror stay exactly in step. A playlist of 0 or 1 items is
-    left as-is (there is nothing to shuffle)."""
+    left as-is (there is nothing to shuffle).
+
+    Stamps `shuffled_at` so the UI can SHOW that the order came from a shuffle
+    (John, 2026-10-28: "it usually doesn't show me a box ... so I don't think it
+    works"). A one-item playlist is stamped too: the operator pressed the
+    button and is entitled to see that it registered.
+    """
     ids = [i["id"] for i in get_items(conn, pid)]
     if len(ids) > 1:
         (rng or random).shuffle(ids)
         reorder_items(conn, pid, ids)
+    with conn:
+        conn.execute("UPDATE playlists SET shuffled_at = ? WHERE id = ?",
+                     (time.time(), pid))
     return ids
+
+
+def shuffled_at(conn: sqlite3.Connection, pid: int):
+    """When this playlist's order last came from Shuffle, or None."""
+    row = conn.execute("SELECT shuffled_at FROM playlists WHERE id = ?",
+                       (pid,)).fetchone()
+    return row["shuffled_at"] if row else None
 
 
 def _renumber(conn: sqlite3.Connection, pid: int) -> None:
@@ -778,7 +796,8 @@ def register(app: FastAPI) -> None:
         _playlist_or_404(conn, pid)
         ids = shuffle_items(conn, pid)
         _sync(conn, pid)          # the .lst file follows the new order
-        return {"ok": True, "item_ids": ids}
+        return {"ok": True, "item_ids": ids,
+                "shuffled_at": shuffled_at(conn, pid)}
 
     def _music_root() -> str:
         root = (app.state.cfg.get("nas_music_root") or "").strip()
