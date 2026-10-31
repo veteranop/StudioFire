@@ -114,6 +114,16 @@
       <small class="muted" id="st-pass-hint">Leave blank to keep the saved one</small></label>
   </div>
   <div class="row" style="flex-wrap:wrap;gap:.6rem">
+    <label style="flex:1;min-width:320px">What the file says (the song line)
+      <input id="st-npformat" autocomplete="off"
+             placeholder="{artist} | {title} | {album} | {label} | {isrc}">
+      <small class="muted">Leave blank for the default. Fields: {artist},
+        {title}, {album}, {label}, {isrc}. Your stream host parses this line
+        to build its reporting, so keep the order identical on every song and
+        leave a missing value as an empty slot. Listeners see this too, so
+        change it only when your host asks.</small></label>
+  </div>
+  <div class="row" style="flex-wrap:wrap;gap:.6rem">
     <label style="flex:1;min-width:320px">Now-playing file (for the stream encoder)
       <input id="st-npfile" autocomplete="off"
              placeholder="\\192.168.6.222\StudioFire\...\Current\CurrentSong.txt">
@@ -769,6 +779,8 @@ async function loadStreaming() {
     document.getElementById("st-mount").value = d.mount || "/live";
     document.getElementById("st-user").value = d.user || "";
     document.getElementById("st-npfile").value = d.np_file || "";
+    const fmtEl = document.getElementById("st-npformat");
+    if (fmtEl) fmtEl.value = d.np_format || "";
     const hint = document.getElementById("st-pass-hint");
     hint.textContent = d.credential_set
       ? "Saved — leave blank to keep it" : "Not set yet";
@@ -787,6 +799,7 @@ async function saveStreaming() {
     user: document.getElementById("st-user").value,
     password: document.getElementById("st-pass").value,
     np_file: document.getElementById("st-npfile").value,
+    np_format: document.getElementById("st-npformat").value,
   };
   const r = await fetch("/api/streaming/settings", {
     method: "POST", headers: {"Content-Type": "application/json"},

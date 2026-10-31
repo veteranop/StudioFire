@@ -27,9 +27,22 @@ DESIGN LAWS
   manifest writer).
 * **ASCII-folded.** The consumer chain is a legacy encoder into Icecast, which
   was measured mangling UTF-8 (`Björk` → `BjÃ¶rk`). Folding keeps what renders
-  correct; a missing umlaut beats mojibake on a live station.
+  correct; a missing umlaut beats mojibake on a live station. (StreamGuys showed
+  UTF-8 surviving on their own /sg-test mount on 2026-10-30, but that is display
+  only — it is NOT proven inside the SGreports export CSV, so folding stays until
+  that answer lands. Relaxing it is a one-line change to `fold`.)
 * **Independent of the HTTP push.** This works with `nowplaying_push.enabled`
   false — which is the configuration the station actually wants.
+* **The line is a FORMAT CONTRACT, not a display string (2026-10-30).** The
+  stream vendor parses the title into report fields, so the shape is a template
+  held in the DB (`stream_np_format`, Settings → Streaming) rather than a
+  hard-coded f-string: default `{artist} | {title} | {album} | {label} | {isrc}`
+  (their recommended order — ISRC last because it is the field least likely to
+  be populated, so a missing one is a single blank trailing slot). Reverting to
+  the old `artist - title` line is one setting, not a release.
+  A `|` INSIDE a value would shift every downstream column and they will not
+  parse around it, so each field is sanitised before the join; a missing field
+  stays as an empty slot rather than being dropped, for the same reason.
 """
 
 from __future__ import annotations
@@ -37,15 +50,32 @@ from __future__ import annotations
 import logging
 import ntpath
 import os
+import string
 import time
 import unicodedata
 
-from . import db
+from . import db, tagfields
 
 log = logging.getLogger("core.nowplaying_file")
 
 # DB setting holding the file path (empty = feature off)
 K_PATH = "stream_np_file"
+
+# DB setting holding the format template ("" / missing = DEFAULT_FORMAT)
+K_FORMAT = "stream_np_format"
+
+# The two shapes that matter. PIPE is what the stream vendor asked for
+# (their field order + a trailing empty ISRC slot); LEGACY is the pre-1.6.2
+# `Artist - Title` line, kept as the one-setting revert.
+FORMAT_PIPE = "{artist} | {title} | {album} | {label} | {isrc}"
+FORMAT_LEGACY = "{artist} - {title}"
+DEFAULT_FORMAT = FORMAT_PIPE
+
+# Fields a template may use, and what an interior delimiter becomes. A pipe
+# inside an artist/title/album/label would shift every column downstream and
+# the vendor will not parse around it, so it is replaced, never escaped.
+TEMPLATE_FIELDS = ("artist", "title", "album", "label", "isrc")
+PIPE_SUB = "/"
 
 # Sources that count as "a song is on air". Spots / IDs / PSAs deliberately do
 # not overwrite the title — listeners should keep seeing the track, and the
@@ -63,6 +93,116 @@ def get_path(conn) -> str:
 
 def set_path(conn, path: str) -> None:
     db.set_setting(conn, K_PATH, (path or "").strip())
+
+
+def validate_format(template: str) -> str:
+    """Return the template to store, or raise ValueError.
+
+    Blank means "use the default". Only the five known placeholders are allowed:
+    a typo like `{titel}` would ship the literal text to the stream host on
+    every track change, and that string is what the public player shows.
+    """
+    tpl = (template or "").strip()
+    if not tpl:
+        return ""
+    try:
+        names = [n for _, n, _, _ in string.Formatter().parse(tpl) if n]
+    except ValueError as exc:
+        raise ValueError(f"format is not a valid template: {exc}")
+    unknown = sorted({n for n in names if n not in TEMPLATE_FIELDS})
+    if unknown:
+        raise ValueError(
+            "unknown field(s) " + ", ".join("{%s}" % n for n in unknown)
+            + " — allowed: " + ", ".join("{%s}" % n for n in TEMPLATE_FIELDS))
+    if not names:
+        raise ValueError("the format needs at least one field, "
+                         "e.g. {artist} | {title}")
+    return tpl
+
+
+def get_format(conn) -> str:
+    return (db.get_setting(conn, K_FORMAT) or "").strip() or DEFAULT_FORMAT
+
+
+def set_format(conn, template: str) -> None:
+    db.set_setting(conn, K_FORMAT, validate_format(template))
+
+
+def split_display(display: str) -> tuple:
+    """`Artist - Song` -> (artist, song). Em/en dash variants included.
+
+    The journal carries ONE joined title; when the feeder did not hand over the
+    separate fields (older journal lines, a startup re-write from play_history)
+    this recovers them. No separator => ("", whole string), so the title is
+    never lost.
+    """
+    text = (display or "").strip()
+    for sep in (" - ", " \u2014 ", " \u2013 "):
+        if sep in text:
+            artist, title = text.split(sep, 1)
+            return artist.strip(), title.strip()
+    return "", text
+
+
+def fields(ev) -> dict:
+    """The five report fields for one journal event.
+
+    Artist / title / album come from the event when the feeder carried them
+    (it does: `st["fed"]` holds artist/album/song); label and ISRC can only come
+    from the file's own tags, read off the LOCAL precache copy.
+    """
+    ev = ev or {}
+    display = str(ev.get("title") or "")
+    artist = str(ev.get("artist") or "").strip()
+    title = str(ev.get("song") or "").strip()
+    album = str(ev.get("album") or "").strip()
+    if not artist or not title:
+        a, t = split_display(display)
+        artist = artist or a
+        title = title or t
+    tags = tagfields.read(str(ev.get("path") or ""))
+    return {
+        "artist": artist,
+        "title": title,
+        "album": album or tags["album"],
+        "label": str(ev.get("label") or "").strip() or tags["label"],
+        "isrc": str(ev.get("isrc") or "").strip() or tags["isrc"],
+    }
+
+
+def _clean(value) -> str:
+    """One field, safe to sit between pipes: no delimiter, no newline.
+
+    A `|` inside a value shifts every column after it and the vendor will not
+    parse around it, so it is replaced (StreamGuys: "we'd rather you remove
+    pipes inside values"). Whitespace is collapsed because the line is read by
+    a parser, not a person.
+    """
+    text = " ".join(str(value or "").split())   # collapses CR, LF, tabs
+    text = text.replace(chr(0), " ").replace("|", PIPE_SUB)
+    return " ".join(text.split())
+
+
+def render(ev, template: str = None) -> str:
+    """Build the line the encoder publishes. Never raises.
+
+    Missing values keep their slot (`artist | title | album | |`): the vendor
+    prefers an empty field to a dropped delimiter, because that is what keeps
+    the columns aligned track to track.
+    """
+    try:
+        vals = {k: _clean(v) for k, v in fields(ev).items()}
+        if not any(vals.values()):
+            return ""
+        tpl = (template or "").strip() or DEFAULT_FORMAT
+        try:
+            line = tpl.format(**vals)
+        except Exception:
+            line = FORMAT_LEGACY.format(**vals)
+        return " ".join(str(line).split())
+    except Exception:                                    # never break a tick
+        log.warning("now-playing render failed (non-fatal)", exc_info=True)
+        return ""
 
 
 def fold(text: str) -> str:
@@ -152,7 +292,7 @@ def write_now_playing(conn, events, now_playing: str | None = None) -> bool:
         ev = choose(events, now_playing)
         if ev is None:
             return False
-        return write_text(path, ev.get("title") or "")
+        return write_text(path, render(ev, get_format(conn)))
     except Exception:
         log.warning("now-playing file step failed (non-fatal)", exc_info=True)
         return False
@@ -180,7 +320,12 @@ def write_current(conn, engine_status=None) -> bool:
         if now_playing and row["path"] != now_playing:
             # the history row is the best we have; still better than stale
             pass
-        return write_text(path, row["title"])
+        # A startup re-write has no journal event, so artist/title are
+        # recovered from the stored display string and the tags are read
+        # off the local precache copy.
+        return write_text(path, render({"title": row["title"],
+                                        "path": row["path"]},
+                                       get_format(conn)))
     except Exception:
         log.warning("now-playing file startup write failed (non-fatal)",
                     exc_info=True)

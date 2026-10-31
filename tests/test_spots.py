@@ -49,8 +49,12 @@ def main():
         rc = spots.get(conn, cid)
         at_top = dt.datetime(2026, 7, 4, 15, 0, 20).timestamp()
         check("clock due at :00", spots.due(rc, at_top))
-        off = dt.datetime(2026, 7, 4, 15, 31, 0).timestamp()
-        check("clock not due at :31", not spots.due(rc, off))
+        # :31 is one minute after the :30 mark, so under the grace window the
+        # rule is still (correctly) eligible; "off" is the first instant past it.
+        check("clock still due 1 min after a :30 mark",
+              spots.due(rc, dt.datetime(2026, 7, 4, 15, 31, 0).timestamp()))
+        off = dt.datetime(2026, 7, 4, 15, 37, 0).timestamp()
+        check("clock not due 7 min after a mark", not spots.due(rc, off))
         check("clock next fire is in the future",
               spots.next_fire_epoch(rc, off) > off)
 
@@ -70,6 +74,33 @@ def main():
         spots.mark_fired(conn, rc, at_top)
         check("clock not re-due same minute",
               not spots.due(spots.get(conn, cid), at_top + 5))
+
+        # ---- clock grace window (John, 2026-09-27: "a legal ID set to run at the
+        # top and bottom of the hour ... if something is already playing straight
+        # up or down, it won't play currently") ----
+        def at(h, m, s=0):
+            return dt.datetime(2026, 8, 5, h, m, s).timestamp()
+
+        gid = spots.add(conn, "dir_station_ids", "clock", clock_minutes="0")
+        check("clock due 4 min after the mark (a song ran across the hour)",
+              spots.due(spots.get(conn, gid), at(6, 4)))
+        check("clock never fires EARLY",
+              not spots.due(spots.get(conn, gid), at(5, 58)))
+        check("clock not due once the 5-minute grace has expired",
+              not spots.due(spots.get(conn, gid), at(6, 6)))
+        spots.mark_fired(conn, spots.get(conn, gid), at(6, 1))
+        check("the grace cannot re-fire a mark already played",
+              not spots.due(spots.get(conn, gid), at(6, 3)))
+        check("clock is due again at the next hour's mark",
+              spots.due(spots.get(conn, gid), at(7, 0)))
+
+        # a :59 mark seen just after the hour is minutes old, not 57 — the case
+        # minute-arithmetic modulo 60 gets backwards
+        sid = spots.add(conn, "dir_station_ids", "clock", clock_minutes="59")
+        check("a :59 mark is still eligible two minutes into the next hour",
+              spots.due(spots.get(conn, sid), at(6, 1)))
+        check("a :59 mark is NOT eligible at :57 of the same hour",
+              not spots.due(spots.get(conn, sid), at(6, 57)))
 
         check("describe interval", "every 15 min" in spots.describe(
             spots.get(conn, iid)))

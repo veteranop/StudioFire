@@ -99,6 +99,7 @@ def read_settings(conn) -> dict:
         "mount": db.get_setting(conn, K_MOUNT) or "/live",
         "transport": db.get_setting(conn, K_TRANSPORT) or "icecast",
         "np_file": db.get_setting(conn, nowplaying_file.K_PATH) or "",
+        "np_format": nowplaying_file.get_format(conn),
     }
 
 
@@ -318,6 +319,15 @@ def register(app) -> None:
         # probe the now-playing file BEFORE writing anything, so a bad path
         # cannot leave the rest of the section half-saved
         np_file = (body.get("np_file") or "").strip()
+        # the format template is validated before anything is stored:
+        # a bad placeholder would otherwise reach the stream on the next
+        # track change, and that string is public.
+        np_format = body.get("np_format")
+        if np_format is not None:
+            try:
+                np_format = nowplaying_file.validate_format(np_format)
+            except ValueError as exc:
+                raise HTTPException(400, str(exc))
         file_check = {"path": np_file, "ok": None, "error": None}
         if "np_file" in body:
             probe_ok, probe_err = _probe_file(np_file)
@@ -338,6 +348,8 @@ def register(app) -> None:
             save_secret(app.state.cfg, user, password)
         if "np_file" in body:
             nowplaying_file.set_path(conn, np_file)
+        if np_format is not None:
+            nowplaying_file.set_format(conn, np_format)
         res = reload_pusher(app, conn)
         log.info("streaming settings saved: enabled=%s endpoint=%r mount=%r "
                  "credential=%s np_file=%r", bool(body.get("enabled")), endpoint,

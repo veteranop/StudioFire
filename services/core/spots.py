@@ -49,6 +49,13 @@ TRIGGERS = ("interval", "clock", "once", "manual", "daily", "weekly")
 # How late a daily/weekly slot may still fire (tolerates missed ticks / short
 # outages), mirroring the On-Air schedule.
 CATCH_UP_MIN = 20
+# How long AFTER a clock mark a `clock` rule stays eligible. A song running
+# straight across the top of the hour used to mean the legal ID was simply
+# skipped (John, 2026-09-27: "if something is already playing straight up or
+# down, it won't play"), because a clock rule only fired inside the exact
+# minute of the mark. Same catch-up idea the daily/weekly slots have always
+# had. Never EARLY: a :00 item does not air at :58.
+CLOCK_GRACE_MIN = 5
 _DAY_ABBR = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
 
@@ -182,6 +189,37 @@ def _slot_due(rule: dict, now: float) -> bool:
     return 0 <= now - slot <= CATCH_UP_MIN * 60
 
 
+def clock_slot(now: float, mins: list, grace_min: int = CLOCK_GRACE_MIN):
+    """Epoch start of the clock mark `now` belongs to, else None.
+
+    A mark is eligible from its own minute until `grace_min` minutes after
+    it, so an item scheduled for :00 still airs when the programme is
+    mid-song at :00 and the next opening is :03. The MOST RECENT eligible
+    mark wins, and `due()` refuses a mark the rule has already fired for, so
+    the grace can never double-fire an item.
+
+    Hour crossing is worked on absolute timestamps (a :59 mark seen at :02 of
+    the next hour is 3 minutes old, not 57) — minute arithmetic modulo 60
+    silently inverts that case.
+    """
+    try:
+        grace = max(0, int(grace_min))
+    except (TypeError, ValueError):
+        grace = CLOCK_GRACE_MIN
+    cur = _dt.datetime.fromtimestamp(now).replace(second=0, microsecond=0)
+    best = None
+    for hour_offset in (0, -1):        # this hour, and the one before it
+        base = cur + _dt.timedelta(hours=hour_offset)
+        for m in mins:
+            if not 0 <= m <= 59:
+                continue
+            slot = base.replace(minute=m).timestamp()
+            age = now - slot
+            if 0 <= age <= grace * 60 and (best is None or slot > best):
+                best = slot
+    return best
+
+
 def due(rule: dict, now: float) -> bool:
     """Should this rule fire right now?"""
     t = rule["trigger"]
@@ -198,11 +236,10 @@ def due(rule: dict, now: float) -> bool:
         mins = _parse_minutes(rule["clock_minutes"])
         if not mins:
             return False
-        cur = _dt.datetime.fromtimestamp(now)
-        if cur.minute not in mins:
+        slot = clock_slot(now, mins)
+        if slot is None:
             return False
-        minute_start = cur.replace(second=0, microsecond=0).timestamp()
-        return lf is None or lf < minute_start  # not already fired this minute
+        return lf is None or lf < slot  # not already fired for this mark
     if t in ("daily", "weekly"):
         return _slot_due(rule, now)
     if t == "once":
