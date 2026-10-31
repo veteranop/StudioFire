@@ -7,6 +7,8 @@ plain English a non-technical operator can understand.
 
 ## [Unreleased]
 
+## [1.6.3] - 2026-10-30
+
 ### Added
 - **Shuffle now shows you that it happened.** Reordering a playlist into a random
   mix always worked, but the button gave no answer — so it looked like nothing
@@ -16,7 +18,6 @@ plain English a non-technical operator can understand.
   the playlist's own page until you drag the songs into a different order yourself.
   The new order still takes effect after the song that is playing, so nothing is cut
   off mid-song.
-
 
 ## [1.6.2] - 2026-10-30
 
