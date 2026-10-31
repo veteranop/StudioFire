@@ -7,6 +7,8 @@ plain English a non-technical operator can understand.
 
 ## [Unreleased]
 
+## [1.6.2] - 2026-10-30
+
 ### Added
 - **The song line StudioFire sends to the stream host now carries the report
   fields, not just artist and title.** The line used to be
@@ -32,7 +34,6 @@ plain English a non-technical operator can understand.
   goes out at the next opening. It never airs early, and it still airs only
   once per mark - a second item scheduled for the same mark cannot make the
   first one repeat.
-
 
 ## [1.6.1] - 2026-10-27
 
