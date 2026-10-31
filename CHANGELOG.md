@@ -7,6 +7,33 @@ plain English a non-technical operator can understand.
 
 ## [Unreleased]
 
+### Added
+- **The song line StudioFire sends to the stream host now carries the report
+  fields, not just artist and title.** The line used to be
+  `Artist - Title`; it is now
+  `Artist | Title | Album | Label | ISRC`, which is the shape your stream host
+  asks for when it builds the listening report it files for you. Listeners are
+  not shown the raw line: the host splits it and shows the artist and title as
+  before. Two rules worth knowing:
+  * An unknown value keeps its place as an empty slot rather than being
+    dropped, so the columns stay lined up from song to song. ISRC is often
+    empty (a small share of the library carries it) and that is expected.
+  * A `|` inside a song title is replaced with `/` before sending, because it
+    would otherwise push everything after it into the wrong column.
+  The line is editable under **Settings > Streaming > What the file says**, and
+  leaving it blank restores the default. Setting it to
+  `{artist} - {title}` puts the old line back exactly, without a reinstall.
+
+### Fixed
+- **A legal ID or top-of-hour item is no longer skipped when a song runs
+  straight across the hour.** Items set to run at a clock minute used to be
+  eligible for only that one minute, so if the programme was mid-song the item
+  never went out. It now stays eligible for **five minutes after** its mark and
+  goes out at the next opening. It never airs early, and it still airs only
+  once per mark - a second item scheduled for the same mark cannot make the
+  first one repeat.
+
+
 ## [1.6.1] - 2026-10-27
 
 ### Added
