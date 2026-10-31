@@ -646,6 +646,12 @@ def main():
         check("still on air after shuffle (re-synced, not dead)",
               engine.status().get("now_playing")
               and not engine.status().get("emergency_mode"))
+        # the response tells the page WHEN, and the poll carries it back, so the
+        # badge survives a reload instead of only the instant of the click
+        check("rotation shuffle reports when it happened",
+              bool(r.json().get("shuffled_at")))
+        check("rotation payload carries the shuffled state",
+              client.get("/api/rotation").json()["playlist"].get("shuffled_at"))
 
         # remove a song that isn't the one playing -> saved + re-synced
         now_item = client.get("/api/rotation").json()["now_item_id"]

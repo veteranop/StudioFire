@@ -85,6 +85,15 @@ def main():
     solo = pl.create_playlist(conn, "Solo Song")
     only = pl.add_item(conn, solo, "file", r"C:\music\only.mp3", "only")
     check("one-item shuffle is a no-op", pl.shuffle_items(conn, solo) == [only])
+
+    # ---- the shuffle must be VISIBLE afterwards (John, 2026-10-28: the button
+    # "usually doesn't show me a box ... so I don't think it works") ----
+    pl.shuffle_items(conn, sp, rng=_rnd.Random(4321))
+    check("shuffle records when it happened, so the UI can show it",
+          pl.shuffled_at(conn, sp) is not None)
+    pl.reorder_items(conn, sp, [i["id"] for i in pl.get_items(conn, sp)][::-1])
+    check("a manual reorder clears the shuffled marker (order is the operator's)",
+          pl.shuffled_at(conn, sp) is None)
     empty = pl.create_playlist(conn, "Empty Shuffle")
     check("empty shuffle returns []", pl.shuffle_items(conn, empty) == [])
 
