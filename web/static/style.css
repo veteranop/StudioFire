@@ -459,6 +459,16 @@ input {
   background: var(--panel); border: 1px solid var(--border);
   box-shadow: 0 8px 24px rgba(0,0,0,.45);
 }
+/* reasons sit above the tiles: the verdict explains itself before the detail */
+.health-reasons { display: flex; flex-direction: column; gap: .45rem; }
+.health-reasons:not(:empty) { margin-bottom: .7rem;
+  padding-bottom: .6rem; border-bottom: 1px solid var(--border); }
+.health-reason { font-size: .9rem; line-height: 1.35; padding-left: .55rem;
+  border-left: 3px solid var(--muted); color: var(--text); }
+.health-reason.reason-fault { border-left-color: var(--red); color: #ffc9c9; }
+.health-reason.reason-warn { border-left-color: var(--yellow); }
+.health-reason.reason-ok { border-left-color: var(--green); color: var(--muted); }
+
 
 /* tables + lists */
 .row { display: flex; gap: .6rem; margin: 1rem 0; align-items: center; }

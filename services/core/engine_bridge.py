@@ -38,6 +38,7 @@ from . import db as coredb
 from . import playlists as pl
 from . import schedule as sched
 from . import spots as spotmod
+from . import status as statusmod
 from .nowplaying_push import NowPlayingPusher
 from . import nowplaying_file
 
@@ -1207,6 +1208,14 @@ def register(app: FastAPI) -> None:
         Air VU meter. ok=False when the engine can't be reached."""
         lv = engine.levels()
         return {"ok": lv is not None, **(lv or {})}
+
+    @app.get("/api/health/verdict")
+    def api_health_verdict(conn=Depends(get_conn), _=Depends(api_user)):
+        """The single honest station-health verdict the header pill reads.
+        One engine status + levels snapshot feeds it; never 500s if the engine
+        is offline (that is itself the fault)."""
+        return statusmod.verdict(conn, cfg, engine.status(), engine.levels(),
+                                 time.time())
 
     @app.post("/api/engine/op")
     def api_engine_op(body: dict, _=Depends(api_user)):

@@ -18,13 +18,16 @@
           title="Restart all StudioFire services (audio blips to filler)">⟳</button>
   {% endif %}
   <div class="health-wrap">
-    <button id="health-summary" class="health-pill h-green"
+    <button id="health-summary" class="health-pill"
             onclick="toggleHealth()" aria-expanded="false">
       <span class="health-dot"></span>
       <span>Studio health</span>
       <span id="health-word" class="health-word">…</span>
     </button>
-    <div id="tiles" class="tiles health-dropdown" hidden></div>
+    <div id="health-panel" class="health-dropdown" hidden>
+      <div id="health-reasons" class="health-reasons"></div>
+      <div id="tiles" class="tiles"></div>
+    </div>
   </div>
   <form method="post" action="/logout">
     <button type="submit" class="btn">Sign out</button>
@@ -1123,26 +1126,45 @@ function renderNpPlaylist(q) {
 let healthOpen = false;
 function toggleHealth() {
   healthOpen = !healthOpen;
-  document.getElementById("tiles").hidden = !healthOpen;
+  document.getElementById("health-panel").hidden = !healthOpen;
   document.getElementById("health-summary")
     .setAttribute("aria-expanded", healthOpen);
 }
 document.addEventListener("click", (e) => {
   if (healthOpen && !e.target.closest(".health-wrap")) toggleHealth();
 });
+// The pill is driven ONLY by the single verdict (/api/health/verdict), never
+// by the tiles — so it can never read green while a check is failing. Colour
+// comes straight from state; the dropdown lists the reasons above the tiles.
+const VERDICT_PILL = { ok: "h-green", warn: "h-yellow", fault: "h-red" };
+async function refreshVerdict() {
+  try {
+    const v = await (await fetch("/api/health/verdict")).json();
+    const sum = document.getElementById("health-summary");
+    sum.className = "health-pill " + (VERDICT_PILL[v.state] || "h-yellow");
+    document.getElementById("health-word").textContent =
+      v.state === "fault" ? "FAULT" : v.state === "warn" ? "Check" : "OK";
+    sum.title = v.headline || "Studio health";
+    const box = document.getElementById("health-reasons");
+    box.innerHTML = "";
+    if (v.state !== "ok" && (v.reasons || []).length) {
+      for (const r of v.reasons) {
+        const el = document.createElement("div");
+        el.className = "health-reason reason-" + r.state;
+        el.textContent = r.text;
+        box.appendChild(el);
+      }
+    } else {
+      const el = document.createElement("div");
+      el.className = "health-reason reason-ok";
+      el.textContent = v.headline || "All monitored checks passed.";
+      box.appendChild(el);
+    }
+  } catch (e) { /* next poll — leave the last known pill */ }
+}
 async function refreshTiles() {
   try {
     const tiles = await (await fetch("/api/health/tiles")).json();
-    const rank = { green: 1, yellow: 2, red: 3 };
-    let worst = "green";
-    for (const t of tiles)
-      if ((rank[t.state] || 1) > rank[worst]) worst = t.state;
-    const sum = document.getElementById("health-summary");
-    sum.className = "health-pill h-" + worst;
-    document.getElementById("health-word").textContent =
-      worst === "red" ? "Problem"
-      : worst === "yellow" ? "Needs a look"
-      : "All good";
     const div = document.getElementById("tiles");
     div.innerHTML = "";
     for (const t of tiles) {
@@ -1299,9 +1321,10 @@ async function refreshUpdatePill() {
   } catch (e) { /* next poll */ }
 }
 refreshUpdatePill(); setInterval(refreshUpdatePill, 60000);
-refresh(); refreshTiles(); refreshSchedule();
+refresh(); refreshVerdict(); refreshTiles(); refreshSchedule();
 refreshSpots(); refreshRotation(); refreshHistory();
 setInterval(refresh, 2000);
+setInterval(refreshVerdict, 5000);
 setInterval(refreshTiles, 10000);
 setInterval(refreshSchedule, 5000);
 setInterval(refreshSpots, 5000);
