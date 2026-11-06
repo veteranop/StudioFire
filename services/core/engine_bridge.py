@@ -30,9 +30,10 @@ import time
 import uuid
 
 import httpx
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Body, Depends, FastAPI, HTTPException
 from pydantic import BaseModel
 
+from . import auth
 from . import db as coredb
 from . import playlists as pl
 from . import schedule as sched
@@ -1173,6 +1174,7 @@ def register(app: FastAPI) -> None:
     cfg = app.state.cfg
     get_conn = app.state.get_conn
     api_user = app.state.api_user
+    api_admin = app.state.api_admin
 
     engine = EngineClient(cfg["engine_url"])
     precache = Precache(cfg["precache_dir"])
@@ -1745,10 +1747,104 @@ def register(app: FastAPI) -> None:
                           else None)
         return {"id": rid}
 
+    UNDO_SECONDS = 72 * 3600   # how long a soft-deleted rule can be restored
+
+    def _stops_airing(rule: dict) -> str:
+        """Plain-English 'what will stop airing' if this rule is removed."""
+        k = rule.get("folder_key") or ""
+        if k == "dir_station_ids":
+            return "legal station IDs"
+        if k == "dir_ads":
+            return "paid underwriting / ad spots"
+        if k == "dir_jingles":
+            return "jingles / sweepers"
+        if k == "dir_psas":
+            return "PSAs / liners"
+        return rule.get("label") or "this spot"
+
+    def _deleted_view(rule: dict) -> dict:
+        da = rule.get("deleted_at")
+        return {"id": rule["id"], "label": rule["label"],
+                "folder_key": rule.get("folder_key"),
+                "trigger": rule["trigger"], "summary": spotmod.describe(rule),
+                "deleted_at": da, "deleted_by": rule.get("deleted_by"),
+                "purge_at": (da + UNDO_SECONDS) if da else None}
+
     @app.delete("/api/spots/{rid}")
-    def api_spots_remove(rid: int, conn=Depends(get_conn), _=Depends(api_user)):
-        spotmod.remove(conn, rid)
-        return {"ok": True}
+    def api_spots_remove(rid: int, body: dict = Body(default=None),
+                         conn=Depends(get_conn), sess: dict = Depends(api_admin)):
+        """Guarded soft-delete (admin only). The bare ✕ that took underwriting
+        off air for 23 hours is gone: a confirm is required, and removing the
+        LAST legal-ID/underwriting rule needs the word DELETE typed. The rule is
+        soft-deleted (Undo for 72h), never hard-deleted here."""
+        rule = spotmod.get(conn, rid)
+        if rule is None or rule.get("deleted_at") is not None:
+            raise HTTPException(404, "spot rule not found")
+        body = body or {}
+        confirm = str(body.get("confirm") or "")
+
+        # does removing THIS rule drop enabled legal-ID/underwriting policy to 0?
+        protected_ids = {p["id"] for p in spotmod.protected_rules(conn)}
+        last_protected = rid in protected_ids and not (protected_ids - {rid})
+        stops = _stops_airing(rule)
+
+        if last_protected:
+            if confirm != "DELETE":
+                raise HTTPException(428, detail={
+                    "error": "typed_confirm_required",
+                    "rule": _deleted_view(rule),
+                    "stops_airing": stops,
+                    "warning": (f"This is the LAST enabled rule airing {stops}. "
+                                "Delete it and paid credits / legal IDs go off "
+                                "air with nothing to replace them."),
+                    "confirm_with": "DELETE",
+                    "detail": ("Type the word DELETE to confirm removing the "
+                               f"last rule that airs {stops}.")})
+        elif confirm != "yes":
+            raise HTTPException(428, detail={
+                "error": "confirm_required",
+                "rule": _deleted_view(rule),
+                "stops_airing": stops,
+                "warning": f"Deleting this rule stops airing {stops}.",
+                "confirm_with": "yes",
+                "detail": (f"Deleting \"{rule['label']}\" stops airing {stops}. "
+                           "Re-send with confirm:\"yes\" to proceed "
+                           "(you can Undo for 72 hours).")})
+
+        username = None
+        u = auth.get_user(conn, sess["uid"])
+        if u:
+            username = u["username"]
+        spotmod.remove(conn, rid, by=username)
+        # opportunistic housekeeping: drop rows past the undo window
+        try:
+            spotmod.purge_expired(conn, hours=72)
+        except sqlite3.Error:
+            pass
+        resp = {"ok": True, "undo_seconds": UNDO_SECONDS,
+                "rule": _deleted_view(spotmod.get(conn, rid))}
+        if spotmod.count_enabled(conn) == 0:
+            resp["warning"] = ("No spot rules are enabled now — nothing "
+                               "(IDs, ads, PSAs) will air between songs.")
+        elif not spotmod.protected_rules(conn):
+            resp["warning"] = ("No enabled legal-ID or underwriting rules "
+                               "remain — paid credits may be off air.")
+        return resp
+
+    @app.post("/api/spots/{rid}/restore")
+    def api_spots_restore(rid: int, conn=Depends(get_conn),
+                          _=Depends(api_admin)):
+        """Undo a soft delete (admin). 404 if the rule isn't a deleted one."""
+        rule = spotmod.get(conn, rid)
+        if rule is None or rule.get("deleted_at") is None:
+            raise HTTPException(404, "no deleted spot rule with that id")
+        spotmod.restore(conn, rid)
+        return {"ok": True, "rule": _deleted_view(spotmod.get(conn, rid))}
+
+    @app.get("/api/spots/deleted")
+    def api_spots_deleted(conn=Depends(get_conn), _=Depends(api_admin)):
+        """Recently soft-deleted rules still inside the 72h undo window."""
+        return {"rules": [_deleted_view(r) for r in spotmod.list_deleted(conn)]}
 
     @app.post("/api/spots/{rid}/toggle")
     def api_spots_toggle(rid: int, conn=Depends(get_conn), _=Depends(api_user)):
