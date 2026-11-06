@@ -155,15 +155,86 @@ def purge_expired(conn: sqlite3.Connection, hours: int = 72) -> int:
     return cur.rowcount
 
 
+def _setting(conn: sqlite3.Connection, key: str) -> str:
+    """One DB-held setting (kept local so this module stays import-light)."""
+    try:
+        row = conn.execute("SELECT value FROM settings WHERE key = ?",
+                           (key,)).fetchone()
+    except sqlite3.Error:
+        return ""
+    return (row[0] if row else "") or ""
+
+
+def _norm(p) -> str:
+    """Compare stored folder paths the way the operator means them."""
+    s = str(p or "").strip().replace("/", "\\")
+    return s.rstrip("\\").casefold()
+
+
+#: The two folder settings whose rules are *policy*: legal IDs (FCC) and paid
+#: underwriting. Losing them is the 2026-11-02 failure.
+PROTECTED_SETTINGS = (("ids", "dir_station_ids"), ("ads", "dir_ads"))
+
+
+def protected_paths(conn: sqlite3.Connection) -> dict[str, set[str]]:
+    """Normalised folder paths configured as legal IDs / underwriting.
+
+    Rules made through the GUI's browse picker store a `folder_path` and leave
+    `folder_key` empty (that is how the station's real rules are built), so
+    matching on folder_key alone missed exactly the rules that matter.
+    """
+    out: dict[str, set[str]] = {}
+    for kind, key in PROTECTED_SETTINGS:
+        v = _norm(_setting(conn, key))
+        out[kind] = {v} if v else set()
+    return out
+
+
+def rule_kind(conn: sqlite3.Connection, rule: dict) -> str | None:
+    """'ids' | 'ads' when this rule airs legal IDs / underwriting, else None."""
+    fk = rule.get("folder_key") or ""
+    if fk == "dir_station_ids":
+        return "ids"
+    if fk == "dir_ads":
+        return "ads"
+    paths = protected_paths(conn)
+    folder = _norm(rule.get("folder_path"))
+    if folder:
+        for kind in ("ids", "ads"):
+            if folder in paths[kind]:
+                return kind
+    # a single-file rule pointed straight at a file inside one of those folders
+    fp = _norm(rule.get("file_path"))
+    if fp:
+        for kind in ("ids", "ads"):
+            for p in paths[kind]:
+                if p and fp.startswith(p + "\\"):
+                    return kind
+    return None
+
+
 def protected_rules(conn: sqlite3.Connection) -> list[dict]:
     """Enabled, live rules carrying legal station IDs or paid underwriting —
     the policy whose silent removal took the station off air for 23 hours.
-    folder_key based (the preset station folders); a one-off browsed-folder or
-    single-file rule is not auto-protected."""
-    return [dict(r) for r in conn.execute(
-        "SELECT * FROM spot_rules WHERE enabled = 1 AND deleted_at IS NULL "
-        "AND folder_key IN ('dir_station_ids', 'dir_ads') "
-        "ORDER BY id").fetchall()]
+
+    Matches BOTH the preset station-folder rules (folder_key) and rules built
+    through the browse picker (folder_path pointing at the same configured
+    folder), because the station's real legal-ID and underwriting rules are the
+    latter.
+    """
+    out = []
+    for r in conn.execute(
+            "SELECT * FROM spot_rules WHERE enabled = 1 AND deleted_at IS NULL "
+            "ORDER BY id").fetchall():
+        d = dict(r)
+        if rule_kind(conn, d):
+            out.append(d)
+    return out
+
+
+def legal_id_rules(conn: sqlite3.Connection) -> list[dict]:
+    """Enabled, live rules that air legal station IDs (FCC hourly ID)."""
+    return [r for r in protected_rules(conn) if rule_kind(conn, r) == "ids"]
 
 
 def count_enabled(conn: sqlite3.Connection) -> int:

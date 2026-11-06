@@ -118,7 +118,7 @@ def verdict(conn: sqlite3.Connection, cfg: dict,
 
     enabled = spotmod.list_enabled(conn)
     n_enabled = len(enabled)
-    legal = [r for r in enabled if r.get("folder_key") == "dir_station_ids"]
+    legal = spotmod.legal_id_rules(conn)
 
     nas = cfg.get("nas_music_root") or ""
     nas_ok = (not nas) or os.path.isdir(pl.alias_path(nas))

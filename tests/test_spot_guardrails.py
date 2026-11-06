@@ -62,6 +62,20 @@ def main():
 
         check("legal-ID and underwriting rules are protected",
               {r["id"] for r in spots.protected_rules(conn)} == {ads, ids})
+
+        # the station's real rules come from the browse picker: folder_path set,
+        # folder_key empty. They must be protected too, or the guardrail misses
+        # exactly the rules it exists for.
+        db.set_setting(conn, "dir_station_ids", "Z:\Legal ID's")
+        db.set_setting(conn, "dir_ads", "Z:\1 - ALL DJ BREAKS")
+        fp_ids = spots.add(conn, "", "clock", clock_minutes="0",
+                           folder_path="z:/legal id's/")
+        check("browse-picker legal-ID rule is protected",
+              fp_ids in {r["id"] for r in spots.protected_rules(conn)})
+        check("browse-picker legal-ID rule is a legal-ID rule",
+              fp_ids in {r["id"] for r in spots.legal_id_rules(conn)})
+        # park it again so the API block below runs against the 2 preset rules
+        spots.remove(conn, fp_ids, by="tester")
         spots.remove(conn, psa)
         conn.execute("UPDATE spot_rules SET deleted_at = ? WHERE id = ?",
                      (time.time() - 73 * 3600, psa))

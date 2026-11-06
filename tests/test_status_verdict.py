@@ -137,6 +137,25 @@ def main():
         check("skip count is in checked",
               v["checked"]["skipped_last_15min"] >= 1)
 
+        # ---- browse-picker rules (folder_path, empty folder_key) are policy too
+        # The station's real legal-ID / underwriting rules are built through the
+        # GUI's browse picker, which leaves folder_key empty. Matching on
+        # folder_key alone would call a healthy station "no legal ID".
+        conn.execute("DELETE FROM skipped_items")
+        conn.commit()
+        db.set_setting(conn, "dir_station_ids", "z:/legal id's/")
+        db.set_setting(conn, "dir_ads", "Z:\1 - ALL DJ BREAKS")
+        for rid in [r["id"] for r in spots.list_all(conn)]:
+            spots.remove(conn, rid)
+        spots.add(conn, "", "clock", clock_minutes="0",
+                  folder_path="Z:\Legal ID's")
+        spots.add(conn, "", "interval", interval_min=30,
+                  folder_path="Z:\1 - ALL DJ BREAKS\\")
+        v = status.verdict(conn, cfg, LIVE(), LOUD(), now2)
+        check("browse-picker legal-ID rule is recognised",
+              v["checked"]["legal_id_rules"] == 1, str(v["checked"]))
+        check("browse-picker rules => ok", v["state"] == "ok", v["headline"])
+
         # ---- equipment pings are deliberately NOT part of the verdict ----
         v = status.verdict(conn, cfg, LIVE(), LOUD(), now2)
         check("verdict does not depend on equipment pings",
