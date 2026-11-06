@@ -194,8 +194,10 @@ def _recent_skips(conn, now: float) -> int:
     (or if the query fails) this contributes nothing rather than crashing."""
     cutoff = now - SKIP_WINDOW_MIN * 60
     try:
+        # DISTINCT path, not events: a playlist laps, so the same dead file is
+        # skipped again every pass and the raw count inflates fast.
         row = conn.execute(
-            "SELECT COUNT(*) FROM skipped_items WHERE ts >= ?",
+            "SELECT COUNT(DISTINCT path) FROM skipped_items WHERE ts >= ?",
             (cutoff,)).fetchone()
     except sqlite3.Error:
         return 0

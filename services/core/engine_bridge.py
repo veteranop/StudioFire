@@ -1711,6 +1711,7 @@ def register(app: FastAPI) -> None:
         now = time.time()
         rules = []
         for r in spotmod.list_all(conn):
+            _kind = spotmod.rule_kind(conn, r)
             rules.append({
                 "id": r["id"], "folder_key": r["folder_key"],
                 "file_path": r["file_path"],
@@ -1720,6 +1721,10 @@ def register(app: FastAPI) -> None:
                 "enabled": bool(r["enabled"]),
                 "end_date": r.get("end_date"),
                 "summary": spotmod.describe(r),
+                # 'ids' / 'ads' when this rule airs legal IDs or paid
+                # underwriting: the UI can mark those, and deleting the last
+                # one needs a typed confirm.
+                "kind": _kind, "protected": _kind is not None,
                 "next_epoch": spotmod.next_fire_epoch(r, now)})
         # soonest first; manual/disabled (next_epoch None) sink to the bottom
         rules.sort(key=lambda x: (x["next_epoch"] is None, x["next_epoch"] or 0))
