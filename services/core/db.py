@@ -281,6 +281,18 @@ ALTER TABLE playlist_items ADD COLUMN duration_sec REAL;
 -- Cleared by a manual reorder: the order then came from the operator, not us.
 ALTER TABLE playlists ADD COLUMN shuffled_at REAL;
 """),
+    (13, """
+-- Soft-delete + Undo for spot rules. A deleted rule keeps its row (so Undo can
+-- bring it back with the SAME id) but never airs and never lists. deleted_at is
+-- the epoch it was removed, deleted_by the username who did it; both NULL means
+-- the rule is live. Rows older than the undo window are hard-purged
+-- opportunistically (spots.purge_expired). The 2026-11-02 underwriting blackout
+-- was a bare DELETE with no confirm, no undo and no audit — this is the floor
+-- the guardrails (release A) build on.
+ALTER TABLE spot_rules ADD COLUMN deleted_at REAL;
+ALTER TABLE spot_rules ADD COLUMN deleted_by TEXT;
+CREATE INDEX idx_spot_rules_deleted ON spot_rules(deleted_at);
+"""),
 ]
 
 SCHEMA_VERSION = MIGRATIONS[-1][0]

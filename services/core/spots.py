@@ -118,9 +118,59 @@ def add(conn: sqlite3.Connection, folder_key: str, trigger: str,
     return cur.lastrowid
 
 
-def remove(conn: sqlite3.Connection, rid: int) -> None:
+def remove(conn: sqlite3.Connection, rid: int, by: str | None = None) -> None:
+    """Soft delete: hide the rule from airing + listing but keep the row so Undo
+    (restore) can bring it back with the SAME id. `by` is the username for the
+    audit trail. Hard removal happens later via purge_expired(). A no-op on an
+    already-deleted rule (won't move its deleted_at / undo clock)."""
     with conn:
-        conn.execute("DELETE FROM spot_rules WHERE id = ?", (rid,))
+        conn.execute("UPDATE spot_rules SET deleted_at = ?, deleted_by = ? "
+                     "WHERE id = ? AND deleted_at IS NULL",
+                     (time.time(), by, rid))
+
+
+def restore(conn: sqlite3.Connection, rid: int) -> None:
+    """Undo a soft delete: the rule is live again with its original id."""
+    with conn:
+        conn.execute("UPDATE spot_rules SET deleted_at = NULL, "
+                     "deleted_by = NULL WHERE id = ?", (rid,))
+
+
+def list_deleted(conn: sqlite3.Connection) -> list[dict]:
+    """Soft-deleted rules, newest deletion first (the Undo list)."""
+    return [dict(r) for r in conn.execute(
+        "SELECT * FROM spot_rules WHERE deleted_at IS NOT NULL "
+        "ORDER BY deleted_at DESC").fetchall()]
+
+
+def purge_expired(conn: sqlite3.Connection, hours: int = 72) -> int:
+    """Hard-delete soft-deleted rows older than the undo window; returns the
+    count removed. Called opportunistically from the delete path so the table
+    doesn't grow without bound — the row is only truly gone after `hours`."""
+    cutoff = time.time() - max(0, hours) * 3600
+    with conn:
+        cur = conn.execute(
+            "DELETE FROM spot_rules WHERE deleted_at IS NOT NULL "
+            "AND deleted_at < ?", (cutoff,))
+    return cur.rowcount
+
+
+def protected_rules(conn: sqlite3.Connection) -> list[dict]:
+    """Enabled, live rules carrying legal station IDs or paid underwriting —
+    the policy whose silent removal took the station off air for 23 hours.
+    folder_key based (the preset station folders); a one-off browsed-folder or
+    single-file rule is not auto-protected."""
+    return [dict(r) for r in conn.execute(
+        "SELECT * FROM spot_rules WHERE enabled = 1 AND deleted_at IS NULL "
+        "AND folder_key IN ('dir_station_ids', 'dir_ads') "
+        "ORDER BY id").fetchall()]
+
+
+def count_enabled(conn: sqlite3.Connection) -> int:
+    """How many spot rules are live and enabled (zero = nothing between songs)."""
+    return conn.execute(
+        "SELECT COUNT(*) FROM spot_rules "
+        "WHERE enabled = 1 AND deleted_at IS NULL").fetchone()[0]
 
 
 def get(conn: sqlite3.Connection, rid: int) -> dict | None:
@@ -135,13 +185,18 @@ def set_enabled(conn: sqlite3.Connection, rid: int, on: bool) -> None:
 
 
 def list_all(conn: sqlite3.Connection) -> list[dict]:
+    # Soft-deleted rows (deleted_at set) are hidden everywhere they could air or
+    # list — a missed filter here would resurrect a deleted rule in the UI.
     return [dict(r) for r in conn.execute(
-        "SELECT * FROM spot_rules ORDER BY id").fetchall()]
+        "SELECT * FROM spot_rules WHERE deleted_at IS NULL "
+        "ORDER BY id").fetchall()]
 
 
 def list_enabled(conn: sqlite3.Connection) -> list[dict]:
+    # The feeder's due() path reads this; deleted rules must never fire.
     return [dict(r) for r in conn.execute(
-        "SELECT * FROM spot_rules WHERE enabled = 1 ORDER BY id").fetchall()]
+        "SELECT * FROM spot_rules WHERE enabled = 1 AND deleted_at IS NULL "
+        "ORDER BY id").fetchall()]
 
 
 def mark_fired(conn: sqlite3.Connection, rule: dict, now: float) -> None:
@@ -223,6 +278,10 @@ def clock_slot(now: float, mins: list, grace_min: int = CLOCK_GRACE_MIN):
 def due(rule: dict, now: float) -> bool:
     """Should this rule fire right now?"""
     t = rule["trigger"]
+    # A soft-deleted rule never fires, even if something hands due() a stale row
+    # straight from get() (list_enabled already filters these out).
+    if rule.get("deleted_at") is not None:
+        return False
     if not rule["enabled"] or t == "manual":
         return False
     if t != "once" and not _in_window(rule, now):
