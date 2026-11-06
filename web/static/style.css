@@ -477,6 +477,66 @@ input {
 }
 .alert-banner[hidden] { display: none; }
 .alert-banner strong { color: #fff; }
+.skip-names { margin-top: .45rem; }
+.skip-names summary { cursor: pointer; font-size: .85rem; color: #ffd9d9; }
+.skip-names ul { margin: .35rem 0 0 .9rem; padding: 0; }
+.skip-names li { font-size: .84rem; color: #ffc9c9; }
+
+/* policy chips: make it obvious which rules are legal IDs / paid underwriting */
+.spot-badge {
+  display: inline-block; padding: .05rem .4rem; border-radius: 999px;
+  font-size: .68rem; font-weight: 800; letter-spacing: .04em;
+  vertical-align: middle;
+}
+.spot-badge.badge-ids { background: #14304a; color: #9fd0ff; border: 1px solid #2b5d86; }
+.spot-badge.badge-ads { background: #3a2c14; color: #ffd58a; border: 1px solid #7a5c22; }
+
+/* recently deleted (Undo) block under the spot list */
+.spot-undo { margin-top: .7rem; padding-top: .6rem; border-top: 1px dashed var(--border); }
+.spot-undo[hidden] { display: none; }
+.spot-undo-head { font-size: .78rem; text-transform: uppercase;
+  letter-spacing: .06em; color: var(--muted); margin-bottom: .35rem; }
+
+.btn-danger-ghost { color: #ff9d9d; border-color: #5a2222; }
+.btn-danger-ghost:hover { background: #4a1414; }
+.btn-red { background: #a32424; border-color: #c93b3b; color: #fff; }
+.btn-red:hover { filter: brightness(1.1); }
+
+/* one in-app confirm dialog (replaces alert/confirm/prompt) */
+.sf-modal {
+  position: fixed; inset: 0; z-index: 90; display: flex;
+  align-items: center; justify-content: center;
+  background: rgba(0,0,0,.6); padding: 1rem;
+}
+.sf-modal[hidden] { display: none; }
+.sf-modal-card {
+  width: min(460px, 100%); background: var(--panel);
+  border: 1px solid var(--border); border-radius: 14px;
+  padding: 1.1rem 1.2rem; box-shadow: 0 18px 50px rgba(0,0,0,.6);
+}
+.sf-modal-card h3 { margin: 0 0 .6rem; font-size: 1.1rem; }
+.sf-modal-msg { font-size: .95rem; line-height: 1.45; color: var(--text); }
+.sf-modal-type { display: block; margin-top: .8rem; font-size: .9rem;
+  color: var(--muted); }
+.sf-modal-type[hidden] { display: none; }
+.sf-modal-type input { margin-top: .35rem; width: 100%; }
+.sf-modal-btns { display: flex; gap: .6rem; justify-content: flex-end;
+  margin-top: 1rem; }
+.sf-shake { animation: sf-shake .35s; border-color: var(--red) !important; }
+@keyframes sf-shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-6px); } 75% { transform: translateX(6px); }
+}
+
+/* toast with Undo */
+.sf-toast {
+  position: fixed; left: 50%; bottom: 1.4rem; transform: translateX(-50%);
+  z-index: 95; display: flex; align-items: center; gap: .8rem;
+  max-width: min(680px, 92vw); padding: .7rem 1rem; border-radius: 12px;
+  background: #1d2833; border: 1px solid var(--border);
+  box-shadow: 0 12px 34px rgba(0,0,0,.55); font-size: .92rem;
+}
+.sf-toast[hidden] { display: none; }
 
 
 /* tables + lists */
