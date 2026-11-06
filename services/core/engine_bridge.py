@@ -45,6 +45,28 @@ from . import nowplaying_file
 log = logging.getLogger("core.bridge")
 
 
+def record_skip(conn: sqlite3.Connection, path: str,
+                reason: str = "missing") -> None:
+    """Persist a skipped-as-missing playlist item so the GUI can show it.
+
+    The feeder has always dropped an item whose file moved/renamed with a log
+    line only, so an operator heard songs vanish with nothing on screen to
+    explain it. Never raises: bookkeeping must not break the feeder tick, and a
+    missing table (pre-migration DB) is simply a no-op.
+    """
+    try:
+        pid = coredb.get_setting(conn, "active_playlist_id")
+        pid = int(pid) if pid and str(pid).isdigit() else None
+        now = time.time()
+        conn.execute("INSERT INTO skipped_items(ts, path, reason, playlist_id) "
+                     "VALUES (?, ?, ?, ?)", (now, path or "", reason, pid))
+        conn.execute("DELETE FROM skipped_items WHERE ts < ?",
+                     (now - 7 * 86400,))
+        conn.commit()
+    except (sqlite3.Error, ValueError):
+        log.debug("feeder: could not record skip", exc_info=True)
+
+
 def _read_meta(path: str) -> dict:
     """Best-effort artist/album/title/duration from a LOCAL audio file — the
     pre-cached copy, so it's fast and works even off the NAS. Never raises."""
@@ -330,6 +352,7 @@ class Feeder:
                         item["id"])
             log.warning("feeder: item unresolvable (skip+alert, §10.5): %r",
                         item["path"])
+            record_skip(conn, item.get("path") or "")
         return None
 
     def activate(self, conn, playlist_id: int) -> tuple[bool, str]:
@@ -1216,6 +1239,26 @@ def register(app: FastAPI) -> None:
         is offline (that is itself the fault)."""
         return statusmod.verdict(conn, cfg, engine.status(), engine.levels(),
                                  time.time())
+
+    @app.get("/api/skips")
+    def api_skips(hours: int = 24, conn=Depends(get_conn),
+                  _=Depends(api_user)):
+        """Playlist items skipped because their file is gone (release A, A4).
+
+        Read-only view of skipped_items: the On Air screen shows the count so a
+        volunteer can see why songs are missing instead of only hearing it.
+        """
+        cutoff = time.time() - max(1, min(int(hours), 24 * 30)) * 3600
+        try:
+            rows = conn.execute(
+                "SELECT ts, path, reason, playlist_id FROM skipped_items "
+                "WHERE ts >= ? ORDER BY ts DESC LIMIT 200", (cutoff,)
+            ).fetchall()
+        except sqlite3.Error:
+            rows = []
+        items = [{"ts": r["ts"], "path": r["path"], "reason": r["reason"],
+                  "playlist_id": r["playlist_id"]} for r in rows]
+        return {"hours": hours, "count": len(items), "items": items}
 
     @app.post("/api/engine/op")
     def api_engine_op(body: dict, _=Depends(api_user)):

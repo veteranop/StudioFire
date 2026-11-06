@@ -293,6 +293,23 @@ ALTER TABLE spot_rules ADD COLUMN deleted_at REAL;
 ALTER TABLE spot_rules ADD COLUMN deleted_by TEXT;
 CREATE INDEX idx_spot_rules_deleted ON spot_rules(deleted_at);
 """),
+    (14, """
+-- Missing playlist files, made visible. The feeder has always skipped an item
+-- whose file has moved or been renamed, but it only wrote a log line
+-- ("feeder: item unresolvable"), so an operator heard songs missing and had
+-- nothing on screen to explain it (23% of one live playlist was dead this way).
+-- One row per skip event; the On Air screen shows the recent count, and the
+-- status verdict warns while skips are recent. Rows older than a week are
+-- dropped opportunistically so the table stays small.
+CREATE TABLE IF NOT EXISTS skipped_items (
+  id INTEGER PRIMARY KEY,
+  ts REAL NOT NULL,
+  path TEXT NOT NULL,
+  reason TEXT,
+  playlist_id INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_skipped_items_ts ON skipped_items(ts);
+"""),
 ]
 
 SCHEMA_VERSION = MIGRATIONS[-1][0]

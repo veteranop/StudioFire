@@ -102,6 +102,7 @@
 <div class="grid3">
   <div class="card">
     <h2>Upcoming spots</h2>
+    <div id="spot-empty-banner" class="alert-banner" hidden></div>
     <input type="text" id="spot-search" class="rot-search" autocomplete="off"
            placeholder="🔎 Search spots by name…" oninput="renderSpots()">
     <ol id="spot-list" class="schedlist"><li class="muted">loading…</li></ol>
@@ -189,6 +190,7 @@
     </div>
     <input type="text" id="rot-search" class="rot-search" autocomplete="off"
            placeholder="🔎 Search this playlist…" oninput="renderRotation()">
+    <div id="skip-warning" class="alert-banner" hidden></div>
     <ol id="rot-list" class="queue"><li class="muted">loading…</li></ol>
   </div>
   <div class="card">
@@ -688,6 +690,19 @@ async function refreshSpots() {
 function renderSpots() {
   const ol = document.getElementById("spot-list");
   ol.innerHTML = "";
+  // The empty-spot-policy alarm: with no rule enabled, nothing (legal IDs, paid
+  // underwriting, PSAs) airs between songs and nothing looks broken. That is
+  // exactly how the 2026-11-02 outage stayed invisible for 23 hours.
+  const enabled = spotRules.filter(r => r.enabled).length;
+  const banner = document.getElementById("spot-empty-banner");
+  if (banner) {
+    banner.hidden = enabled > 0;
+    if (!enabled) {
+      banner.innerHTML = "<strong>No spot rules are running.</strong> " +
+        "Nothing between songs — legal IDs and paid underwriting may be off air. " +
+        "Add a rule below, or Undo a deletion.";
+    }
+  }
   if (!spotRules.length) {
     ol.innerHTML = "<li class='muted'>No spots yet</li>";
     return;
@@ -1321,10 +1336,33 @@ async function refreshUpdatePill() {
   } catch (e) { /* next poll */ }
 }
 refreshUpdatePill(); setInterval(refreshUpdatePill, 60000);
+// Missing playlist files: the feeder skips them, so they are silent unless we
+// say so. Count only — the list is the tooltip.
+async function refreshSkips() {
+  try {
+    const d = await (await fetch("/api/skips?hours=24")).json();
+    const el = document.getElementById("skip-warning");
+    if (!el) return;
+    const n = d.count || 0;
+    el.hidden = n === 0;
+    if (n) {
+      const names = (d.items || []).slice(0, 6).map(i => {
+        const p = (i.path || "").split(/[\\/]/).pop();
+        return p || i.path;
+      });
+      el.innerHTML = "<strong>" + n + " song" + (n === 1 ? "" : "s") +
+        " in this playlist " + (n === 1 ? "is" : "are") + " missing</strong> " +
+        "and will be skipped. Check the library folder or use " +
+        "“Fix broken file paths” on the Playlists page.";
+      el.title = names.join("\n");
+    }
+  } catch (e) { /* next poll */ }
+}
 refresh(); refreshVerdict(); refreshTiles(); refreshSchedule();
-refreshSpots(); refreshRotation(); refreshHistory();
+refreshSpots(); refreshRotation(); refreshHistory(); refreshSkips();
 setInterval(refresh, 2000);
 setInterval(refreshVerdict, 5000);
+setInterval(refreshSkips, 30000);
 setInterval(refreshTiles, 10000);
 setInterval(refreshSchedule, 5000);
 setInterval(refreshSpots, 5000);

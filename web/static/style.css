@@ -469,6 +469,15 @@ input {
 .health-reason.reason-warn { border-left-color: var(--yellow); }
 .health-reason.reason-ok { border-left-color: var(--green); color: var(--muted); }
 
+/* in-card alarms (empty spot policy, missing songs) — loud enough to notice */
+.alert-banner {
+  margin: .5rem 0 .35rem; padding: .6rem .75rem; border-radius: 10px;
+  background: #4a1414; border-left: 4px solid var(--red); color: #ffc9c9;
+  font-size: .92rem; line-height: 1.35;
+}
+.alert-banner[hidden] { display: none; }
+.alert-banner strong { color: #fff; }
+
 
 /* tables + lists */
 .row { display: flex; gap: .6rem; margin: 1rem 0; align-items: center; }
