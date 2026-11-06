@@ -70,10 +70,14 @@
     <div class="help-callout" id="start">
       <strong>Start here — the one thing to remember.</strong>
       StudioFire is built so the music <em>never</em> stops. If the screen looks
-      wrong, the music is almost certainly still playing. Nothing you can click on
-      these pages will make {{ station }} go silent — the worst case is you change
-      what's playing next. When in doubt, look at the green <strong>ON AIR</strong>
-      light on the On Air screen. Green means you're fine.
+      wrong, the music is almost certainly still playing. The one thing that
+      really can take audio off air is <strong>deleting spot rules</strong>:
+      legal IDs and paid underwriting stop airing, and the music keeps playing so
+      nothing sounds broken. Deleting a rule now asks you to confirm, keeps it in
+      an <strong>Undo</strong> list for 72 hours, and an alarm shows on the On Air
+      screen whenever no rules are running. When in doubt, look at the
+      <strong>ON AIR</strong> light and the <strong>Studio health</strong> pill —
+      and read what the pill says, because it names what it checked.
     </div>
 
     <div class="help-callout warn">
@@ -93,15 +97,18 @@
     <table>
       <tr><th>What you see</th><th>What it means</th></tr>
       <tr><td><strong>ON AIR</strong> (green)</td><td>The automation is running and
-        feeding the transmitter. All good.</td></tr>
+        feeding the transmitter.</td></tr>
       <tr><td><strong>OFF AIR</strong></td><td>The engine isn't feeding audio.
         See <a href="#trouble">If something looks wrong</a>.</td></tr>
       <tr><td><strong>Program Output</strong> meters (L / R)</td><td>The sound level
         leaving the studio. If the bars stop moving, no audio is playing.</td></tr>
       <tr><td><strong>Now playing</strong> + <strong>Next up</strong></td><td>The
         current track and what follows.</td></tr>
-      <tr><td><strong>Studio health</strong> pill</td><td>Green = healthy. Click it
-        for the detail behind it.</td></tr>
+      <tr><td><strong>Studio health</strong> pill</td><td><strong>OK</strong> =
+        the checks it names all passed. <strong>Check</strong> = something needs a
+        look. <strong>FAULT</strong> = audio, the engine or the spot policy
+        (legal IDs / underwriting) is wrong right now. Click the pill to read the
+        reasons — it never shows green while a check is failing.</td></tr>
     </table>
     <p>Safe buttons on this screen: <span class="help-key">Shuffle</span> reshuffles
       the current list and then says so — you get a <b>✓ Shuffled</b> message and a
@@ -136,17 +143,25 @@
       <strong>promos</strong>. They're scheduled as <em>rules</em> — "play this
       folder every hour," "play this underwriter's credit twice a day."</p>
     <ul>
-      <li>Set up or edit spot rules on the <strong>Schedule</strong> page.</li>
+      <li>Set up or edit spot rules on the <strong>On Air</strong> screen, under
+        <strong>Upcoming spots</strong> → <em>Add a spot rule</em>. The
+        <strong>Schedule</strong> page is for shows, not spots.</li>
+      <li>Deleting a spot rule asks you to confirm and keeps it in an Undo list
+        for 72 hours. Removing the last legal-ID or underwriting rule needs you to
+        type DELETE — and the On Air screen shows a red warning whenever no rules
+        are running.</li>
       <li>Underwriting is <strong>never called advertising</strong> — {{ station }}
         is non-commercial. The wording matters; leave it as written.</li>
-      <li>Legal IDs must air every hour. The <strong>Reports</strong> page has a
-        Legal ID report that flags any hour that missed one.</li>
+      <li>Legal IDs must air every hour. The <strong>Reports</strong> page lists
+        everything that aired, so you can check any hour; a legal-ID gap report is
+        planned, not built yet.</li>
     </ul>
 
     <h2 id="schedule">The schedule</h2>
-    <p>The <strong>Schedule</strong> page is where time-based things live: shows
-      that start at a set hour, and spot rules that fire on a clock. Set the day
-      and time, choose what plays, and save. StudioFire handles the timing.</p>
+    <p>The <strong>Schedule</strong> page is where <em>shows</em> live: a
+      programme that starts at a set hour and runs for its length. Set the day and
+      time, choose what plays, and save. StudioFire handles the timing. Spot rules
+      (IDs, underwriting, PSAs) are set on the <strong>On Air</strong> screen.</p>
 
     <h2 id="reports">Reports — what aired</h2>
     <p>The <strong>Reports</strong> page is your proof of what actually played.

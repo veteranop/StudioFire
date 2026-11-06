@@ -7,6 +7,35 @@ plain English a non-technical operator can understand.
 
 ## [Unreleased]
 
+### Added
+- **Deleting a spot rule can no longer silence your IDs and underwriting by
+  accident.** It was one click on a ✕ with no warning — which is how a station
+  can end up with no legal IDs and no paid credits airing for a day while the
+  music keeps playing and nothing looks wrong. Now:
+  * deleting asks you to confirm, and removing the **last** legal-ID or
+    underwriting rule needs you to type `DELETE`;
+  * a deleted rule is kept for **72 hours** so you can Undo it (same rule, same
+    place);
+  * the On Air screen shows a red warning whenever **no spot rules are running**.
+- **The Studio health pill now tells the truth.** It used to show green from a
+  pile of independent checks, so it could be green while quiet air, a stopped
+  engine or an empty spot policy was the real story. It is now one verdict —
+  **OK**, **Check** or **FAULT** — and clicking it lists the reasons: audio
+  silent, engine not feeding, no spot rules, no legal-ID rule, music library
+  unreachable, or songs missing from the playlist.
+- **Songs missing from a playlist are now visible instead of silent.** If a
+  file has moved or been renamed, StudioFire always skipped it and only wrote a
+  line in a log file. The On Air screen now says how many songs are missing from
+  the playlist on air (hover for the names), and the health pill warns while it
+  is happening.
+
+### Changed
+- **In-app Help corrected in three places.** It said spot rules were edited on
+  the Schedule page (they are on **On Air**), that green meant "you're fine" and
+  that nothing on the screen could take the station off air (both untrue — a
+  deleted spot rule takes IDs and underwriting off air), and it promised a
+  legal-ID gap report that does not exist yet. The words now match the product.
+
 ## [1.6.3] - 2026-10-30
 
 ### Added
