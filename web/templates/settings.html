@@ -579,6 +579,9 @@ function flash(id, text, isError) {
   if (text) setTimeout(() => { if (el.textContent === text) el.textContent = ""; }, 4000);
 }
 
+/* the signed-in username, for the "· you" marker in the Users list */
+const SF_ME = "{{ me }}";
+
 /* ============================================================ folders */
 let dirs = [];
 let lstPath = "";
@@ -967,7 +970,7 @@ async function loadUsers() {
     const main = document.createElement("div");
     main.className = "st-rowmain";
     const nm = document.createElement("strong");
-    nm.textContent = u.username + (me && u.username === me ? " \u00b7 you" : "");
+    nm.textContent = u.username + (SF_ME && u.username === SF_ME ? " \u00b7 you" : "");
     main.append(nm);
 
     const role = document.createElement("span");

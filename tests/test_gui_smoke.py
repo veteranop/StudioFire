@@ -155,9 +155,14 @@ def main():
           and csv.text.startswith("Time,What aired,Type"))
 
     # ---- settings: station folders + folder browser
+    _settings = client.get("/settings").content
     check("settings page renders",
-          b'id="dir-rows"' in client.get("/settings").content
-          and b'data-goto="station"' in client.get("/settings").content)
+          b'id="dir-rows"' in _settings
+          and b'data-goto="station"' in _settings)
+    # the Users list needs the signed-in name as a JS value, not a Jinja one —
+    # referencing the Jinja variable directly threw and left the list blank
+    check("settings passes the username to the page script",
+          b"const SF_ME" in _settings)
     dirs = client.get("/api/settings/dirs").json()
     check("dir settings listed", len(dirs) >= 4
           and all(d["path"] == "" for d in dirs))
