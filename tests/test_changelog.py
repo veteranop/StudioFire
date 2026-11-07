@@ -190,14 +190,18 @@ def test_route():
     client.post("/setup", data={"username": "op", "password": "longenough",
                                 "password2": "longenough"})
 
-    # ---- Settings page renders the change log with the running version
+    # ---- Settings shows the installed release + links to the full history
     r = client.get("/settings")
     check("settings page renders the change log",
-          r.status_code == 200 and b"What's new / Change log" in r.content)
+          r.status_code == 200 and b"What's new in" in r.content
+          and b'href="/changelog"' in r.content)
     check("settings page shows the running version",
           ("StudioFire " + running).encode() in r.content)
-    check("settings page shows a released version heading",
-          b"Version 1.2.0" in r.content)
+    # the whole history now lives on its own page (Settings is one group/screen)
+    ch = client.get("/changelog")
+    check("changelog page renders the release history",
+          ch.status_code == 200 and b"Change history" in ch.content
+          and b"1.2.0" in ch.content)
 
     # ---- JSON route: 200 for a signed-in operator, includes VERSION
     j = client.get("/api/changelog")

@@ -289,12 +289,26 @@ def create_app(cfg: dict) -> FastAPI:
     DIR_SETTINGS = spots.FOLDER_CATEGORIES
 
     @app.get("/settings", response_class=HTMLResponse)
-    def settings_page(request: Request, sess: dict = Depends(page_user)):
+    def settings_page(request: Request, sess: dict = Depends(page_user),
+                      conn=Depends(get_conn)):
         # Basic (operator) can do everything except manage users; the Users
         # section is only rendered/enabled for admins (role passed to template).
         # The change log is read from CHANGELOG.md on disk (tolerant: a missing
         # file just renders "not available", never a 500).
+        try:
+            uname = (auth.get_user(conn, sess["uid"]) or {}).get("username") or ""
+        except Exception:      # noqa: BLE001 — never break the page over a label
+            uname = ""
         return render(request, "settings.html", role=sess["role"],
+                      user=uname,
+                      changelog=changelog.load(),
+                      running_version=running_version)
+
+    @app.get("/changelog", response_class=HTMLResponse)
+    def changelog_page(request: Request, sess: dict = Depends(page_user)):
+        """The full release history, moved off Settings so that page can stay
+        one group per screen. Read-only."""
+        return render(request, "changelog.html", role=sess["role"],
                       changelog=changelog.load(),
                       running_version=running_version)
 
@@ -444,6 +458,21 @@ def create_app(cfg: dict) -> FastAPI:
         if not name or not host:
             raise HTTPException(400, "give the device a name and an IP/host")
         return {"id": devmod.add(conn, name, host)}
+
+    @app.post("/api/devices/{did}")
+    def api_devices_update(did: int, body: dict, conn=Depends(get_conn),
+                           _=Depends(api_user)):
+        """Rename a device or correct its address (the row's Edit action).
+
+        Additive: the add/delete/ping routes are unchanged.
+        """
+        name = (body.get("name") or "").strip()
+        host = (body.get("host") or "").strip()
+        if not name or not host:
+            raise HTTPException(400, "give the device a name and an IP/host")
+        if not devmod.update(conn, did, name, host):
+            raise HTTPException(404, "device not found")
+        return {"ok": True}
 
     @app.delete("/api/devices/{did}")
     def api_devices_del(did: int, conn=Depends(get_conn), _=Depends(api_user)):

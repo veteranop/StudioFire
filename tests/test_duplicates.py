@@ -164,7 +164,7 @@ def main():
     got = client.get("/api/duplicates").json()
     check("GET /api/duplicates returns groups",
           "groups" in got and isinstance(got["groups"], list))
-    check("settings links to the cleanup", b"Open duplicate cleanup" in
+    check("settings links to the cleanup", b'href="/duplicates"' in
           client.get("/settings").content)
     bad = client.post("/api/duplicates/quarantine", json={})
     check("quarantine needs a path list (400)", bad.status_code == 400)

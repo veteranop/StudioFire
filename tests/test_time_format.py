@@ -6,6 +6,7 @@ Run: python tests/test_time_format.py
 """
 import datetime
 import os
+import re
 import sys
 import tempfile
 
@@ -69,9 +70,9 @@ def main():
           client.get("/api/settings/time_format").json()["format"] == "12")
     check("dashboard renders the 12h flag for the header clock",
           b"window.SF_HOUR12 = true" in client.get("/").content)
+    page = re.sub(rb"\s+", b" ", client.get("/settings").content)
     check("settings page shows 12-hour selected",
-          b'value="12" selected' in client.get("/settings").content)
-
+          b'data-tf="12" aria-pressed="true"' in page)
     r = client.post("/api/settings/time_format", json={"format": "24"})
     check("POST 24-hour accepted",
           r.status_code == 200 and r.json()["format"] == "24")
@@ -80,9 +81,9 @@ def main():
           client.get("/api/settings/time_format").json()["format"] == "24")
     check("dashboard renders the 24h flag",
           b"window.SF_HOUR12 = false" in client.get("/").content)
+    page = re.sub(rb"\s+", b" ", client.get("/settings").content)
     check("settings page shows 24-hour selected",
-          b'value="24" selected' in client.get("/settings").content)
-
+          b'data-tf="24" aria-pressed="true"' in page)
     check("garbage format rejected (400)",
           client.post("/api/settings/time_format",
                       json={"format": "yes"}).status_code == 400)

@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Change history — {{ station }}{% endblock %}
+{% block nav %}
+<nav class="nav-links">
+  <a href="/">On Air</a>
+  <a href="/playlists">Playlists</a>
+  <a href="/schedule">Schedule</a>
+  <a href="/settings">Settings</a>
+  <a href="/reports">Reports</a>
+  <a href="/help">Help</a>
+</nav>
+<form method="post" action="/logout" class="nav-right">
+  <button type="submit" class="btn">Sign out</button>
+</form>
+{% endblock %}
+{% block content %}
+{% from "_changelog.html" import cl_groups with context %}
+<div class="sf-settings" style="display:block">
+  <div class="st-head" style="margin-bottom:.8rem">
+    <div>
+      <h2>Change history</h2>
+      <p class="st-sub">Every StudioFire release, newest first. This station is
+        running <strong>{{ running_version }}</strong>.
+        <a class="st-link" href="/settings#about">Back to Settings</a></p>
+    </div>
+  </div>
+
+  {% if not changelog.ok or not changelog.releases %}
+  <div class="st-card">
+    <p class="st-help">Change history isn't available on this install.</p>
+  </div>
+  {% else %}
+    {% for rel in changelog.releases %}
+      {% if rel.released %}
+      {% if rel.version == running_version %}
+      <div class="st-card cl-release">
+        <h3 class="cl-ver" style="margin:0 0 .5rem">Version {{ rel.version }}{% if rel.date %}
+          <span class="muted" style="font-weight:400">— {{ rel.date }}</span>{% endif %}
+          <span class="src-tag">installed</span></h3>
+        {{ cl_groups(rel) }}
+      </div>
+      {% else %}
+      <details class="st-card cl-release" style="margin-bottom:.7rem">
+        <summary style="cursor:pointer">Version {{ rel.version }}{% if rel.date %} — {{ rel.date }}{% endif %}</summary>
+        <div style="margin-top:.6rem">{{ cl_groups(rel) }}</div>
+      </details>
+      {% endif %}
+      {% endif %}
+    {% endfor %}
+    {% for rel in changelog.releases if not rel.released and rel.groups %}
+    <details class="st-card cl-release">
+      <summary style="cursor:pointer">Not yet released</summary>
+      <div style="margin-top:.6rem">{{ cl_groups(rel) }}</div>
+    </details>
+    {% endfor %}
+  {% endif %}
+</div>
+{% endblock %}

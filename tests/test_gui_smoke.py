@@ -156,7 +156,8 @@ def main():
 
     # ---- settings: station folders + folder browser
     check("settings page renders",
-          b"Station folders" in client.get("/settings").content)
+          b'id="dir-rows"' in client.get("/settings").content
+          and b'data-goto="station"' in client.get("/settings").content)
     dirs = client.get("/api/settings/dirs").json()
     check("dir settings listed", len(dirs) >= 4
           and all(d["path"] == "" for d in dirs))

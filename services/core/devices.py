@@ -41,6 +41,14 @@ def add(conn: sqlite3.Connection, name: str, host: str) -> int:
     return cur.lastrowid
 
 
+def update(conn: sqlite3.Connection, did: int, name: str, host: str) -> bool:
+    """Rename a device or correct its address. False if the row is gone."""
+    with conn:
+        cur = conn.execute("UPDATE devices SET name = ?, host = ? WHERE id = ?",
+                           (name, host, did))
+    return cur.rowcount > 0
+
+
 def remove(conn: sqlite3.Connection, did: int) -> None:
     with conn:
         conn.execute("DELETE FROM devices WHERE id = ?", (did,))

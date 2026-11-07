@@ -15,341 +15,627 @@
 {% endblock %}
 {% block content %}
 {% from "_changelog.html" import cl_groups with context %}
+{% set me = user | default('') %}
+{% set is_admin = (role == 'admin') %}
 
-<h1 class="page-title">Settings</h1>
-<div class="sec-nav">
-  <a href="#sec-station-folders">Station folders</a>
-  <a href="#sec-playlists-folder">Playlists folder</a>
-  <a href="#sec-clock-and-time-format">Clock and time format</a>
-  <a href="#sec-library-duplicate-cleanup">Library duplicate cleanup</a>
-  <a href="#sec-station-equipment">Station equipment</a>
-  <a href="#sec-streaming-and-song-metadata">Streaming and song metadata</a>
-  <a href="#sec-users">Users</a>
-  <a href="#sec-full-playlist-export-and-restore">Full playlist export and restore</a>
-  <a href="#updates">Software updates</a>
-  <a href="#changelog">What's new / Change log</a>
-  <a href="#sec-system">System</a>
-</div>
-<div class="settings-grid">
-<div class="card" id="sec-station-folders">
-  <h2>Station folders</h2>
-  <p class="muted">Point StudioFire at the folders where your station keeps
-    things. These are used by playlists and (soon) automatic scheduling.</p>
-  <div id="dir-rows"></div>
-</div>
+<div class="sf-settings">
+  <!-- ------------------------------------------------------------ sidebar -->
+  <nav class="st-nav" aria-label="Settings sections">
+    <h1 class="st-title">Settings</h1>
 
-<div class="card" id="sec-playlists-folder">
-  <h2>Playlists folder</h2>
-  <p class="muted">Playlists are ZaraRadio-format <code>.lst</code> files.
-    New playlists are saved into this folder; a playlist opened from
-    somewhere else keeps saving back to its own file. Point this at the
-    folder where your <code>.lst</code> files live.</p>
-  <div class="dirrow">
-    <div><strong>Playlists folder</strong><br>
-      <small class="muted">e.g. the NAS folder with your Zara .lst files</small></div>
-    <div class="dirval"><code id="lst-path">…</code> <span id="lst-warn"></span></div>
-    <div>
-      <button class="btn btn-sm" id="lst-browse">Browse&#8230;</button>
-      <button class="btn btn-sm" id="lst-clear" onclick="setLstDir('')" hidden>Clear</button>
-      <button class="btn btn-sm btn-green" id="lst-syncall" onclick="syncAllLst()" hidden>Save all now</button>
-    </div>
-  </div>
-  <div id="lst-msg" class="muted" style="margin-top:.5rem"></div>
-</div>
+    <button class="st-navitem" data-goto="station" aria-current="true">
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="12" cy="12" r="2.4"/><path d="M7.8 7.8a6 6 0 0 0 0 8.4"/>
+        <path d="M16.2 7.8a6 6 0 0 1 0 8.4"/><path d="M5 5a10 10 0 0 0 0 14"/>
+        <path d="M19 5a10 10 0 0 1 0 14"/></svg>
+      <span>Station</span>
+    </button>
 
-<div class="card" id="sec-clock-and-time-format">
-  <h2>Clock &amp; time format</h2>
-  <p class="muted">How times are shown across StudioFire — the clock in the top
-    bar, the On Air log, reports, and the schedule.</p>
-  <div class="row">
-    <label style="margin:0">Time format
-      <select id="tf-format" onchange="saveTimeFormat()"
-              style="display:block;margin-top:.3rem">
-        <option value="12" {% if hour12 %}selected{% endif %}>12-hour (AM / PM)</option>
-        <option value="24" {% if not hour12 %}selected{% endif %}>24-hour (military)</option>
-      </select></label>
-  </div>
-  <div id="tf-msg" class="muted" style="margin-top:.4rem"></div>
-</div>
+    {% if is_admin %}
+    <button class="st-navitem" data-goto="streaming">
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M17 17h1.4a3.6 3.6 0 0 0 .3-7.2A5.6 5.6 0 0 0 8.3 9.5
+                 4 4 0 0 0 8 17h1"/>
+        <path d="M12 20v-7"/><path d="M9.2 15.2 12 12.4l2.8 2.8"/></svg>
+      <span>Streaming</span>
+      <em class="st-badge" id="nav-stream" hidden></em>
+    </button>
+    {% endif %}
 
-<div class="card" id="sec-library-duplicate-cleanup">
-  <h2>Library duplicate cleanup</h2>
-  <p class="muted">Find songs that appear more than once in the music library,
-    review them side by side, and move the extras out of the way. It is a
-    look-first, reversible tidy-up: nothing is deleted, and any file used by a
-    playlist, a show or a spot is protected.</p>
-  <a class="btn" href="/duplicates">🧹 Open duplicate cleanup</a>
-</div>
+    <button class="st-navitem" data-goto="equipment">
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <rect x="3" y="4" width="18" height="7" rx="2"/>
+        <rect x="3" y="13" width="18" height="7" rx="2"/>
+        <path d="M6.6 7.5h.01M6.6 16.5h.01"/></svg>
+      <span>Equipment</span>
+      <em class="st-badge st-badge-red" id="nav-dev" hidden></em>
+    </button>
 
-<div class="card" id="sec-station-equipment">
-  <h2>Station equipment</h2>
-  <p class="muted">Gear to keep an eye on by ping (ICMP) — transmitter, Barix,
-    switches, UniFi. <span class="tile-green-text">Green</span> = reachable,
-    <span class="tile-red-text">red</span> = not responding.</p>
-  <div id="dev-rows"><div class="muted">loading&#8230;</div></div>
-  <details class="advanced">
-    <summary>&#10133; Add a device</summary>
-    <div class="row">
-      <label style="flex:1">Name
-        <input id="nd-name" autocomplete="off" placeholder="TX150"></label>
-      <label style="flex:1">IP / host
-        <input id="nd-host" autocomplete="off" placeholder="10.0.0.5"></label>
-    </div>
-    <button class="btn btn-green" onclick="addDevice()">Add device</button>
-    <div id="dev-msg" class="muted" style="margin-top:.4rem"></div>
-  </details>
-</div>
+    {% if is_admin %}
+    <button class="st-navitem" data-goto="users">
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="9" cy="8" r="3.2"/><path d="M3.6 20a5.4 5.4 0 0 1 10.8 0"/>
+        <path d="M16.2 5.5a2.8 2.8 0 0 1 0 5.4"/>
+        <path d="M17.6 20a4.8 4.8 0 0 0-1.6-3.6"/></svg>
+      <span>Users</span>
+    </button>
+    {% endif %}
 
-<div class="card" id="sec-streaming-and-song-metadata">
-  <h2>Streaming &amp; song metadata</h2>
-  <p class="muted">Send the on-air artist and title to your streaming host, so the
-    website player shows what is playing and the host keeps a record of what it
-    carried (the listening half of a SoundExchange report). StudioFire sends from
-    the playout log &mdash; it never touches the audio, and a stream host that is
-    down or slow cannot affect what goes to air.</p>
-  {% if role == 'admin' %}
-  <div class="row" style="align-items:center">
-    <label style="margin:0;display:flex;align-items:center;gap:.5rem">
-      <input type="checkbox" id="st-enabled" style="margin:0">
-      <span>Send the on-air title to the stream</span></label>
-  </div>
-  <div class="row" style="flex-wrap:wrap;gap:.6rem">
-    <label style="flex:2;min-width:280px">Target URL
-      <input id="st-endpoint" autocomplete="off"
-             placeholder="http://peridot.streamguys.com:5110">
-      <small class="muted">Your stream host's address &mdash; no path after it</small></label>
-    <label style="flex:1;min-width:130px">Mount
-      <input id="st-mount" autocomplete="off" placeholder="/live"></label>
-  </div>
-  <div class="row" style="flex-wrap:wrap;gap:.6rem">
-    <label style="flex:1;min-width:190px">Username
-      <input id="st-user" autocomplete="off" placeholder="from your stream host"></label>
-    <label style="flex:1;min-width:190px">Password
-      <input id="st-pass" type="password" autocomplete="new-password">
-      <small class="muted" id="st-pass-hint">Leave blank to keep the saved one</small></label>
-  </div>
-  <div class="row" style="flex-wrap:wrap;gap:.6rem">
-    <label style="flex:1;min-width:320px">What the file says (the song line)
-      <input id="st-npformat" autocomplete="off"
-             placeholder="{artist} | {title} | {album} | {label} | {isrc}">
-      <small class="muted">Leave blank for the default. Fields: {artist},
-        {title}, {album}, {label}, {isrc}. Your stream host parses this line
-        to build its reporting, so keep the order identical on every song and
-        leave a missing value as an empty slot. Listeners see this too, so
-        change it only when your host asks.</small></label>
-  </div>
-  <div class="row" style="flex-wrap:wrap;gap:.6rem">
-    <label style="flex:1;min-width:320px">Now-playing file (for the stream encoder)
-      <input id="st-npfile" autocomplete="off"
-             placeholder="\\192.168.6.222\StudioFire\...\Current\CurrentSong.txt">
-      <small class="muted">StudioFire writes the current song here on every track
-        change. Point this at the file your encoder (e.g. BUTT) polls — full
-        UNC path, not a drive letter.</small></label>
-  </div>
-  <button class="btn btn-green" onclick="saveStreaming()">Save</button>
-  <button class="btn" onclick="writeNowPlayingFile()">Write the current song now</button>
-  <button class="btn" onclick="testStreaming()">Send a test title</button>
-  <div id="st-msg" class="muted" style="margin-top:.4rem"></div>
-  {% endif %}
-  <h2 style="margin-top:1.1rem">Live monitor</h2>
-  <div id="st-monitor" class="muted">Checking&hellip;</div>
-</div>
+    <button class="st-navitem" data-goto="maintenance">
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M4 7h8M16 7h4M4 17h4M12 17h8"/>
+        <circle cx="14" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>
+      <span>Maintenance</span>
+    </button>
 
-{% if role == 'admin' %}
-<div class="card card-wide" id="sec-users">
-  <h2>Users</h2>
-  <p class="muted">Admins can do everything, including managing users. Basic
-    users can do everything <em>except</em> add or remove users.</p>
-  <div id="user-rows"></div>
-  <details class="advanced">
-    <summary>&#10133; Add a user</summary>
-    <div class="row">
-      <label style="flex:1">Username
-        <input id="nu-name" autocomplete="off"></label>
-      <label style="flex:1">Password <span class="muted">(min 8)</span>
-        <input id="nu-pass" type="password" autocomplete="new-password"></label>
-      <label>Role
-        <select id="nu-role">
-          <option value="operator">Basic</option>
-          <option value="admin">Admin</option>
-        </select></label>
-    </div>
-    <button class="btn btn-green" onclick="addUser()">Create user</button>
-    <div id="user-msg" class="muted" style="margin-top:.4rem"></div>
-  </details>
-</div>
+    <button class="st-navitem" data-goto="about">
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="12" cy="12" r="9"/><path d="M12 11.4v5"/>
+        <path d="M12 7.8h.01"/></svg>
+      <span>About &amp; updates</span>
+      <em class="st-badge" id="nav-ver">{{ running_version }}</em>
+      <em class="st-badge st-badge-green" id="nav-update" hidden>Update</em>
+    </button>
+  </nav>
 
-<div class="card card-wide" id="sec-full-playlist-export-and-restore">
-  <h2>Full playlist export &amp; restore</h2>
-  <p class="muted">One file containing every playlist — download it now and
-    then, keep it somewhere safe (USB stick, email it to yourself), and
-    restore from it if anything ever goes wrong.</p>
-  <div class="row">
-    <a class="btn" href="/api/backup">⬇ Download backup</a>
-    <input type="file" id="restore-file" accept=".json,application/json">
-    <button class="btn" onclick="restoreBackup()">⬆ Restore from backup</button>
-  </div>
-</div>
-{% endif %}
+  <!-- ------------------------------------------------------------ content -->
+  <div class="st-main">
 
-<div class="card card-wide" id="updates">
-  <h2>Software updates</h2>
-  <p class="muted">New versions of StudioFire are published on GitHub.
-    StudioFire checks for one every few hours. It never installs anything
-    by itself — an admin presses <strong>Install</strong>.</p>
-  <div id="upd-summary">Checking…</div>
-  <div id="upd-notes" class="upd-notes" hidden></div>
-  <div class="row">
-    <button class="btn" id="upd-check" onclick="updCheck()">🔄 Check now</button>
-    <button class="btn btn-green" id="upd-install" onclick="updInstall()"
-            hidden>⬆ Install update</button>
-  </div>
-  <div id="upd-progress" class="muted"></div>
-  <!-- §6.3 major-version gate: DETECT + INFORM ONLY. Admins see a muted,
-       non-clickable note when a higher major exists; operators see nothing.
-       There is no button, input or endpoint to install a major in this
-       release — major upgrades are scheduled by VeteranOp. -->
-  <div id="upd-major" class="muted" hidden style="margin-top:.7rem"></div>
-</div>
-
-<div class="card" id="changelog">
-  <h2>What's new / Change log</h2>
-  <p class="muted">This station is running
-    <strong>StudioFire {{ running_version }}</strong>. Here's what changed in
-    this version and the ones before it (newest first).</p>
-  {% if not changelog.ok or not changelog.releases %}
-  <p class="muted">Change history isn't available on this install.</p>
-  {% else %}
-    {% set ns = namespace(shown=0) %}
-    {% for rel in changelog.releases if rel.released %}
-      {% set ns.shown = ns.shown + 1 %}
-      {% if ns.shown == 1 %}
-      {# newest released version — expanded, and flagged if it's the one running #}
-      <div class="cl-release">
-        <h2 class="cl-ver">Version {{ rel.version }}{% if rel.date %}
-          <span class="muted">— {{ rel.date }}</span>{% endif %}
-          {% if rel.version == running_version %}
-          <span class="src-tag">installed</span>{% endif %}</h2>
-        {{ cl_groups(rel) }}
+    <!-- ===== 1. STATION ================================================ -->
+    <section class="st-group" id="g-station" data-group="station">
+      <div class="st-head">
+        <div>
+          <h2>Station</h2>
+          <p class="st-sub">Where StudioFire finds your audio, and how it shows
+            the time.</p>
+        </div>
       </div>
-      {% else %}
-      {# older versions — collapsed, so this doubles as version history #}
-      <details class="advanced cl-release">
-        <summary>Version {{ rel.version }}{% if rel.date %} — {{ rel.date }}{% endif %}</summary>
-        {{ cl_groups(rel) }}
-      </details>
-      {% endif %}
-    {% endfor %}
-    {% for rel in changelog.releases if not rel.released and rel.groups %}
-    {# anything staged but not shipped yet — clearly not the installed notes #}
-    <details class="advanced cl-release">
-      <summary>Not yet released</summary>
-      {{ cl_groups(rel) }}
-    </details>
-    {% endfor %}
-  {% endif %}
+
+      <div class="st-card">
+        <div class="st-card-head">
+          <h3>Folders</h3>
+          <div class="st-tools">
+            <button class="st-link" id="lst-syncall" onclick="syncAllLst()"
+                    hidden>Save all now</button>
+            <span class="st-saved">&#10003; Changes save automatically</span>
+          </div>
+        </div>
+        <table class="st-table">
+          <tbody id="dir-rows">
+            <tr><td class="st-empty">Loading&hellip;</td></tr>
+          </tbody>
+        </table>
+        <div class="st-flash" id="lst-msg" aria-live="polite"></div>
+      </div>
+
+      <div class="st-card">
+        <div class="st-tfrow">
+          <div>
+            <strong>Time format</strong>
+            <p class="st-help">Top-bar clock, On Air log, reports and schedule</p>
+          </div>
+          <div class="st-seg" role="group" aria-label="Time format">
+            <button type="button" data-tf="12"
+                    aria-pressed="{{ 'true' if hour12 else 'false' }}">12-hour</button>
+            <button type="button" data-tf="24"
+                    aria-pressed="{{ 'false' if hour12 else 'true' }}">24-hour</button>
+          </div>
+        </div>
+        <div class="st-flash" id="tf-msg" aria-live="polite"></div>
+      </div>
+    </section>
+
+    <!-- ===== 2. STREAMING ============================================= -->
+    <section class="st-group" id="g-streaming" data-group="streaming"
+             aria-label="Streaming &amp; song metadata"
+             {% if not is_admin %}hidden{% endif %}>
+      <div class="st-head">
+        <div>
+          <h2>Streaming</h2>
+          <p class="st-sub">Send the on-air artist and title to your stream host.
+            Never touches the audio.
+            <a class="st-link" href="/help#streaming">How this works</a></p>
+        </div>
+      </div>
+
+      <div id="st-banner" class="st-banner st-banner-warn" hidden></div>
+
+      <div class="st-card">
+        {% if is_admin %}
+        <div class="st-switchrow">
+          <div>
+            <strong>Send on-air title to the stream</strong>
+            <p class="st-help" id="st-enabled-note">Off &mdash; nothing is being sent</p>
+          </div>
+          <button type="button" class="st-switch" id="st-enabled" role="switch"
+                  aria-pressed="false" aria-label="Send on-air title to the stream">
+            <span></span>
+          </button>
+        </div>
+
+        <div class="st-fields">
+          <div class="st-field">
+            <label for="st-endpoint">Stream host</label>
+            <input id="st-endpoint" autocomplete="off"
+                   placeholder="http://peridot.streamguys.com:5110">
+            <p class="st-help">Address only, no path after it</p>
+          </div>
+          <div class="st-field">
+            <label for="st-mount">Mount</label>
+            <input id="st-mount" autocomplete="off" placeholder="/live">
+          </div>
+          <div class="st-field">
+            <label for="st-user">Username</label>
+            <input id="st-user" autocomplete="off" placeholder="from your stream host">
+          </div>
+          <div class="st-field">
+            <label for="st-pass">Password</label>
+            <input id="st-pass" type="password" autocomplete="new-password">
+            <p class="st-help" id="st-pass-hint"></p>
+          </div>
+        </div>
+
+        <details class="st-adv" id="st-advanced">
+          <summary>Advanced &mdash; song line format, now-playing file</summary>
+          <div class="st-fields" style="margin-top:.9rem">
+            <div class="st-field">
+              <label for="st-npformat">Song line format</label>
+              <input id="st-npformat" autocomplete="off"
+                     placeholder="{artist} | {title} | {album} | {label} | {isrc}">
+              <p class="st-help">Only change this if your stream host asks.
+                Fields: {artist} {title} {album} {label} {isrc}</p>
+            </div>
+            <div class="st-field">
+              <label for="st-npfile">Now-playing file</label>
+              <input id="st-npfile" autocomplete="off"
+                     placeholder="\\192.168.6.222\StudioFire\...\CurrentSong.txt">
+              <p class="st-help">For your encoder (e.g. BUTT). Use a full network
+                path, not a drive letter.</p>
+              <div class="st-foot" style="margin-top:.5rem">
+                <button class="btn btn-ghost btn-sm" onclick="writeNowPlayingFile()">
+                  Write the current song now</button>
+              </div>
+            </div>
+          </div>
+        </details>
+
+        <div class="st-foot">
+          <button class="btn btn-green" onclick="saveStreaming()">Save</button>
+          <button class="btn btn-ghost" onclick="testStreaming()">Send a test title</button>
+        </div>
+        <div class="st-flash" id="st-msg" aria-live="polite"></div>
+        {% endif %}
+      </div>
+
+      <div class="st-card">
+        <div class="st-card-head"><h3>Live status</h3></div>
+        <div id="st-monitor" class="st-empty">Checking&hellip;</div>
+      </div>
+    </section>
+
+    <!-- ===== 3. EQUIPMENT ============================================= -->
+    <section class="st-group" id="g-equipment" data-group="equipment" hidden>
+      <div class="st-head">
+        <div>
+          <h2>Equipment</h2>
+          <p class="st-sub">Gear StudioFire pings. Problems also show on the
+            On Air health badge.</p>
+        </div>
+        <button class="btn btn-ghost" onclick="deviceDialog()">+ Add device</button>
+      </div>
+      <div class="st-card">
+        <div id="dev-rows" class="st-rows">
+          <div class="st-empty">Loading&hellip;</div>
+        </div>
+        <div class="st-flash" id="dev-msg" aria-live="polite"></div>
+      </div>
+    </section>
+
+    <!-- ===== 4. USERS ================================================= -->
+    {% if is_admin %}
+    <section class="st-group" id="g-users" data-group="users" hidden>
+      <div class="st-head">
+        <div>
+          <h2>Users</h2>
+          <p class="st-sub">Admins can manage users. Basic users can do
+            everything else.</p>
+        </div>
+        <button class="btn btn-ghost" onclick="userDialog()">+ Add user</button>
+      </div>
+      <div class="st-card">
+        <div id="user-rows" class="st-rows">
+          <div class="st-empty">Loading&hellip;</div>
+        </div>
+        <div class="st-flash" id="user-msg" aria-live="polite"></div>
+      </div>
+    </section>
+    {% endif %}
+
+    <!-- ===== 5. MAINTENANCE =========================================== -->
+    <section class="st-group" id="g-maintenance" data-group="maintenance" hidden>
+      <div class="st-head">
+        <div>
+          <h2>Maintenance</h2>
+          <p class="st-sub">Occasional tidy-up and safety tools.</p>
+        </div>
+      </div>
+
+      <div class="st-2col">
+        <div class="st-card">
+          <div class="st-card-head"><h3>Duplicate cleanup</h3></div>
+          <p class="st-help">Find songs that are in the library twice. Nothing is
+            deleted, and files in use are protected.</p>
+          <div class="st-foot">
+            <a class="btn btn-ghost" href="/duplicates">Review duplicates</a>
+          </div>
+        </div>
+
+        <div class="st-card">
+          <div class="st-card-head"><h3>Playlist backup</h3></div>
+          <p class="st-help">Every playlist in one file. Keep a copy somewhere
+            safe.</p>
+          <div class="st-foot">
+            <a class="btn btn-ghost" href="/api/backup">Download backup</a>
+            <button class="btn-text" onclick="restorePick()">Restore&hellip;</button>
+            <input type="file" id="restore-file" accept=".json,application/json" hidden>
+          </div>
+          <div class="st-flash" id="backup-msg" aria-live="polite"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== 6. ABOUT & UPDATES ======================================= -->
+    <section class="st-group" id="g-about" data-group="about" hidden>
+      <div class="st-head">
+        <div>
+          <h2>About &amp; updates</h2>
+          <p class="st-sub">What this install is, and what has changed.</p>
+        </div>
+      </div>
+
+      <div class="st-card">
+        <div class="st-verrow">
+          <div>
+            <div class="st-vernum">StudioFire {{ running_version }}</div>
+            <p class="st-help" id="upd-summary">Checking&hellip;</p>
+          </div>
+          <div class="st-veract">
+            <button class="btn btn-ghost" id="upd-check" onclick="updCheck()">
+              Check for updates</button>
+            <button class="btn btn-green" id="upd-install" onclick="updInstall()"
+                    hidden>Install</button>
+          </div>
+        </div>
+        <div id="upd-notes" class="upd-notes" hidden></div>
+        <div id="upd-progress" class="st-help"></div>
+        <!-- §6.3 major-version gate: DETECT + INFORM ONLY. Admins see a muted,
+             non-clickable note when a higher major exists; operators see
+             nothing. There is no button, input or endpoint to install a major
+             in this release — major upgrades are scheduled by VeteranOp. -->
+        <div id="upd-major" class="st-help" hidden></div>
+
+        <div class="st-whatsnew">
+          {% set cur = namespace(rel=None) %}
+          {% for rel in changelog.releases %}
+            {% if rel.version == running_version %}{% set cur.rel = rel %}{% endif %}
+          {% endfor %}
+          {% if cur.rel and cur.rel.groups %}
+            <h3>What's new in {{ running_version }}<span class="muted"
+              style="font-weight:400">{% if cur.rel.date %} &mdash; {{ cur.rel.date }}{% endif %}</span></h3>
+            {{ cl_groups(cur.rel) }}
+          {% elif changelog.ok and changelog.releases %}
+            <h3>What's new in {{ running_version }}</h3>
+            <p class="st-help">No notes recorded for this build.</p>
+          {% else %}
+            <h3>What's new</h3>
+            <p class="st-help">Change history isn't available on this install.</p>
+          {% endif %}
+          <div class="st-foot">
+            <a class="st-link" href="/changelog">Full change history</a>
+          </div>
+        </div>
+      </div>
+
+      <div class="st-card st-danger">
+        <h3>Quit StudioFire</h3>
+        <p class="st-help">Stops all services, including playout. The station
+          goes silent.</p>
+        <div class="st-foot">
+          <button class="btn btn-danger" onclick="quitStudioFire()">Quit&hellip;</button>
+        </div>
+        <div class="st-flash" id="quit-msg" aria-live="polite"></div>
+      </div>
+    </section>
+
+  </div>
 </div>
 
-<div class="card card-danger" id="sec-system">
-  <h2>System</h2>
-  <p class="muted">Stop all services and exit.</p>
-  <button class="btn btn-red" onclick="quitStudioFire()">Quit StudioFire</button>
-  <div id="quit-msg" class="muted" style="margin-top:.5rem"></div>
-</div>
-</div>
-<div class="card" id="picker-card" hidden>
-  <h2 id="picker-title">Choose a folder</h2>
-  <div class="row">
-    <button class="btn btn-sm" onclick="pickerGo('')">&#128187; Drives</button>
-    <button class="btn btn-sm" id="picker-up" onclick="pickerUp()">&#11014; Up</button>
-    <span id="picker-path" class="muted"></span>
+<!-- ---------------------------------------------------------- dialogs -->
+<dialog class="sf-dlg" id="sf-dlg">
+  <h3 id="sf-dlg-title">Confirm</h3>
+  <p id="sf-dlg-body"></p>
+  <div id="sf-dlg-field" hidden>
+    <input id="sf-dlg-input" autocomplete="off">
+  </div>
+  <div class="st-foot">
+    <button class="btn btn-ghost" id="sf-dlg-cancel">Cancel</button>
+    <button class="btn btn-green" id="sf-dlg-ok">OK</button>
+  </div>
+</dialog>
+
+<dialog class="sf-picker" id="picker-dlg">
+  <h3 id="picker-title" style="margin:0 0 .6rem;font-size:1rem">Choose a folder</h3>
+  <div class="row" style="margin:.2rem 0 .5rem">
+    <button class="btn btn-ghost btn-sm" onclick="pickerGo('')">Drives</button>
+    <button class="btn btn-ghost btn-sm" id="picker-up" onclick="pickerUp()">Up</button>
+    <span id="picker-path" class="muted" style="font-size:.82rem"></span>
   </div>
   <div id="picker-list" class="picker"></div>
-  <div class="row">
-    <button class="btn btn-green" onclick="pickerUse()">&#10004; Use this folder</button>
-    <button class="btn" onclick="pickerClose()">Cancel</button>
+  <div class="st-foot">
+    <button class="btn-text" id="picker-clear" onclick="pickerClear()" hidden>Clear</button>
+    <span style="flex:1"></span>
+    <button class="btn btn-ghost" onclick="pickerClose()">Cancel</button>
+    <button class="btn btn-green" onclick="pickerUse()">Use this folder</button>
   </div>
-</div>
+</dialog>
 
 <script>
+/* ============================================================ navigation
+   One group at a time, driven by the URL hash so deep links and the back
+   button work. Old anchor links (#updates, #changelog, #sec-*) still land on
+   the right group. */
+const ST_GROUPS = ["station", "streaming", "equipment", "users",
+                   "maintenance", "about"];
+const ST_LEGACY = {
+  "sec-station-folders": "station", "sec-playlists-folder": "station",
+  "sec-clock-and-time-format": "station",
+  "sec-streaming-and-song-metadata": "streaming", "streaming": "streaming",
+  "sec-station-equipment": "equipment", "equipment": "equipment",
+  "sec-users": "users", "users": "users",
+  "sec-library-duplicate-cleanup": "maintenance",
+  "sec-full-playlist-export-and-restore": "maintenance",
+  "duplicates": "maintenance", "backup": "maintenance",
+  "updates": "about", "changelog": "about", "sec-system": "about",
+  "about": "about"
+};
+
+function stGroupFromHash() {
+  const raw = (location.hash || "").replace(/^#/, "");
+  if (!raw) return "station";
+  if (ST_GROUPS.includes(raw)) return raw;
+  return ST_LEGACY[raw] || "station";
+}
+
+function stShow(group, push) {
+  if (!ST_GROUPS.includes(group)) group = "station";
+  for (const g of ST_GROUPS) {
+    const el = document.getElementById("g-" + g);
+    if (el) el.hidden = (g !== group);
+  }
+  for (const b of document.querySelectorAll(".st-navitem")) {
+    b.setAttribute("aria-current", b.dataset.goto === group ? "true" : "false");
+  }
+  if (push && location.hash !== "#" + group) {
+    history.pushState(null, "", "#" + group);
+  }
+  window.scrollTo(0, 0);
+}
+
+document.querySelectorAll(".st-navitem").forEach(b => {
+  b.addEventListener("click", () => stShow(b.dataset.goto, true));
+});
+window.addEventListener("hashchange", () => stShow(stGroupFromHash(), false));
+window.addEventListener("popstate", () => stShow(stGroupFromHash(), false));
+
+/* ============================================================ dialogs */
+const dlg = document.getElementById("sf-dlg");
+let dlgResolve = null;
+
+function sfDialog(opts) {
+  opts = opts || {};
+  document.getElementById("sf-dlg-title").textContent = opts.title || "Confirm";
+  document.getElementById("sf-dlg-body").textContent = opts.body || "";
+  const ok = document.getElementById("sf-dlg-ok");
+  ok.textContent = opts.okLabel || "OK";
+  ok.className = "btn " + (opts.danger ? "btn-danger" : "btn-green");
+  const fieldBox = document.getElementById("sf-dlg-field");
+  const input = document.getElementById("sf-dlg-input");
+  fieldBox.hidden = !opts.field;
+  if (opts.field) {
+    input.type = opts.field.type || "text";
+    input.value = opts.field.value || "";
+    input.placeholder = opts.field.placeholder || "";
+  }
+  dlg.showModal();
+  if (opts.field) setTimeout(() => input.focus(), 30);
+  return new Promise(res => { dlgResolve = res; });
+}
+
+dlg.addEventListener("close", () => {
+  if (!dlgResolve) return;
+  const ok = dlg.returnValue === "ok";
+  const input = document.getElementById("sf-dlg-input");
+  const fieldBox = document.getElementById("sf-dlg-field");
+  dlgResolve(fieldBox.hidden ? ok : (ok ? input.value : null));
+  dlgResolve = null;
+});
+document.getElementById("sf-dlg-ok").addEventListener("click", () => dlg.close("ok"));
+document.getElementById("sf-dlg-cancel").addEventListener("click", () => dlg.close("cancel"));
+
+function flash(id, text, isError) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = text || "";
+  el.dataset.error = isError ? "1" : "0";
+  if (text) setTimeout(() => { if (el.textContent === text) el.textContent = ""; }, 4000);
+}
+
+/* ============================================================ folders */
 let dirs = [];
+let lstPath = "";
 let pickKey = null;
 let pickPath = "";
 let pickParent = null;
 
-async function loadDirs() {
-  dirs = await (await fetch("/api/settings/dirs")).json();
+function stNarrow() {
+  return window.matchMedia("(max-width: 720px)").matches;
+}
+
+function midEll(p, max) {
+  max = max || 42;
+  p = String(p || "");
+  if (p.length <= max) return p;
+  const head = Math.ceil((max - 3) * 0.55);
+  const tail = max - 3 - head;
+  return p.slice(0, head) + " \u2026 " + p.slice(p.length - tail);
+}
+
+const FOLDER_ROWS = [
+  {key: "__lst__", label: "Playlists", hint: "Your Zara .lst files"},
+  {key: "dir_shows", label: "Shows", hint: "Syndicated \u2014 newest file plays"},
+  {key: "dir_ads", label: "Ads / spots", hint: "Rotate evenly"},
+  {key: "dir_station_ids", label: "Station IDs", hint: "Top-of-hour legal IDs"},
+  {key: "dir_jingles", label: "Jingles / sweepers", hint: "Between songs"},
+  {key: "dir_psas", label: "PSAs / liners", hint: "PSAs and DJ liners"}
+];
+
+function folderPath(key) {
+  if (key === "__lst__") return lstPath;
+  const d = dirs.find(x => x.key === key);
+  return d ? d.path : "";
+}
+function folderExists(key) {
+  if (key === "__lst__") return true;
+  const d = dirs.find(x => x.key === key);
+  return !d || !d.path || d.exists;
+}
+
+function renderDirs() {
   const box = document.getElementById("dir-rows");
+  if (!box) return;
   box.innerHTML = "";
-  for (const d of dirs) {
-    const row = document.createElement("div");
-    row.className = "dirrow";
-    const warn = d.path && !d.exists
-      ? " <span class='tile-red-text'>&#9888; folder not found</span>" : "";
-    row.innerHTML =
-      "<div><strong>" + d.label + "</strong><br>" +
-      "<small class='muted'>" + d.hint + "</small></div>" +
-      "<div class='dirval'><code>" +
-      (d.path || "<span class='muted'>Not set</span>") + "</code>" + warn +
-      "</div>";
-    const btns = document.createElement("div");
-    const browse = document.createElement("button");
-    browse.className = "btn btn-sm";
-    browse.textContent = "Browse\u2026";
-    browse.onclick = () => pickerOpen(d.key, d.label, d.path);
-    btns.appendChild(browse);
-    if (d.path) {
-      const clear = document.createElement("button");
-      clear.className = "btn btn-sm";
-      clear.textContent = "Clear";
-      clear.onclick = async () => { await saveDir(d.key, ""); };
-      btns.appendChild(clear);
+  for (const row of FOLDER_ROWS) {
+    const path = folderPath(row.key);
+    const tr = document.createElement("tr");
+
+    const name = document.createElement("td");
+    name.className = "st-name";
+    const strong = document.createElement("strong");
+    strong.textContent = row.label;
+    const desc = document.createElement("span");
+    desc.className = "st-desc";
+    desc.textContent = row.hint;
+    name.append(strong, desc);
+
+    const pathCell = document.createElement("td");
+    pathCell.className = "st-path";
+    const code = document.createElement("code");
+    if (path) {
+      /* desktop: middle-ellipsis so the tail of the path stays readable in the
+         pill; phone: the full path, wrapped (there is room once rows stack) */
+      code.dataset.full = path;
+      code.textContent = stNarrow() ? path : midEll(path);
+      code.title = path;
+    } else {
+      code.textContent = "Not set";
+      code.className = "is-empty";
     }
-    row.appendChild(btns);
-    box.appendChild(row);
+    pathCell.appendChild(code);
+    if (path && !folderExists(row.key)) {
+      const warn = document.createElement("span");
+      warn.className = "st-warn";
+      warn.textContent = "\u26a0 folder not found";
+      pathCell.appendChild(warn);
+    }
+
+    const act = document.createElement("td");
+    act.className = "st-act";
+    const btn = document.createElement("button");
+    btn.className = "btn btn-ghost btn-sm";
+    btn.type = "button";
+    btn.textContent = "Change";
+    btn.onclick = () => pickerOpen(row.key, row.label, path);
+    act.appendChild(btn);
+
+    tr.append(name, pathCell, act);
+    box.appendChild(tr);
   }
+  const sync = document.getElementById("lst-syncall");
+  if (sync) sync.hidden = !lstPath;
+}
+
+async function loadDirs() {
+  try {
+    dirs = await (await fetch("/api/settings/dirs")).json();
+  } catch (e) { dirs = []; }
+  await loadLstDir();
 }
 
 async function saveDir(key, path) {
   const r = await fetch("/api/settings/dirs", {method: "POST",
     headers: {"Content-Type": "application/json"},
     body: JSON.stringify({key, path})});
-  if (!r.ok) alert((await r.json()).detail || "Could not save");
-  loadDirs();
+  if (!r.ok) {
+    flash("lst-msg", (await r.json().catch(() => ({}))).detail ||
+      "Could not save that folder.", true);
+    return false;
+  }
+  await loadDirs();
+  return true;
 }
 
-async function saveTimeFormat() {
-  const fmt = document.getElementById("tf-format").value;
-  const msg = document.getElementById("tf-msg");
-  const r = await fetch("/api/settings/time_format", {method: "POST",
+async function loadLstDir() {
+  try {
+    const d = await (await fetch("/api/playlists/lst_dir")).json();
+    lstPath = d.path || "";
+  } catch (e) { lstPath = ""; }
+  renderDirs();
+}
+
+async function setLstDir(path) {
+  const r = await fetch("/api/playlists/lst_dir", {method: "POST",
     headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({format: fmt})});
+    body: JSON.stringify({name: path})});
+  const j = await r.json().catch(() => ({}));
   if (!r.ok) {
-    msg.textContent = (await r.json()).detail || "Could not save.";
-    return;
+    flash("lst-msg", j.detail || "Could not save that folder.", true);
+    return false;
   }
-  window.SF_HOUR12 = (fmt === "12");   // the top-bar clock updates next tick
-  msg.textContent = "Saved — times now show in " +
-    (fmt === "12" ? "12-hour (AM/PM)" : "24-hour") + " format.";
+  await loadLstDir();
+  flash("lst-msg", path ? "Saved and wrote " + j.synced + " playlist(s)."
+                        : "Turned off.");
+  return true;
+}
+
+async function syncAllLst() {
+  const r = await fetch("/api/playlists/sync_lst", {method: "POST"});
+  const j = await r.json().catch(() => ({}));
+  flash("lst-msg", r.ok ? "Wrote " + j.synced + " playlist(s) to " + j.folder
+                        : (j.detail || "Could not save"), !r.ok);
 }
 
 function pickerOpen(key, label, startPath) {
   pickKey = key;
   document.getElementById("picker-title").textContent =
     "Choose a folder for: " + label;
-  document.getElementById("picker-card").hidden = false;
+  document.getElementById("picker-clear").hidden = !startPath;
+  document.getElementById("picker-dlg").showModal();
   pickerGo(startPath || "");
-  document.getElementById("picker-card").scrollIntoView({behavior: "smooth"});
+}
+
+function pickerClose() {
+  const d = document.getElementById("picker-dlg");
+  if (d.open) d.close();
+  pickKey = null;
 }
 
 async function pickerGo(path) {
   const r = await fetch("/api/fs/list?path=" + encodeURIComponent(path));
-  if (!r.ok) { alert("Cannot open that folder"); return; }
+  if (!r.ok) { flash("lst-msg", "Cannot open that folder.", true); return; }
   const d = await r.json();
   pickPath = d.path;
   pickParent = d.parent;
-  document.getElementById("picker-path").textContent =
-    d.path || "Choose a drive";
+  document.getElementById("picker-path").textContent = d.path || "Choose a drive";
   document.getElementById("picker-up").disabled = d.parent === null;
   const list = document.getElementById("picker-list");
   list.innerHTML = "";
@@ -369,418 +655,554 @@ function pickerUp() {
   if (pickParent !== null) pickerGo(pickParent);
 }
 
+async function pickerClear() {
+  if (pickKey === "__lst__") await setLstDir("");
+  else await saveDir(pickKey, "");
+  pickerClose();
+}
+
 async function pickerUse() {
-  if (!pickPath) { alert("Open a drive or folder first."); return; }
+  if (!pickPath) { flash("lst-msg", "Open a drive or folder first.", true); return; }
   if (pickKey === "__lst__") await setLstDir(pickPath);
   else await saveDir(pickKey, pickPath);
   pickerClose();
 }
 
-// ---- playlist .lst backup folder
-async function loadLstDir() {
-  const d = await (await fetch("/api/playlists/lst_dir")).json();
-  const c = document.getElementById("lst-path");
-  c.textContent = d.path || "Not set"; c.dataset.path = d.path || "";
-  document.getElementById("lst-warn").innerHTML = d.path && !d.exists
-    ? "<span class='tile-red-text'>⚠ folder not found</span>" : "";
-  document.getElementById("lst-clear").hidden = !d.path;
-  document.getElementById("lst-syncall").hidden = !d.path;
-}
-async function setLstDir(path) {
-  const r = await fetch("/api/playlists/lst_dir", {method: "POST",
+/* ============================================================ time format */
+document.querySelectorAll(".st-seg button[data-tf]").forEach(btn => {
+  btn.addEventListener("click", () => saveTimeFormat(btn.dataset.tf));
+});
+
+async function saveTimeFormat(fmt) {
+  const r = await fetch("/api/settings/time_format", {method: "POST",
     headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({name: path})});
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok) { alert(j.detail || "Could not save"); return; }
-  document.getElementById("lst-msg").textContent = path
-    ? "Saved and wrote " + j.synced + " playlist(s) to " + path : "Turned off.";
-  loadLstDir();
-}
-async function syncAllLst() {
-  const r = await fetch("/api/playlists/sync_lst", {method: "POST"});
-  const j = await r.json().catch(() => ({}));
-  document.getElementById("lst-msg").textContent = r.ok
-    ? "Wrote " + j.synced + " playlist(s) to " + j.folder
-    : (j.detail || "Could not save");
-}
-document.getElementById("lst-browse").onclick = () => pickerOpen(
-  "__lst__", "playlist .lst backup",
-  document.getElementById("lst-path").dataset.path || "");
-
-function pickerClose() {
-  document.getElementById("picker-card").hidden = true;
-  pickKey = null;
+    body: JSON.stringify({format: fmt})});
+  if (!r.ok) {
+    flash("tf-msg", (await r.json().catch(() => ({}))).detail ||
+      "Could not save.", true);
+    return;
+  }
+  for (const b of document.querySelectorAll(".st-seg button[data-tf]"))
+    b.setAttribute("aria-pressed", b.dataset.tf === fmt ? "true" : "false");
+  window.SF_HOUR12 = (fmt === "12");
+  flash("tf-msg", "Saved \u2713");
 }
 
-// ---- users (admin only; the section isn't rendered for Basic)
+/* ============================================================ devices */
+let devices = [];
+
+function devStatus(d) {
+  if (d.up === true)
+    return [d.latency_ms != null ? Math.round(d.latency_ms) + " ms" : "Up", ""];
+  if (d.up === false) return ["Not responding", "down"];
+  return ["\u2026 checking", ""];
+}
+
+async function loadDevices() {
+  const box = document.getElementById("dev-rows");
+  if (!box) return;
+  try { devices = await (await fetch("/api/devices")).json(); }
+  catch (e) { return; }
+  box.innerHTML = "";
+  if (!devices.length) {
+    box.innerHTML = "<div class='st-empty'>No devices yet.</div>";
+    navDeviceBadge(0);
+    return;
+  }
+  let down = 0;
+  for (const d of devices) {
+    const [txt, cls] = devStatus(d);
+    if (d.up === false) down++;
+
+    const row = document.createElement("div");
+    row.className = "st-row";
+
+    const dot = document.createElement("span");
+    dot.className = "st-dot" + (d.up === false ? " down" : "");
+
+    const main = document.createElement("div");
+    main.className = "st-rowmain";
+    const nm = document.createElement("strong");
+    nm.textContent = d.name;
+    const host = document.createElement("span");
+    host.className = "st-rowsub";
+    host.textContent = d.host;
+    main.append(nm, host);
+
+    const status = document.createElement("span");
+    status.className = "st-status " + cls;
+    status.textContent = txt;
+
+    row.append(dot, main, status,
+               kebabButton([
+                 {label: "Edit", on: () => deviceDialog(d)},
+                 {divider: true},
+                 {label: "Remove\u2026", danger: true, on: () => removeDevice(d)}
+               ]));
+    box.appendChild(row);
+  }
+  navDeviceBadge(down);
+}
+
+function navDeviceBadge(down) {
+  const b = document.getElementById("nav-dev");
+  if (!b) return;
+  b.hidden = !down;
+  b.textContent = down ? String(down) : "";
+}
+
+async function deviceDialog(existing) {
+  const ok = await sfDialog({
+    title: existing ? "Edit device" : "Add device",
+    body: existing ? "Rename it, or correct its address."
+                   : "Name it, then give it an IP address or host name.",
+    okLabel: existing ? "Save" : "Add device",
+    field: {value: existing ? existing.name : "", placeholder: "TX150"}
+  });
+  if (!ok) return;
+  const name = String(ok).trim();
+  if (!name) return;
+  let host = existing ? existing.host
+                      : (prompt("IP or host name for " + name + ":") || "").trim();
+  if (!host) return;
+  const r = existing
+    ? await fetch("/api/devices/" + existing.id, {method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({name, host})})
+    : await fetch("/api/devices", {method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({name, host})});
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { flash("dev-msg", j.detail || "Could not save.", true); return; }
+  flash("dev-msg", existing ? "Saved." : "Added " + name + ".");
+  loadDevices();
+}
+
+async function removeDevice(d) {
+  const ok = await sfDialog({
+    title: "Remove " + d.name + "?",
+    body: "StudioFire stops pinging " + d.host + ". You can add it again later.",
+    okLabel: "Remove", danger: true
+  });
+  if (!ok) return;
+  await fetch("/api/devices/" + d.id, {method: "DELETE"});
+  flash("dev-msg", "Removed " + d.name + ".");
+  loadDevices();
+}
+
+/* ============================================================ kebab menu */
+let openMenu = null;
+
+function closeMenu() {
+  if (openMenu) { openMenu.remove(); openMenu = null; }
+  document.querySelectorAll("[aria-expanded='true']").forEach(
+    b => b.setAttribute("aria-expanded", "false"));
+}
+document.addEventListener("click", e => {
+  if (openMenu && !openMenu.contains(e.target)) closeMenu();
+});
+
+function kebabButton(items) {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "btn btn-ghost st-kebab";
+  btn.setAttribute("aria-label", "More actions");
+  btn.setAttribute("aria-expanded", "false");
+  btn.innerHTML = "&#8943;";
+  btn.onclick = e => {
+    e.stopPropagation();
+    if (openMenu && openMenu.dataset.owner === btn.dataset.owner) {
+      closeMenu(); return;
+    }
+    closeMenu();
+    const menu = document.createElement("div");
+    menu.className = "st-menu";
+    for (const it of items) {
+      if (it.divider) { menu.appendChild(document.createElement("hr")); continue; }
+      const b = document.createElement("button");
+      b.type = "button";
+      b.textContent = it.label;
+      if (it.danger) b.className = "danger";
+      b.onclick = ev => { ev.stopPropagation(); closeMenu(); it.on(); };
+      menu.appendChild(b);
+    }
+    document.body.appendChild(menu);
+    const r = btn.getBoundingClientRect();
+    menu.style.top = (window.scrollY + r.bottom + 6) + "px";
+    menu.style.left = Math.max(8, (window.scrollX + r.right - 190)) + "px";
+    btn.setAttribute("aria-expanded", "true");
+    openMenu = menu;
+    menu.dataset.owner = btn.dataset.owner;
+  };
+  btn.dataset.owner = "m" + Math.random().toString(36).slice(2);
+  return btn;
+}
+
+/* ============================================================ users */
+let users = [];
+
 async function loadUsers() {
   const box = document.getElementById("user-rows");
   if (!box) return;
-  let users;
   try { users = await (await fetch("/api/users")).json(); }
   catch (e) { return; }
   box.innerHTML = "";
   for (const u of users) {
     const row = document.createElement("div");
-    row.className = "dirrow";
-    const who = document.createElement("div");
-    const name = document.createElement("strong");
-    name.textContent = u.username;
-    const tag = document.createElement("span");
-    tag.className = "src-tag";
-    tag.textContent = u.role === "admin" ? "Admin" : "Basic";
-    who.append(name, " ", tag);
-    const btns = document.createElement("div");
-    const tog = document.createElement("button");
-    tog.className = "btn btn-sm";
-    tog.textContent = u.role === "admin" ? "Make Basic" : "Make Admin";
-    tog.onclick = () => setRole(u.id, u.role === "admin" ? "operator" : "admin");
-    const pw = document.createElement("button");
-    pw.className = "btn btn-sm";
-    pw.textContent = "Reset password";
-    pw.onclick = () => resetPw(u.id, u.username);
-    const del = document.createElement("button");
-    del.className = "btn btn-sm btn-red";
-    del.textContent = "Remove";
-    del.onclick = () => delUser(u.id, u.username);
-    btns.append(tog, pw, del);
-    row.append(who, btns);
+    row.className = "st-row";
+
+    const avatar = document.createElement("span");
+    avatar.className = "st-avatar";
+    avatar.textContent = (u.username || "?").slice(0, 1).toUpperCase();
+
+    const main = document.createElement("div");
+    main.className = "st-rowmain";
+    const nm = document.createElement("strong");
+    nm.textContent = u.username + (me && u.username === me ? " \u00b7 you" : "");
+    main.append(nm);
+
+    const role = document.createElement("span");
+    role.className = "st-role" + (u.role === "admin" ? " admin" : "");
+    role.textContent = u.role === "admin" ? "Admin" : "Basic";
+
+    row.append(avatar, main, role,
+      kebabButton([
+        {label: u.role === "admin" ? "Make Basic" : "Make Admin",
+         on: () => setRole(u.id, u.role === "admin" ? "operator" : "admin")},
+        {label: "Reset password", on: () => resetPw(u.id, u.username)},
+        {divider: true},
+        {label: "Remove user\u2026", danger: true,
+         on: () => delUser(u.id, u.username)}
+      ]));
     box.appendChild(row);
   }
 }
-async function addUser() {
-  const body = {
-    username: document.getElementById("nu-name").value.trim(),
-    password: document.getElementById("nu-pass").value,
-    role: document.getElementById("nu-role").value};
+
+async function userDialog() {
+  const ok = await sfDialog({
+    title: "Add user",
+    body: "A username, then a password of at least 8 characters. New users are Basic.",
+    okLabel: "Create user",
+    field: {placeholder: "username"}
+  });
+  if (!ok) return;
+  const username = String(ok).trim();
+  if (!username) return;
+  const password = prompt("Password for " + username + " (min 8 characters):");
+  if (!password) return;
   const r = await fetch("/api/users", {method: "POST",
-    headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({username, password, role: "operator"})});
   const j = await r.json().catch(() => ({}));
-  const msg = document.getElementById("user-msg");
-  if (!r.ok) { msg.textContent = j.detail || "Could not create"; return; }
-  msg.textContent = "Created " + body.username + ".";
-  document.getElementById("nu-name").value = "";
-  document.getElementById("nu-pass").value = "";
+  if (!r.ok) { flash("user-msg", j.detail || "Could not create.", true); return; }
+  flash("user-msg", "Created " + username + ".");
   loadUsers();
 }
+
 async function setRole(id, role) {
   const r = await fetch("/api/users/" + id + "/role", {method: "POST",
     headers: {"Content-Type": "application/json"},
     body: JSON.stringify({role})});
-  if (!r.ok) alert((await r.json().catch(() => ({}))).detail || "Could not change");
+  if (!r.ok) {
+    flash("user-msg", (await r.json().catch(() => ({}))).detail ||
+      "Could not change that role.", true);
+    return;
+  }
   loadUsers();
 }
+
 async function resetPw(id, username) {
-  const pw = prompt("New password for " + username + " (min 8 characters):");
-  if (!pw) return;
+  const out = await sfDialog({
+    title: "Reset password",
+    body: "New password for " + username + " \u2014 at least 8 characters.",
+    okLabel: "Set password",
+    field: {type: "password", placeholder: "new password"}
+  });
+  if (!out) return;
+  const password = String(out);
+  if (!password) return;
   const r = await fetch("/api/users/" + id + "/password", {method: "POST",
     headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({password: pw})});
-  alert(r.ok ? "Password updated."
-    : ((await r.json().catch(() => ({}))).detail || "Could not update"));
+    body: JSON.stringify({password})});
+  if (!r.ok) {
+    flash("user-msg", (await r.json().catch(() => ({}))).detail ||
+      "Could not update.", true);
+    return;
+  }
+  flash("user-msg", "Password updated for " + username + ".");
 }
+
 async function delUser(id, username) {
-  if (!confirm("Remove user " + username + "?")) return;
+  const ok = await sfDialog({
+    title: "Remove " + username + "?",
+    body: "They lose access immediately. Their past airings and notes stay in the log.",
+    okLabel: "Remove user", danger: true
+  });
+  if (!ok) return;
   const r = await fetch("/api/users/" + id, {method: "DELETE"});
-  if (!r.ok) alert((await r.json().catch(() => ({}))).detail || "Could not remove");
+  if (!r.ok) {
+    flash("user-msg", (await r.json().catch(() => ({}))).detail ||
+      "Could not remove.", true);
+    return;
+  }
+  flash("user-msg", "Removed " + username + ".");
   loadUsers();
 }
 
-// ---- station equipment (ICMP monitor)
-function devStatus(d) {
-  if (d.up === true) return ["🟢 up" +
-    (d.latency_ms != null ? " (" + Math.round(d.latency_ms) + " ms)" : ""), ""];
-  if (d.up === false) return ["🔴 not responding", "tile-red-text"];
-  return ["… checking", "muted"];
-}
-async function loadDevices() {
-  const box = document.getElementById("dev-rows");
-  if (!box) return;
-  let devs;
-  try { devs = await (await fetch("/api/devices")).json(); }
-  catch (e) { return; }
-  box.innerHTML = "";
-  if (!devs.length) { box.innerHTML = "<div class='muted'>No devices yet</div>"; return; }
-  for (const d of devs) {
-    const row = document.createElement("div"); row.className = "dirrow";
-    const info = document.createElement("div");
-    const nm = document.createElement("strong"); nm.textContent = d.name;
-    const host = document.createElement("small");
-    host.className = "muted"; host.textContent = d.host;
-    info.append(nm, document.createElement("br"), host);
-    const [txt, cls] = devStatus(d);
-    const status = document.createElement("div");
-    status.className = "dirval " + cls; status.textContent = txt;
-    const btns = document.createElement("div");
-    const del = document.createElement("button");
-    del.className = "btn btn-sm btn-red"; del.textContent = "Remove";
-    del.onclick = () => delDevice(d.id, d.name);
-    btns.append(del);
-    row.append(info, status, btns);
-    box.appendChild(row);
-  }
-}
-async function addDevice() {
-  const body = {name: document.getElementById("nd-name").value.trim(),
-                host: document.getElementById("nd-host").value.trim()};
-  const r = await fetch("/api/devices", {method: "POST",
-    headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
-  const j = await r.json().catch(() => ({}));
-  const msg = document.getElementById("dev-msg");
-  if (!r.ok) { msg.textContent = j.detail || "Could not add"; return; }
-  document.getElementById("nd-name").value = "";
-  document.getElementById("nd-host").value = "";
-  msg.textContent = ""; loadDevices();
-}
-async function delDevice(id, name) {
-  if (!confirm("Remove " + name + "?")) return;
-  await fetch("/api/devices/" + id, {method: "DELETE"});
-  loadDevices();
-}
-
-// ---- playlist backup & restore (admin)
-async function restoreBackup() {
+/* ============================================================ backup */
+function restorePick() {
   const inp = document.getElementById("restore-file");
-  if (!inp.files.length) { alert("Choose a backup file first."); return; }
-  if (!confirm("Restore playlists from this backup?\n\nExisting playlists " +
-               "are kept; restored ones with the same name get a " +
-               "'(restored)' suffix.")) return;
+  inp.value = "";
+  inp.click();
+}
+
+document.getElementById("restore-file").addEventListener("change", async e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  const ok = await sfDialog({
+    title: "Restore playlists?",
+    body: "Existing playlists are kept. Restored ones with the same name get a " +
+          "'(restored)' suffix.",
+    okLabel: "Restore"
+  });
+  if (!ok) return;
   const fd = new FormData();
-  fd.append("file", inp.files[0]);
+  fd.append("file", f);
   const r = await fetch("/api/restore", {method: "POST", body: fd});
-  const body = await r.json();
-  if (r.ok) alert("Restored " + body.imported + " playlist(s).");
-  else alert(body.detail || "Restore failed");
-}
+  const body = await r.json().catch(() => ({}));
+  flash("backup-msg", r.ok ? "Restored " + body.imported + " playlist(s)."
+                           : (body.detail || "Restore failed"), !r.ok);
+});
 
-// ---- system: quit all services
+/* ============================================================ quit */
 async function quitStudioFire() {
-  if (!confirm("Stop all StudioFire services and quit?\nThe system will go silent.")) return;
-  const msg = document.getElementById("quit-msg");
-  msg.textContent = "Stopping…";
+  const ok = await sfDialog({
+    title: "Quit StudioFire?",
+    body: "This stops every service, including playout. The station goes silent " +
+          "until someone starts it again.",
+    okLabel: "Quit", danger: true
+  });
+  if (!ok) return;
+  flash("quit-msg", "Stopping\u2026");
   const r = await fetch("/api/system/quit", {method: "POST"});
-  if (r.ok) {
-    msg.textContent = "Services stopped. You may close this window.";
-  } else {
-    const j = await r.json().catch(() => ({}));
-    msg.textContent = "Error: " + (j.detail || "Could not quit");
-  }
+  if (r.ok) flash("quit-msg", "Services stopped. You may close this window.");
+  else flash("quit-msg", "Could not quit \u2014 check the service log.", true);
 }
 
-// ---- software updates (GitHub Releases)
+/* ============================================================ updates */
 const UPD_BUSY = ["starting", "downloading", "backing_up", "installing",
                   "restarting", "rolling_back"];
 let updPoll = null;
+
 function updEsc(s) {
   return String(s == null ? "" : s).replace(/[&<>"]/g,
     c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
 }
+
 function updRender(u) {
   const sum = document.getElementById("upd-summary");
   const notes = document.getElementById("upd-notes");
   const inst = document.getElementById("upd-install");
   const prog = document.getElementById("upd-progress");
-  let html = "This station is running <strong>StudioFire " +
-    updEsc(u.current) + "</strong>. ";
+  const badge = document.getElementById("nav-update");
+
+  let html;
   if (u.dev_checkout) {
-    html += "<span class='muted'>(developer copy — updated with git, not " +
-      "from here)</span>";
+    html = "Developer copy \u2014 updated with git, not from here.";
   } else if (u.check_error) {
-    html += "<span class='tile-red-text'>Couldn't reach GitHub: " +
-      updEsc(u.check_error) + "</span>";
+    html = "Couldn't reach GitHub: " + updEsc(u.check_error);
   } else if (u.update_available) {
-    html += "<strong class='tile-green-text'>Version " +
-      updEsc(u.latest.version) + " is available.</strong>";
+    html = "Version " + updEsc(u.latest.version) + " is available.";
   } else if (u.latest) {
-    html += "<span class='tile-green-text'>That's the latest version.</span>";
+    html = "That's the latest version.";
   } else {
-    html += "<span class='muted'>Not checked yet.</span>";
+    html = "Not checked yet.";
+  }
+  if (u.state && u.state.checked_at) {
+    const when = new Date(u.state.checked_at * 1000);
+    if (!isNaN(when)) html += " Checked " + when.toLocaleString() + ".";
   }
   sum.innerHTML = html;
+  sum.className = "st-help" + (u.check_error ? " tile-red-text" : "");
+
+  if (badge) badge.hidden = !(u.update_available && u.can_install && !u.dev_checkout);
+
   notes.hidden = !(u.update_available && u.latest && u.latest.notes);
   if (!notes.hidden)
     notes.innerHTML = "<strong>What's new in " + updEsc(u.latest.version) +
       ":</strong><pre>" + updEsc(u.latest.notes) + "</pre>";
+
   const st = u.state || {};
   const busy = UPD_BUSY.includes(st.state);
   inst.hidden = !(u.update_available && u.can_install && !u.dev_checkout);
   inst.disabled = busy;
+  if (!inst.hidden && u.latest) inst.textContent = "Install " + u.latest.version;
   if (u.update_available && !u.can_install && !u.dev_checkout)
-    sum.innerHTML += "<br><span class='muted'>Ask an admin to install it.</span>";
-  // last/ongoing install
-  if (st.state && st.state !== "done" || (st.state === "done" && st.finished_at &&
-      Date.now() / 1000 - st.finished_at < 3600)) {
-    const cls = st.state === "failed" ? "tile-red-text"
-      : st.state === "rolled_back" ? "tile-red-text"
-      : st.state === "done" ? "tile-green-text" : "";
-    prog.innerHTML = "<span class='" + cls + "'>" +
-      (busy ? "⏳ " : "") + updEsc(st.message || st.state) + "</span>";
-  } else prog.textContent = "";
+    sum.innerHTML += " Ask an admin to install it.";
+
+  if (st.state && st.state !== "done" ||
+      (st.state === "done" && st.finished_at &&
+       Date.now() / 1000 - st.finished_at < 3600)) {
+    prog.textContent = (busy ? "\u23f3 " : "") + (st.message || st.state || "");
+    prog.className = "st-help" + (st.state === "failed" ||
+      st.state === "rolled_back" ? " tile-red-text" : "");
+  } else {
+    prog.textContent = "";
+  }
   if (busy && !updPoll) updPoll = setInterval(updRefresh, 3000);
   if (!busy && updPoll) { clearInterval(updPoll); updPoll = null; }
   updRenderMajor(u);
 }
 
-// ---- §6.3 major-version gate: DETECT + INFORM ONLY (no install path).
-// When a higher major is available, admins see a muted, non-clickable note
-// inside the Software updates card; operators see nothing. There is NO button,
-// input, or endpoint to install a major in this release — major upgrades are
-// scheduled by VeteranOp (deferred until 2.0 is proven on a 72-hour burn-in).
 function updRenderMajor(u) {
   const note = document.getElementById("upd-major");
   if (!note) return;
   if (u.major_available && u.can_major) {
     note.hidden = false;
-    note.innerHTML = "<span class='tile-red-text'>&#9888;</span> A new major " +
-      "version (" + updEsc(u.major_available.version) + ") is available. " +
-      "Major upgrades are scheduled by VeteranOp — contact support before " +
-      "upgrading.";
+    note.innerHTML = "A new major version (" + updEsc(u.major_available.version) +
+      ") is available. Major upgrades are scheduled by VeteranOp \u2014 contact " +
+      "support before upgrading.";
   } else {
     note.hidden = true;
     note.textContent = "";
   }
 }
+
 async function updRefresh() {
   try {
     const r = await fetch("/api/update", {cache: "no-store"});
     if (r.ok) updRender(await r.json());
   } catch (e) {
-    // the web service restarts during an update — keep polling
-    document.getElementById("upd-progress").textContent =
-      "⏳ Restarting StudioFire… this page reconnects by itself.";
+    const p = document.getElementById("upd-progress");
+    if (p) p.textContent =
+      "Restarting StudioFire\u2026 this page reconnects by itself.";
   }
 }
+
 async function updCheck() {
   const b = document.getElementById("upd-check");
-  b.disabled = true; b.textContent = "Checking…";
+  b.disabled = true; b.textContent = "Checking\u2026";
   try {
     const r = await fetch("/api/update/check", {method: "POST"});
     if (r.ok) updRender(await r.json());
-  } finally { b.disabled = false; b.textContent = "🔄 Check now"; }
+  } finally { b.disabled = false; b.textContent = "Check for updates"; }
 }
+
 async function updInstall() {
-  if (!confirm("Install the StudioFire update now?\n\n" +
-      "StudioFire backs itself up first, and if the new version doesn't " +
-      "start cleanly it puts the old one back by itself.\n\n" +
-      "The web pages restart (a short blip). If the update changes the " +
-      "audio engine, the music drops for a few seconds — pick a quiet " +
-      "moment (not during a live show or an ad).")) return;
+  const ok = await sfDialog({
+    title: "Install the update now?",
+    body: "StudioFire backs itself up first, and if the new version doesn't " +
+          "start cleanly it puts the old one back by itself. The web pages " +
+          "restart (a short blip). If the update changes the audio engine the " +
+          "music drops for a few seconds \u2014 pick a quiet moment.",
+    okLabel: "Install"
+  });
+  if (!ok) return;
   const r = await fetch("/api/update/install", {method: "POST"});
   const b = await r.json().catch(() => ({}));
-  if (!r.ok) { alert(b.detail || "Could not start the update"); return; }
+  if (!r.ok) {
+    flash("upd-progress", b.detail || "Could not start the update.", true);
+    return;
+  }
   document.getElementById("upd-install").disabled = true;
   document.getElementById("upd-progress").textContent =
-    "⏳ Installing " + b.to + "…";
+    "Installing " + b.to + "\u2026";
   if (!updPoll) updPoll = setInterval(updRefresh, 3000);
 }
 
-
-// ---- Streaming & song metadata (#747) -------------------------------------
+/* ============================================================ streaming */
 let streamPoll = null;
 
-function stRow(label, value, cls) {
-  const row = document.createElement("div");
-  row.className = "dirrow";
-  const a = document.createElement("div");
-  a.innerHTML = "<strong>" + label + "</strong>";
-  const b = document.createElement("div");
-  b.className = "dirval";
-  const code = document.createElement("span");
-  code.textContent = value;
-  if (cls) code.className = cls;
-  b.appendChild(code);
-  row.appendChild(a);
-  row.appendChild(b);
-  return row;
+function stTile(label, value, cls) {
+  const d = document.createElement("div");
+  d.className = "st-tile";
+  const b = document.createElement("b");
+  b.textContent = label;
+  const s = document.createElement("span");
+  s.textContent = value;
+  if (cls) s.className = cls;
+  d.append(b, s);
+  return d;
 }
 
 function renderStreaming(d) {
   const box = document.getElementById("st-monitor");
   if (!box) return;
   box.innerHTML = "";
-  box.className = "";
+  box.className = "st-tiles";
+
   const p = d.push || {};
   const pr = d.probe || {};
 
-  let verdict, cls;
+  const banner = document.getElementById("st-banner");
+  let bannerText = "", bannerCls = "";
   if (!d.enabled) {
-    verdict = "Off — nothing is being sent to the stream.";
-    cls = "muted";
-  } else if (!d.credential_set || !d.endpoint) {
-    verdict = "On, but not configured yet — add the target URL and the " +
-              "username/password your stream host gave you.";
-    cls = "tile-red-text";
+    bannerText = "Not sending. Sending is turned off.";
+    bannerCls = "st-banner-warn";
+  } else if (!d.credential_set) {
+    bannerText = "Not sending. Add the stream password, then turn sending on.";
+    bannerCls = "st-banner-warn";
+  } else if (!d.endpoint) {
+    bannerText = "Not sending. Add the stream host address.";
+    bannerCls = "st-banner-warn";
   } else if (p.state === "error") {
-    // the push is the thing that matters: if the host refused us, say that
-    // first and name the likely cause, not the state of the mount
-    const why = (p.error || "unknown error");
-    verdict = /401|auth/i.test(why)
-      ? "The stream host refused the update — it did not accept the " +
+    const why = String(p.error || "unknown error");
+    bannerText = /401|auth/i.test(why)
+      ? "The stream host refused the update \u2014 it did not accept the " +
         "username/password. Everything else is working: the host answers us."
       : "The stream host refused the last update: " + why;
-    cls = "tile-red-text";
+    bannerCls = "st-banner-error";
   } else if (!pr.ok) {
-    verdict = "Cannot reach the stream host" +
-      (pr.error ? " (" + pr.error + ")" : "") + " — nothing is being published.";
-    cls = "tile-red-text";
-  } else if (!pr.icy_title && !pr.server_title) {
-    verdict = "Reachable, but the mount is publishing no song title.";
-    cls = "tile-red-text";
-  } else if (pr.icy_title) {
-    verdict = "Working — listeners see: " + pr.icy_title;
-    cls = "";
-  } else {
-    verdict = "The stream host reports a title but listeners get none yet.";
-    cls = "tile-red-text";
+    bannerText = "Cannot reach the stream host" +
+      (pr.error ? " (" + pr.error + ")" : "") +
+      " \u2014 nothing is being published.";
+    bannerCls = "st-banner-error";
+  }
+  if (banner) {
+    banner.hidden = !bannerText;
+    banner.className = "st-banner " + bannerCls;
+    banner.textContent = bannerText;
   }
 
-  const head = document.createElement("div");
-  head.style.marginBottom = ".5rem";
-  const strong = document.createElement("strong");
-  strong.textContent = verdict;
-  if (cls) strong.className = cls;
-  head.appendChild(strong);
-  box.appendChild(head);
+  const note = document.getElementById("st-enabled-note");
+  if (note) {
+    note.textContent = d.enabled
+      ? "On \u2014 sending each new song to the stream host"
+      : "Off \u2014 nothing is being sent";
+  }
 
-  const last = p.title || "—";
-  let lastVal = last;
-  if (p.at) lastVal += "  (" + p.at + ")";
-  if (p.test) lastVal += "  (test)";
-  if (p.state === "error") lastVal += "  ⚠ " + (p.error || "failed");
-  else if (p.state === "sent") lastVal += "  ✓ sent";
-  else if (p.state === "idle") lastVal = "nothing sent yet this session";
-  box.appendChild(stRow("StudioFire last sent", lastVal,
-                        p.state === "error" ? "tile-red-text" : ""));
+  const nav = document.getElementById("nav-stream");
+  if (nav) {
+    if (p.state === "error") {
+      nav.hidden = false; nav.textContent = "Error";
+      nav.className = "st-badge st-badge-red";
+    } else if (!d.enabled) {
+      nav.hidden = false; nav.textContent = "Off";
+      nav.className = "st-badge st-badge-warn";
+    } else {
+      nav.hidden = true; nav.textContent = ""; nav.className = "st-badge";
+    }
+  }
 
-  box.appendChild(stRow("Stream host reports", pr.server_title || "—"));
-  box.appendChild(stRow("Listener sees", pr.icy_title || "—",
-                        pr.icy_title ? "" : "muted"));
-  box.appendChild(stRow("Listeners now",
-                        (pr.listeners === null || pr.listeners === undefined)
-                          ? "—" : String(pr.listeners)));
-  box.appendChild(stRow("Sending via", p.transport || "—"));
+  box.appendChild(stTile("Last sent", p.title || "Nothing yet",
+    p.state === "error" ? "tile-red-text" : ""));
+
+  box.appendChild(stTile("Listeners see",
+    pr.icy_title || pr.server_title || "Nothing yet",
+    (pr.icy_title || pr.server_title) ? "" : "muted"));
+
+  box.appendChild(stTile("Listeners now",
+    (pr.listeners === null || pr.listeners === undefined)
+      ? "\u2014" : String(pr.listeners)));
 
   const f = d.file || {};
-  let fileVal;
-  if (!d.np_file) {
-    fileVal = "not configured — nothing is being written";
-  } else if (f.ok === true) {
-    fileVal = f.title + "  (" + f.at + ")  ✓ written";
-  } else if (f.ok === false) {
-    fileVal = "⚠ " + (f.error || "last write failed");
-  } else {
-    fileVal = d.np_file + "  (no write yet this session)";
+  let fileVal = "Not set up", fileCls = "muted";
+  if (d.np_file) {
+    fileVal = d.np_file;
+    fileCls = "is-path";
+    if (f.ok === false) { fileVal = "Last write failed"; fileCls = "tile-red-text"; }
   }
-  box.appendChild(stRow("Now-playing file", fileVal,
-                        f.ok === false ? "tile-red-text" : ""));
-  if (p.transport === "DryRunTransport") {
-    box.appendChild(stRow("Note", "DryRun — the push is built but has no " +
-                                  "credential to send with.", "tile-red-text"));
-  }
-  if (pr.server_title && p.title && pr.server_title !== p.title) {
-    box.appendChild(stRow("Note", "Host title differs from the last one sent — " +
-                                  "normal for a second or two after a track change."));
-  }
+  box.appendChild(stTile("Now-playing file", fileVal, fileCls));
 }
 
 async function loadStreaming() {
@@ -789,7 +1211,7 @@ async function loadStreaming() {
   const d = await r.json();
   const en = document.getElementById("st-enabled");
   if (en) {
-    en.checked = !!d.enabled;
+    en.setAttribute("aria-pressed", d.enabled ? "true" : "false");
     document.getElementById("st-endpoint").value = d.endpoint || "";
     document.getElementById("st-mount").value = d.mount || "/live";
     document.getElementById("st-user").value = d.user || "";
@@ -797,66 +1219,96 @@ async function loadStreaming() {
     const fmtEl = document.getElementById("st-npformat");
     if (fmtEl) fmtEl.value = d.np_format || "";
     const hint = document.getElementById("st-pass-hint");
-    hint.textContent = d.credential_set
-      ? "Saved — leave blank to keep it" : "Not set yet";
+    const pass = document.getElementById("st-pass");
+    if (d.credential_set) {
+      hint.textContent = "Leave blank to keep the saved one";
+      pass.placeholder = "Leave blank to keep the saved one";
+      pass.classList.remove("missing");
+    } else {
+      hint.textContent = "";
+      pass.placeholder = "Not set yet";
+      pass.classList.add("missing");
+    }
   }
   renderStreaming(d);
   if (!streamPoll) streamPoll = setInterval(loadStreaming, 5000);
 }
 
-async function saveStreaming() {
-  const msg = document.getElementById("st-msg");
-  msg.textContent = "Saving…";
-  const body = {
-    enabled: document.getElementById("st-enabled").checked,
+const stSwitch = document.getElementById("st-enabled");
+if (stSwitch) {
+  stSwitch.addEventListener("click", async e => {
+    const b = e.currentTarget;
+    const next = b.getAttribute("aria-pressed") !== "true";
+    b.setAttribute("aria-pressed", next ? "true" : "false");
+    await streamSave({silent: true});
+  });
+}
+
+async function streamBody() {
+  return {
+    enabled: document.getElementById("st-enabled")
+      .getAttribute("aria-pressed") === "true",
     endpoint: document.getElementById("st-endpoint").value,
     mount: document.getElementById("st-mount").value,
     user: document.getElementById("st-user").value,
     password: document.getElementById("st-pass").value,
     np_file: document.getElementById("st-npfile").value,
-    np_format: document.getElementById("st-npformat").value,
+    np_format: document.getElementById("st-npformat").value
   };
-  const r = await fetch("/api/streaming/settings", {
-    method: "POST", headers: {"Content-Type": "application/json"},
-    body: JSON.stringify(body)});
-  const d = await r.json().catch(() => ({}));
-  if (!r.ok) { msg.textContent = d.detail || "Could not save."; return; }
-  document.getElementById("st-pass").value = "";
-  msg.textContent = d.configured
-    ? "Saved — the push is live using " + d.transport + "."
-    : "Saved, but it will not send until a target URL and a username/password " +
-      "are set. Currently: " + d.transport + ".";
-  loadStreaming();
 }
 
+async function streamSave(opts) {
+  const r = await fetch("/api/streaming/settings", {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(await streamBody())});
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    flash("st-msg", d.detail || "Could not save.", true);
+    return false;
+  }
+  document.getElementById("st-pass").value = "";
+  if (!(opts && opts.silent)) flash("st-msg", "Saved \u2713");
+  loadStreaming();
+  return true;
+}
+
+function saveStreaming() { streamSave(); }
+
 async function writeNowPlayingFile() {
-  const msg = document.getElementById("st-msg");
-  msg.textContent = "Writing the current song to the file…";
+  flash("st-msg", "Writing the current song to the file\u2026");
   const r = await fetch("/api/streaming/file/write", {method: "POST"});
   const d = await r.json().catch(() => ({}));
-  if (!r.ok) { msg.textContent = d.detail || "Could not write the file."; return; }
-  msg.textContent = d.ok
-    ? "Written to " + d.path + " — check the encoder, it should publish it shortly."
-    : (d.detail || "Nothing written — is there a song on air?");
+  if (!r.ok) {
+    flash("st-msg", d.detail || "Could not write the file.", true);
+    return;
+  }
+  flash("st-msg", d.ok ? "Written \u2014 the encoder should publish it shortly."
+                       : (d.detail || "Nothing written \u2014 is there a song on air?"),
+        !d.ok);
   loadStreaming();
 }
 
 async function testStreaming() {
-  const msg = document.getElementById("st-msg");
-  msg.textContent = "Sending a test title…";
+  flash("st-msg", "Sending a test title\u2026");
   const r = await fetch("/api/streaming/test", {method: "POST"});
   const d = await r.json().catch(() => ({}));
-  if (!r.ok) { msg.textContent = d.detail || "Test failed."; return; }
-  if (!d.sent) { msg.textContent = d.detail || "Nothing sent."; return; }
-  msg.textContent = d.ok
-    ? "Test sent — check the player; the stream host accepts titles from us."
-    : "Sent, but the host refused it: " + (d.detail || "unknown error");
+  if (!r.ok) { flash("st-msg", d.detail || "Test failed.", true); return; }
+  if (!d.sent) { flash("st-msg", d.detail || "Nothing sent.", true); return; }
+  flash("st-msg", d.ok
+    ? "Test sent \u2014 check the player; the host accepts titles from us."
+    : "Sent, but the host refused it: " + (d.detail || "unknown error"), !d.ok);
   loadStreaming();
 }
 
+/* re-render the folder paths when the layout crosses the phone breakpoint */
+window.matchMedia("(max-width: 720px)").addEventListener("change", () => {
+  if (typeof renderDirs === "function") renderDirs();
+});
+
+/* ============================================================ boot */
+stShow(stGroupFromHash(), false);
 loadDirs();
 loadStreaming();
-loadLstDir();
 loadUsers();
 loadDevices();
 updRefresh();

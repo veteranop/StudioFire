@@ -774,3 +774,281 @@ select {
   margin-bottom: .5rem; letter-spacing: .02em;
 }
 .rep-charts svg { display: block; width: 100%; height: auto; }
+
+/* ============================================================ Settings 2.0
+   One group at a time behind a left sidebar. Everything below is scoped to
+   .st-* so the rest of the app is untouched. Type scale: group heading 1.15rem,
+   card heading .98rem, body .92rem, help 13px (never smaller than 12px). */
+.sf-settings { max-width: 1180px; margin: .4rem auto 3.5rem;
+               display: flex; flex-wrap: wrap; gap: 1.4rem;
+               align-items: flex-start; }
+
+/* ---- sidebar ---- */
+.st-nav { flex: 1 1 220px; max-width: 260px; display: flex;
+          flex-direction: column; gap: .25rem; }
+.st-title { font-size: 1.3rem; font-weight: 800; margin: 0 0 .75rem .15rem;
+            letter-spacing: .01em; }
+.st-navitem { display: flex; align-items: center; gap: .6rem; width: 100%;
+              height: 44px; padding: 0 .7rem; cursor: pointer;
+              background: transparent; border: 1px solid transparent;
+              border-radius: 10px; color: #a3afbe;
+              font: inherit; font-size: .95rem; font-weight: 500;
+              text-align: left; }
+.st-navitem:hover { background: rgba(255, 255, 255, .04); color: var(--text); }
+.st-navitem[aria-current="true"] { background: var(--panel);
+              border-color: var(--border); color: var(--text);
+              font-weight: 650; }
+.st-navitem svg { width: 17px; height: 17px; flex: 0 0 17px; fill: none;
+                  stroke: currentColor; stroke-width: 1.7;
+                  stroke-linecap: round; stroke-linejoin: round; }
+.st-navitem span { flex: 1 1 auto; }
+.st-navitem:focus-visible { outline: 2px solid #7ea6ff; outline-offset: 2px; }
+.st-badge { font-style: normal; font-size: .7rem; font-weight: 700;
+            padding: .1rem .42rem; border-radius: 999px; background: #2b3644;
+            color: var(--muted); letter-spacing: .02em; }
+.st-badge-warn  { background: rgba(214, 158, 46, .18); color: #e7b955; }
+.st-badge-red   { background: rgba(255, 107, 107, .16); color: #ff8a8a; }
+.st-badge-green { background: rgba(60, 207, 126, .16); color: #3ccf7e; }
+
+/* ---- content column ---- */
+.st-main { flex: 999 1 560px; min-width: 0; display: flex;
+           flex-direction: column; gap: 1rem; }
+.st-group[hidden] { display: none; }
+.st-head { display: flex; align-items: flex-start; justify-content: space-between;
+           gap: 1rem; margin-bottom: .15rem; }
+.st-head h2 { margin: 0; font-size: 1.15rem; font-weight: 750;
+              letter-spacing: .01em; }
+.st-sub { margin: .2rem 0 0; color: var(--muted); font-size: .88rem;
+          line-height: 1.45; max-width: 64ch; }
+.st-card { background: var(--panel); border: 1px solid var(--border);
+           border-radius: 12px; padding: 1rem 1.1rem; }
+.st-card-head { display: flex; align-items: center; justify-content: space-between;
+                gap: .75rem; margin-bottom: .55rem; }
+.st-card-head h3 { margin: 0; font-size: .98rem; font-weight: 700; }
+.st-tools { display: flex; align-items: center; gap: .75rem; }
+.st-saved { color: #3ccf7e; font-size: .78rem; font-weight: 600; }
+.st-help { color: var(--muted); font-size: 13px; line-height: 1.45;
+           margin: .3rem 0 0; }
+.st-flash { color: #3ccf7e; font-size: .8rem; min-height: 1.1em; margin-top: .4rem; }
+.st-flash[data-error="1"] { color: #ff8a8a; }
+.st-link { background: none; border: 0; padding: 0; cursor: pointer;
+           color: #7ea6ff; font: inherit; font-size: .82rem;
+           text-decoration: underline; text-underline-offset: 2px; }
+.st-empty { color: var(--muted); font-size: .88rem; padding: .4rem 0; }
+
+/* buttons on this page: ghost by default, 40px tall, one green per card */
+.sf-settings .btn { min-height: 40px; font-size: .9rem; padding: .45rem .95rem;
+                    border-radius: 9px; }
+.btn-ghost { background: transparent; border: 1px solid var(--border);
+             color: var(--text); }
+.btn-ghost:hover { background: rgba(255, 255, 255, .05); filter: none; }
+.btn-text { background: none; border: 0; color: var(--muted); font: inherit;
+            font-size: .82rem; cursor: pointer; padding: .2rem 0; }
+.btn-text:hover { color: var(--text); }
+.btn-sm { min-height: 32px !important; padding: .2rem .6rem !important;
+          font-size: .82rem !important; }
+
+/* ---- folder table ---- */
+.st-table { width: 100%; border-collapse: collapse; }
+.st-table td { padding: .55rem .2rem; vertical-align: middle; }
+.st-table tr + tr td { border-top: 1px solid var(--border); }
+.st-name strong { display: block; font-size: .9rem; font-weight: 650; }
+.st-desc { display: block; color: var(--muted); font-size: 12.5px;
+           margin-top: .1rem; }
+.st-path { width: 40%; }
+.st-path code { display: inline-block; max-width: 100%; font: 12.5px/1.5
+                Consolas, "Courier New", monospace; color: #c9d4e0;
+                background: #12181f; border: 1px solid var(--border);
+                border-radius: 6px; padding: .18rem .45rem;
+                white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+                vertical-align: middle; }
+.st-path code.is-empty { font-family: inherit; font-style: italic;
+                         color: var(--muted); }
+.st-warn { display: block; color: #ff8a8a; font-size: 12px; margin-top: .2rem; }
+.st-act { text-align: right; white-space: nowrap; }
+
+/* ---- time format segmented control ---- */
+.st-tfrow { display: flex; align-items: center; justify-content: space-between;
+            gap: 1rem; flex-wrap: wrap; }
+.st-tfrow strong { font-size: .9rem; font-weight: 650; }
+.st-seg { display: inline-flex; border: 1px solid var(--border);
+          border-radius: 9px; overflow: hidden; }
+.st-seg button { min-height: 38px; min-width: 92px; padding: 0 .8rem;
+                 background: transparent; border: 0; color: var(--muted);
+                 font: inherit; font-size: .86rem; cursor: pointer; }
+.st-seg button + button { border-left: 1px solid var(--border); }
+.st-seg button[aria-pressed="true"] { background: #2b3644; color: var(--text);
+                                      font-weight: 650; }
+
+/* ---- rows (equipment, users) ---- */
+.st-rows { display: flex; flex-direction: column; }
+.st-row { display: flex; align-items: center; gap: .8rem;
+          padding: .6rem 0; border-top: 1px solid var(--border); }
+.st-row:first-child { border-top: 0; }
+.st-dot { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 9px;
+          background: #3ccf7e; }
+.st-dot.down { background: #ff6b6b; }
+.st-rowmain { flex: 1 1 auto; min-width: 0; }
+.st-rowmain strong { display: block; font-size: .92rem; font-weight: 650; }
+.st-rowsub { color: var(--muted); font-size: 12.5px;
+             font-family: Consolas, "Courier New", monospace; }
+.st-status { color: var(--muted); font-size: .82rem; white-space: nowrap; }
+.st-status.down { color: #ff8a8a; }
+.st-avatar { width: 30px; height: 30px; border-radius: 50%; flex: 0 0 30px;
+             display: grid; place-items: center; background: #2b3644;
+             color: var(--text); font-size: .82rem; font-weight: 700; }
+.st-role { font-size: .68rem; font-weight: 700; letter-spacing: .03em;
+           text-transform: uppercase; padding: .12rem .45rem;
+           border-radius: 999px; background: #2b3644; color: #a3afbe; }
+.st-role.admin { background: rgba(126, 166, 255, .16); color: #9dbcff; }
+.st-kebab { width: 40px !important; height: 40px; min-height: 40px !important;
+            display: grid; place-items: center; padding: 0 !important; }
+
+/* ---- status banner + streaming ---- */
+.st-banner { border-radius: 10px; padding: .7rem .9rem; font-size: .88rem;
+             border: 1px solid; margin-bottom: .9rem; }
+.st-banner-warn { background: rgba(214, 158, 46, .1); border-color: #7a5a1c;
+                  color: #e7b955; }
+.st-banner-error { background: rgba(255, 107, 107, .09); border-color: #6b2a2a;
+                   color: #ff9d9d; }
+.st-switchrow { display: flex; align-items: center; justify-content: space-between;
+                gap: 1rem; padding-bottom: .9rem; margin-bottom: .35rem;
+                border-bottom: 1px solid var(--border); }
+.st-switchrow strong { display: block; font-size: .92rem; font-weight: 650; }
+.st-switch { width: 52px; height: 30px; flex: 0 0 52px; border-radius: 999px;
+             border: 1px solid var(--border); background: #22303e;
+             position: relative; cursor: pointer; padding: 0; }
+.st-switch span { position: absolute; top: 3px; left: 3px; width: 22px;
+                  height: 22px; border-radius: 50%; background: #8b98a8;
+                  transition: transform .15s ease, background .15s ease; }
+.st-switch[aria-pressed="true"] { background: rgba(60, 207, 126, .22);
+                                  border-color: #2f7a52; }
+.st-switch[aria-pressed="true"] span { transform: translateX(22px);
+                                       background: #3ccf7e; }
+.st-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+             gap: .85rem 1rem; margin-top: .9rem; }
+.st-field label { display: block; font-size: .68rem; font-weight: 700;
+                  letter-spacing: .06em; text-transform: uppercase;
+                  color: var(--muted); margin: 0 0 .3rem; }
+.st-field input { width: 100%; margin: 0; font-size: .92rem; padding: .5rem .65rem;
+                  border-radius: 8px; }
+.st-field input.missing { border-color: #a97b1e;
+                          box-shadow: 0 0 0 1px rgba(214, 158, 46, .35); }
+.st-field .st-help { text-transform: none; letter-spacing: 0; font-weight: 400;
+                     font-size: 13px; }
+.st-adv { margin-top: 1rem; border-top: 1px solid var(--border); padding-top: .8rem; }
+.st-adv > summary { cursor: pointer; color: var(--muted); font-size: .84rem;
+                    list-style: none; }
+.st-adv > summary::-webkit-details-marker { display: none; }
+.st-adv > summary::before { content: "\25B8  "; }
+.st-adv[open] > summary::before { content: "\25BE  "; }
+.st-foot { display: flex; align-items: center; gap: .7rem; flex-wrap: wrap;
+           margin-top: 1rem; }
+.st-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: .7rem; }
+.st-tile { background: #141b23; border: 1px solid var(--border);
+           border-radius: 10px; padding: .6rem .7rem; min-width: 0; }
+.st-tile b { display: block; font-size: .64rem; font-weight: 700;
+             letter-spacing: .07em; text-transform: uppercase; color: var(--muted);
+             margin-bottom: .25rem; }
+.st-tile span { display: block; font-size: .86rem; color: var(--text);
+                overflow-wrap: anywhere; }
+.st-tile span.is-path { font-family: Consolas, "Courier New", monospace;
+                        font-size: 12.5px; }
+
+/* ---- about ---- */
+.st-verrow { display: flex; align-items: center; justify-content: space-between;
+             gap: 1rem; flex-wrap: wrap; }
+.st-vernum { font-size: 1.6rem; font-weight: 800; letter-spacing: .01em; }
+.st-veract { display: flex; gap: .5rem; flex-wrap: wrap; }
+.st-whatsnew { margin-top: 1rem; border-top: 1px solid var(--border);
+               padding-top: .8rem; }
+.st-whatsnew h3 { font-size: .92rem; margin: 0 0 .3rem; }
+.st-danger { border-color: #4a2a2a; background: transparent; }
+.st-danger h3 { color: #ffb4b4; margin: 0 0 .2rem; font-size: .98rem; }
+.btn-danger { background: transparent; border: 1px solid #6b2a2a;
+              color: #ff9d9d; }
+.btn-danger:hover { background: rgba(255, 107, 107, .1); filter: none; }
+.st-2col { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+           gap: 1rem; }
+
+/* ---- dialogs ---- */
+dialog.sf-dlg { background: var(--panel); color: var(--text);
+                border: 1px solid var(--border); border-radius: 14px;
+                padding: 1.2rem 1.3rem; max-width: 460px;
+                width: calc(100% - 2rem); }
+dialog.sf-dlg::backdrop { background: rgba(6, 9, 13, .68); }
+dialog.sf-dlg h3 { margin: 0 0 .4rem; font-size: 1.02rem; }
+dialog.sf-dlg p { margin: 0 0 1rem; color: var(--muted); font-size: .88rem;
+                  line-height: 1.45; overflow-wrap: anywhere; }
+dialog.sf-dlg .st-foot { margin-top: .2rem; justify-content: flex-end; }
+dialog.sf-dlg input, dialog.sf-dlg select { margin: .1rem 0 .9rem;
+                                            font-size: .92rem; padding: .5rem .65rem; }
+
+/* ---- folder picker dialog ---- */
+dialog.sf-picker { background: var(--panel); color: var(--text);
+                   border: 1px solid var(--border); border-radius: 14px;
+                   padding: 1.1rem 1.2rem; width: min(680px, calc(100% - 2rem)); }
+dialog.sf-picker::backdrop { background: rgba(6, 9, 13, .68); }
+.sf-picker .picker { max-height: 300px; }
+
+/* ---- menu (kebab) ---- */
+.st-menu { position: absolute; z-index: 40; min-width: 190px;
+           background: #202a36; border: 1px solid var(--border);
+           border-radius: 10px; padding: .3rem;
+           box-shadow: 0 12px 30px rgba(0, 0, 0, .45); }
+.st-menu button { display: block; width: 100%; text-align: left;
+                  background: none; border: 0; color: var(--text);
+                  font: inherit; font-size: .86rem; padding: .5rem .6rem;
+                  border-radius: 7px; cursor: pointer; }
+.st-menu button:hover { background: rgba(255, 255, 255, .06); }
+.st-menu button.danger { color: #ff8a8a; }
+.st-menu hr { border: 0; border-top: 1px solid var(--border); margin: .3rem .2rem; }
+
+/* ---- phone: sidebar stacks above the content, nothing scrolls sideways ---- */
+@media (max-width: 720px) {
+  .sf-settings { flex-direction: column; align-items: stretch; gap: .9rem; }
+  .st-nav { flex: 1 1 auto; max-width: none; flex-direction: row;
+            flex-wrap: wrap; gap: .35rem; }
+  .st-title { flex: 1 0 100%; margin-bottom: .1rem; }
+  .st-navitem { width: auto; height: 40px; padding: 0 .65rem; font-size: .9rem; }
+  .st-navitem svg { display: none; }
+  .st-main { width: 100%; flex: 1 1 auto; }
+  /* the card keeps the full width; the header stops fighting for space */
+  .st-card-head { flex-wrap: wrap; }
+  .st-saved { display: none; }
+  .st-tools { gap: .4rem; }
+  /* folder rows stack: name, then the path on its own line, then Change */
+  .st-table, .st-table tbody, .st-table tr, .st-table td { display: block; }
+  .st-table tr { padding: .6rem 0; border-top: 1px solid var(--border); }
+  .st-table tr:first-child { border-top: 0; }
+  .st-table tr + tr td { border-top: 0; }
+  .st-table td { padding: 0; }
+  .st-table td.st-path { margin: .35rem 0 .45rem; }
+  .st-path code { white-space: normal; overflow-wrap: anywhere;
+                  word-break: break-word; }
+  .st-table td.st-act { text-align: left; }
+  .st-verrow { gap: .6rem; }
+  .st-row { flex-wrap: wrap; }
+  .st-field input { font-size: 1rem; }
+}
+
+/* ---- Settings 2.0 refinements (after first visual pass) ---- */
+/* the global `input { display:block }` beats the [hidden] attribute */
+#restore-file { display: none !important; }
+/* one-line nav labels: "About & updates" must not wrap around its badge */
+.st-navitem span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.st-navitem .st-badge { flex: 0 0 auto; }
+/* release notes inherit the 18px body size otherwise — too shouty in a card */
+.st-card .cl-list, .st-card .cl-group { font-size: .86rem; line-height: 1.5; }
+.st-card .cl-list li { margin-bottom: .45rem; }
+.st-card .cl-ver { font-size: .95rem; }
+/* a touch denser, so each group fits a 780px-tall laptop window */
+.st-main { gap: .8rem; }
+.st-card { padding: .85rem 1rem; }
+.st-card-head { margin-bottom: .45rem; }
+.st-banner { margin-bottom: .7rem; padding: .6rem .8rem; }
+.st-rowmain { line-height: 1.3; }
+.st-tile { padding: .5rem .65rem; }
+.st-tile b { margin-bottom: .2rem; }
+.st-head { margin-bottom: .05rem; }
