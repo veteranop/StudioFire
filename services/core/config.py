@@ -53,6 +53,82 @@ def _load_nowplaying_push(cfg: dict) -> dict:
     }
 
 
+ROYALTY_DEFAULTS = {
+    # No default for service_name: a Report of Use filed under the wrong
+    # station's name is worse than no report. The generator refuses to run
+    # until the station sets it.
+    "service_name": "",
+    "filer_name": "",
+    "contact": {"name": "", "street": "", "city_state_zip": "",
+                "phone": "", "email": ""},
+    "category": "B",              # A webcast | B broadcast simulcast | C talk
+    "mode": "census_atp",         # census_atp | sample_atp | sample_ath
+    "channel_name": "",           # falls back to service_name
+    "output_format": "headerless",  # headerless | headered
+    "share_aliases": [],          # equivalent share roots, e.g. ["\\NAS\music"]
+    "music_drive_letter": "",     # e.g. "Z:" when the share is mapped
+}
+
+
+def _load_royalty_reporting(cfg: dict) -> dict:
+    """The royalty-reporting block, with safe defaults.
+
+    Everything station-specific (name, contact, shares, drive letter) comes
+    from here — nothing about one station's network is baked into the code.
+    """
+    raw = cfg.get("royalty_reporting") or {}
+    out = {k: raw.get(k, v) for k, v in ROYALTY_DEFAULTS.items()
+           if k != "contact"}
+    contact = dict(ROYALTY_DEFAULTS["contact"])
+    contact.update({str(k): str(v or "") for k, v in
+                    (raw.get("contact") or {}).items()})
+    out["contact"] = contact
+    out["service_name"] = str(out.get("service_name") or "").strip()
+    out["filer_name"] = str(out.get("filer_name") or "").strip()
+    out["category"] = str(out.get("category") or "B").strip().upper()
+    out["mode"] = str(out.get("mode") or "census_atp").strip()
+    out["channel_name"] = str(out.get("channel_name") or "").strip()
+    out["output_format"] = str(out.get("output_format")
+                               or "headerless").strip()
+    out["share_aliases"] = [str(x) for x in (out.get("share_aliases") or [])
+                            if str(x).strip()]
+    out["music_drive_letter"] = str(out.get("music_drive_letter") or "").strip()
+    return out
+
+
+def save_royalty_reporting(block: dict, path: str | None = None) -> dict:
+    """Merge royalty-reporting values into config.json and return the result.
+
+    Only the keys given are touched, so saving the Settings card never wipes a
+    hand-edited share alias. Written atomically (tmp + replace) because the
+    file is read by the on-air services.
+    """
+    import json as _json
+    p = path or os.path.join(ROOT, "config", "config.json")
+    try:
+        with open(p, encoding="utf-8") as fh:
+            cfg = _json.load(fh)
+    except (OSError, ValueError):
+        cfg = {}
+    rr = cfg.get("royalty_reporting") or {}
+    for k, v in (block or {}).items():
+        if k == "contact":
+            contact = rr.get("contact") or {}
+            contact.update({str(a): str(b or "") for a, b in (v or {}).items()})
+            rr["contact"] = contact
+        elif k in ROYALTY_DEFAULTS:
+            rr[k] = v
+    cfg["royalty_reporting"] = rr
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    tmp = p + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        _json.dump(cfg, fh, indent=2)
+        fh.flush()
+        os.fsync(fh.fileno())
+    os.replace(tmp, p)
+    return _load_royalty_reporting(cfg)
+
+
 def load_config(path: str | None = None) -> dict:
     cfg = {}
     p = path or os.path.join(ROOT, "config", "config.json")
@@ -102,4 +178,5 @@ def load_config(path: str | None = None) -> dict:
                                         int(engine.get("ipc_port", 7701))),
         "journal_path": os.path.join(logs_dir, "play_journal.jsonl"),
         "nowplaying_push": _load_nowplaying_push(cfg),
+        "royalty_reporting": _load_royalty_reporting(cfg),
     }

@@ -68,6 +68,58 @@
     </table>
   </div>
   <p class="rep-note muted" id="rep-note" hidden></p>
+
+{% if role == 'admin' %}
+<div class="st-card" id="sx-report" style="margin-top:1.4rem">
+  <div class="st-card-head">
+    <h3>Royalty report (SoundExchange)</h3>
+    <div class="st-tools">
+      <span class="st-help" style="margin:0" id="sx-mode-note">Checking&hellip;</span>
+      <a class="st-link" href="/settings#streaming">Change in Settings</a>
+    </div>
+  </div>
+  <p class="st-help">Builds the Report of Use as the regulation lays it out
+    (ASCII, pipe-delimited, caret-quoted), with a track log, a warnings sheet and
+    the attestation to sign. Nothing here touches playout.</p>
+
+  <div class="st-fields" style="margin-top:.8rem">
+    <div class="st-field" id="sx-month-wrap">
+      <label for="sx-month">Month</label>
+      <input type="month" id="sx-month">
+    </div>
+    <div class="st-field" id="sx-quarter-wrap" hidden>
+      <label for="sx-quarter">Quarter</label>
+      <input id="sx-quarter" placeholder="2026-Q4" autocomplete="off">
+    </div>
+    <div class="st-field" id="sx-week1-wrap" hidden>
+      <label for="sx-week1">First sample week starts</label>
+      <input type="date" id="sx-week1">
+    </div>
+    <div class="st-field" id="sx-week2-wrap" hidden>
+      <label for="sx-week2">Second sample week starts</label>
+      <input type="date" id="sx-week2">
+    </div>
+    <div class="st-field" id="sx-ath-wrap" hidden>
+      <label for="sx-ath">Aggregate tuning hours</label>
+      <input id="sx-ath" inputmode="decimal" placeholder="from your stream host">
+    </div>
+    <div class="st-field" id="sx-listeners-wrap">
+      <label for="sx-listeners">Listener CSV (optional)</label>
+      <input type="file" id="sx-listeners" accept=".csv,text/csv">
+      <p class="st-help">Two columns: timestamp and listener count, from your
+        stream host</p>
+    </div>
+  </div>
+
+  <div class="st-foot">
+    <button class="btn btn-green" id="sx-build" onclick="buildSx()">Build report</button>
+    <a class="btn btn-ghost" id="sx-download" href="/api/sx/download" hidden>
+      Download zip</a>
+  </div>
+  <div id="sx-status" class="st-flash" aria-live="polite"></div>
+</div>
+{% endif %}
+
 </div>
 
 <script>
@@ -178,5 +230,114 @@ async function runReport() {
 }
 blurb();
 runReport();
+
+/* =================================================== royalty report (admin) */
+let sxMode = "census_atp";
+let sxPoll = null;
+
+async function loadSx() {
+  const note = document.getElementById("sx-mode-note");
+  if (!note) return;
+  const d = await (await fetch("/api/sx/config")).json();
+  sxMode = d.mode || "census_atp";
+  const labels = {
+    census_atp: "Monthly census \u2014 actual performances",
+    sample_atp: "Quarterly sample \u2014 actual performances",
+    sample_ath: "Quarterly sample \u2014 listening hours"
+  };
+  note.textContent = d.configured ? (labels[sxMode] || sxMode)
+    : "No service name set yet \u2014 add one in Settings";
+  const census = sxMode === "census_atp";
+  document.getElementById("sx-month-wrap").hidden = !census;
+  document.getElementById("sx-quarter-wrap").hidden = census;
+  document.getElementById("sx-week1-wrap").hidden = census;
+  document.getElementById("sx-week2-wrap").hidden = census;
+  document.getElementById("sx-ath-wrap").hidden = sxMode !== "sample_ath";
+  document.getElementById("sx-listeners-wrap").hidden = sxMode === "sample_ath";
+  renderSx(d.state);
+}
+
+function renderSx(st) {
+  const box = document.getElementById("sx-status");
+  const dl = document.getElementById("sx-download");
+  const btn = document.getElementById("sx-build");
+  if (!box || !st) return;
+  btn.disabled = st.state === "running";
+  btn.textContent = st.state === "running" ? "Building\u2026" : "Build report";
+  if (st.state === "running") {
+    box.dataset.error = "0";
+    box.textContent = "Building the report \u2014 this runs in the background.";
+    if (!sxPoll) sxPoll = setInterval(pollSx, 2500);
+    return;
+  }
+  if (st.state === "error") {
+    box.dataset.error = "1";
+    box.textContent = "Build failed: " + (st.error || "unknown error");
+    return;
+  }
+  if (st.state !== "done") { box.textContent = ""; return; }
+  dl.hidden = !st.zip;
+  box.dataset.error = st.ready ? "0" : "1";
+  const head = st.ready ? "READY TO FILE" : "NOT READY \u2014 fix these first";
+  const facts = st.rows + " rows from " + st.performances +
+        " performances \u00b7 " + (st.period || "") + " \u00b7 due " + (st.due || "");
+  let html = "<div class='sx-verdict'>" + head + "</div><div class='sx-facts'>" +
+             facts + "</div>";
+  if (!st.ready && (st.reasons || []).length) {
+    html += "<ul class='sx-reasons'>";
+    for (const r of st.reasons.slice(0, 4))
+      html += "<li>" + (r.length > 300 ? r.slice(0, 300) + "\u2026" : r) + "</li>";
+    if (st.reasons.length > 4)
+      html += "<li>\u2026 and " + (st.reasons.length - 4) +
+              " more in the warnings file</li>";
+    html += "</ul>";
+  }
+  if (st.ready && st.zip)
+    html += "<div class='sx-facts'>Download the zip, sign the attestation inside " +
+            "it, and upload the .txt through Licensee Direct.</div>";
+  box.innerHTML = html;
+}
+
+async function pollSx() {
+  const st = await (await fetch("/api/sx/status")).json();
+  renderSx(st);
+  if (st.state !== "running" && sxPoll) { clearInterval(sxPoll); sxPoll = null; }
+}
+
+async function buildSx() {
+  const body = {mode: sxMode};
+  if (sxMode === "census_atp") {
+    body.month = document.getElementById("sx-month").value;
+    if (!body.month) { renderSx({state: "error",
+                                 error: "pick a month first"}); return; }
+  } else {
+    body.quarter = document.getElementById("sx-quarter").value.trim();
+    body.week1 = document.getElementById("sx-week1").value;
+    body.week2 = document.getElementById("sx-week2").value;
+    if (sxMode === "sample_ath")
+      body.ath = document.getElementById("sx-ath").value;
+  }
+  const fileEl = document.getElementById("sx-listeners");
+  if (fileEl && fileEl.files.length) {
+    const fd = new FormData();
+    fd.append("file", fileEl.files[0]);
+    const up = await fetch("/api/sx/listeners", {method: "POST", body: fd});
+    if (up.ok) body.listeners_path = (await up.json()).path;
+  }
+  const r = await fetch("/api/sx/build", {method: "POST",
+    headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) { renderSx({state: "error", error: d.detail || "could not start"}); return; }
+  renderSx(d.state);
+  if (!sxPoll) sxPoll = setInterval(pollSx, 2500);
+}
+
+document.getElementById("sx-month") && (function () {
+  const now = new Date();
+  const m = now.getMonth() === 0 ? 12 : now.getMonth();
+  const y = now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear();
+  document.getElementById("sx-month").value = y + "-" + String(m).padStart(2, "0");
+})();
+loadSx();
 </script>
 {% endblock %}

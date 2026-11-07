@@ -8,6 +8,20 @@ plain English a non-technical operator can understand.
 ## [Unreleased]
 
 ### Added
+- **The royalty report is now a button, in the format SoundExchange asks for.**
+  Reports → **Royalty report** builds the Report of Use for a month (or a
+  quarter, for the two sample options), shows **READY TO FILE** or **NOT READY**
+  with the reasons, and hands you one zip: the filing itself (plain text, pipe
+  delimited, caret quoted, exactly the 37 CFR 370.4 layout), a review
+  spreadsheet, the per-song track log, the warnings sheet and an attestation to
+  sign.
+  * The station's name, contact details, category and reporting option live in
+    **Settings → Streaming → Royalty reporting** — nothing is hard-coded for one
+    station any more.
+  * It refuses to run without a service name, and it never fills the
+    performances column with a play count.
+  * Play counts appear only in the quarterly listening-hours format, where the
+    rules ask for them.
 - **Deleting a spot rule can no longer silence your IDs and underwriting by
   accident.** It was one click on a ✕ with no warning — which is how a station
   can end up with no legal IDs and no paid credits airing for a day while the

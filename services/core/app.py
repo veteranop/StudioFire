@@ -17,7 +17,8 @@ import sys
 import time
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import (FileResponse, HTMLResponse,
+                               RedirectResponse, Response)
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -647,6 +648,187 @@ def create_app(cfg: dict) -> FastAPI:
             out.append({"ts": r["ts"], "title": title,
                         "source": r["source"] or ""})
         return out
+
+
+    # ---- SoundExchange royalty report (Report of Use, 37 CFR 370.4) --------
+    # The build runs in a worker thread against a read-only connection: it can
+    # never write to the DB and never touches the playout path.
+    sx_state = {"state": "idle", "started": None, "finished": None,
+                "ready": None, "reasons": [], "zip": None, "files": {},
+                "rows": 0, "performances": 0, "error": None, "mode": None,
+                "period": None, "due": None, "out_dir": None}
+
+    def _sx_cfg():
+        from .config import load_config
+        return load_config().get("royalty_reporting") or {}
+
+    @app.get("/api/sx/config")
+    def api_sx_config(_=Depends(api_user)):
+        rr = _sx_cfg()
+        return {"service_name": rr.get("service_name", ""),
+                "filer_name": rr.get("filer_name", ""),
+                "contact": rr.get("contact") or {},
+                "category": rr.get("category", "B"),
+                "mode": rr.get("mode", "census_atp"),
+                "channel_name": rr.get("channel_name", ""),
+                "output_format": rr.get("output_format", "headerless"),
+                "share_aliases": rr.get("share_aliases") or [],
+                "music_drive_letter": rr.get("music_drive_letter", ""),
+                "configured": bool((rr.get("service_name") or "").strip()),
+                "state": sx_state}
+
+    @app.post("/api/sx/settings")
+    def api_sx_settings(body: dict, _=Depends(api_admin)):
+        from .config import save_royalty_reporting
+        allowed = {"service_name", "filer_name", "contact", "category",
+                   "mode", "channel_name", "output_format", "share_aliases",
+                   "music_drive_letter"}
+        block = {k: v for k, v in (body or {}).items() if k in allowed}
+        if block.get("category") not in (None, "", "A", "B", "C"):
+            raise HTTPException(400, "category must be A, B or C")
+        if block.get("mode") not in (None, "", "census_atp", "sample_atp",
+                                     "sample_ath"):
+            raise HTTPException(400, "unknown reporting mode")
+        if block.get("output_format") not in (None, "", "headerless",
+                                             "headered"):
+            raise HTTPException(400, "format must be headerless or headered")
+        if isinstance(block.get("share_aliases"), str):
+            block["share_aliases"] = [x.strip() for x in
+                                      block["share_aliases"].split(",") if x.strip()]
+        saved = save_royalty_reporting(block)
+        return {"ok": True, "royalty_reporting": saved}
+
+    def _sx_run(job: dict) -> None:
+        """The background build. Never raises into the request thread."""
+        import threading
+        from . import sx_report as sx
+        from .config import load_config
+        try:
+            conf = load_config()
+            cfg = conf.get("royalty_reporting") or {}
+            db_path = conf.get("paths", {}).get("db_path") or os.path.join(
+                conf.get("paths", {}).get("data_dir", "data"), "studiofire.db")
+            conn = db.connect(db_path)
+            roots = list(cfg.get("share_aliases") or [])
+            if not roots:
+                nas = conf.get("paths", {}).get("nas_music_root")
+                if nas:
+                    try:
+                        roots = [pathmap.share_root(nas)]
+                    except Exception:      # noqa: BLE001
+                        roots = [nas]
+            index = sx.build_precache_index(conn, roots,
+                                            cfg.get("music_drive_letter") or "")
+            mode = job["mode"]
+            plays = []
+            for w_start, w_end in job["windows"]:
+                plays.extend(sx.collect_period(conn, w_start, w_end,
+                                               index=index))
+            plays.sort(key=lambda r: r["start"])
+            note = "no listener series supplied"
+            if job.get("listeners"):
+                series = sx.load_listener_series(job["listeners"])
+                missing = sx.apply_listeners(plays, series)
+                note = ("%d listener samples; %d performances outside their "
+                        "coverage" % (len(series), missing))
+            out_dir = job["out_dir"]
+            result = sx.build_report(conn=conn, out_dir=out_dir, cfg=cfg,
+                                     mode=mode, start=job["start"],
+                                     end_excl=job["end_excl"], plays=plays,
+                                     ath=job.get("ath"), extra_note=note)
+            sx_state.update({
+                "state": "done", "finished": time.time(),
+                "ready": result["ready"], "reasons": result["reasons"],
+                "zip": result["zip"], "files": result["files"],
+                "rows": result["rows"], "performances": result["performances"],
+                "mode": mode, "due": result["due"], "error": None,
+                "period": "%s .. %s" % (job["start"].date(),
+                                        (job["end_excl"] -
+                                         datetime.timedelta(days=1)).date()),
+                "out_dir": out_dir})
+        except Exception as exc:          # noqa: BLE001 — surface, never crash
+            log.exception("royalty report build failed")
+            sx_state.update({"state": "error", "finished": time.time(),
+                             "error": str(exc), "ready": None, "reasons": []})
+
+    @app.post("/api/sx/build")
+    def api_sx_build(body: dict, _=Depends(api_admin)):
+        import threading
+        from . import sx_report as sx
+        if sx_state.get("state") == "running":
+            raise HTTPException(409, "a report is already being built")
+        mode = (body.get("mode") or _sx_cfg().get("mode") or "census_atp")
+        if mode not in sx.MODES:
+            raise HTTPException(400, "unknown reporting mode")
+        try:
+            if mode == "census_atp":
+                month = (body.get("month") or "").strip()
+                if not month:
+                    raise HTTPException(400, "pick a month")
+                start, end = sx._month_bounds(month)
+                windows = [(start, end)]
+            else:
+                quarter = (body.get("quarter") or "").strip()
+                w1, w2 = (body.get("week1") or "").strip(), \
+                         (body.get("week2") or "").strip()
+                (w1s, w1e), (w2s, w2e) = sx.validate_weeks(w1, w2, quarter)
+                start, end = sx.quarter_bounds(quarter)
+                windows = [(w1s, w1e), (w2s, w2e)]
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+        except HTTPException:
+            raise
+        except Exception as exc:          # noqa: BLE001
+            raise HTTPException(400, "could not work out the period: %s" % exc)
+        ath = body.get("ath")
+        if mode == "sample_ath":
+            try:
+                ath = float(ath)
+            except (TypeError, ValueError):
+                raise HTTPException(400, "aggregate tuning hours is required "
+                                         "for the listening-hours format")
+        from .config import load_config
+        data_dir = load_config().get("paths", {}).get("data_dir", "data")
+        out_dir = os.path.join(data_dir, "sx_reports",
+                               datetime.datetime.now().strftime("%Y%m%d-%H%M%S"))
+        listeners = body.get("listeners_path") or ""
+        if listeners and not os.path.isfile(listeners):
+            listeners = ""
+        job = {"mode": mode, "start": start, "end_excl": end,
+               "windows": windows, "ath": ath, "listeners": listeners,
+               "out_dir": out_dir}
+        sx_state.update({"state": "running", "started": time.time(),
+                         "finished": None, "ready": None, "reasons": [],
+                         "error": None, "zip": None, "files": {}, "mode": mode,
+                         "out_dir": out_dir, "due": None, "period": None})
+        threading.Thread(target=_sx_run, args=(job,), daemon=True).start()
+        return {"ok": True, "state": sx_state}
+
+    @app.get("/api/sx/status")
+    def api_sx_status(_=Depends(api_admin)):
+        return sx_state
+
+    @app.post("/api/sx/listeners")
+    def api_sx_listeners(file: UploadFile, _=Depends(api_admin)):
+        """Store an uploaded listener series CSV and hand back its path."""
+        from .config import load_config
+        data_dir = load_config().get("paths", {}).get("data_dir", "data")
+        folder = os.path.join(data_dir, "sx_listeners")
+        os.makedirs(folder, exist_ok=True)
+        name = os.path.basename(file.filename or "listeners.csv")
+        safe = "".join(c for c in name if c.isalnum() or c in "._-") or "listeners.csv"
+        path = os.path.join(folder, datetime.datetime.now().strftime("%Y%m%d-%H%M%S-") + safe)
+        with open(path, "wb") as fh:
+            fh.write(file.file.read())
+        return {"ok": True, "path": path}
+
+    @app.get("/api/sx/download")
+    def api_sx_download(_=Depends(api_admin)):
+        zip_path = sx_state.get("zip")
+        if not zip_path or not os.path.isfile(zip_path):
+            raise HTTPException(404, "no report has been built yet")
+        return FileResponse(zip_path, media_type="application/zip",
+                            filename=os.path.basename(zip_path))
 
     @app.get("/reports", response_class=HTMLResponse)
     def reports_page(request: Request, sess: dict = Depends(page_user)):

@@ -211,30 +211,72 @@
       your encoder already watches the file, you don't need it.</p>
 
     <h2 id="royalty">The royalty report — SoundExchange</h2>
-    <p>The station is on FM <em>and</em> streamed on the internet, and the internet
-      stream adds one regular piece of paperwork: a <strong>Report of Use</strong>
-      for <strong>SoundExchange</strong>, listing every song that went out on the
-      stream during the month. StudioFire builds it from the air log it already
-      keeps — nothing has to be typed up by hand.</p>
+    <p>Any station that streams music on the internet owes a
+      <strong>Report of Use</strong> to <strong>SoundExchange</strong>: a list of
+      every recording it transmitted. StudioFire builds it from the air log it
+      already keeps, so nothing is typed up by hand. Build it in
+      <strong>Reports &rarr; Royalty report</strong>; the station's identity and
+      reporting option live in <strong>Settings &rarr; Streaming</strong>.</p>
+
+    <h3>Two ways to report</h3>
     <ul>
-      <li>A month is chosen and the report is run by VeteranOp (or whoever looks
-        after the server). You don't run it from these pages.</li>
-      <li>You get <strong>three files</strong>: the report itself (service, artist,
-        title, album, ISRC, label and performances), a <strong>track log</strong>
-        with the exact time every song started — the evidence behind the report —
-        and a short <strong>warnings</strong> list of anything it could not fill in.</li>
-      <li>Reports are due <strong>45 days after the month ends</strong> — August is
-        due by 14 October. Put it on the same monthly list as the playlist backup.</li>
-      <li>Keep a copy: the regulation asks for three years.</li>
+      <li><strong>Monthly census</strong> — every song, every month, with the
+        number of people who heard each one. Any station can file this way.</li>
+      <li><strong>Quarterly sample</strong> — two chosen weeks standing in for
+        the quarter. This one is only for an <em>Eligible Minimum Fee
+        Webcaster</em> (the station pays no more than the annual minimum fee and
+        owns or operates an FCC-licensed AM/FM station), and it is the only
+        option that may report <em>listening hours plus play counts</em> instead
+        of performances. Confirm your eligibility with SoundExchange first.</li>
     </ul>
+
+    <h3>Where the numbers come from</h3>
+    <ul>
+      <li><strong>StudioFire</strong> supplies the songs, the artist/title/album
+        details and the play counts, from its own playout log.</li>
+      <li><strong>Your stream host</strong> supplies the listeners and the
+        listening hours. Upload their CSV in the report panel (two columns:
+        timestamp and listener count) for the performance formats, or type the
+        aggregate tuning hours for the listening-hours format.</li>
+    </ul>
+
+    <h3>What you get</h3>
+    <p>A single zip with the filing itself — plain ASCII, pipe-delimited,
+      caret-quoted, exactly the layout the regulation asks for — plus a
+      <strong>review CSV</strong> to check in Excel, the <strong>track log</strong>
+      with the exact start time of every song (the evidence behind the report),
+      a <strong>warnings</strong> sheet, and an <strong>attestation</strong> to
+      sign. The warnings file starts with either <em>READY TO FILE</em> or
+      <em>NOT READY</em> and the reasons, so you know before you upload.</p>
+
+    <h3>Before you file</h3>
+    <ul>
+      <li>Due <strong>45 days after the period ends</strong> (a quarter ends
+        31 December, so that one is due 14 February).</li>
+      <li>Keep the report, the track log and the signed attestation for
+        <strong>three years</strong>.</li>
+      <li>The regulation requires a <strong>signed statement</strong> from an
+        officer of the service — fill in and sign the attestation file.</li>
+      <li>Upload through <strong>SoundExchange Licensee Direct</strong>.</li>
+      <li>The monthly <strong>Statement of Account</strong> (listening hours and
+        fees, from your stream host) is filed separately. StudioFire does not
+        produce it.</li>
+      <li>Rates and the minimum-fee listening-hours cap change every year —
+        check SoundExchange's current memo.</li>
+    </ul>
+
     <div class="help-callout">
       <strong>What it leaves out, and will never invent.</strong> Advertisements,
       station IDs, PSAs and underwriting are not in the report — they aren't
-      licensed sound recordings. It will never guess a song's ISRC or record label
-      (those come from the tags inside each song file, and stay blank when a file
-      has no tag), and it never uses "how many times it played" in place of "how
-      many people heard it". That listener total has to come from the stream host.
+      licensed sound recordings. It never guesses an ISRC or a record label:
+      those come from the tags inside each song file and stay blank (marked
+      <code>^^</code>) when a file has no tag. Play counts are only used in the
+      quarterly listening-hours format, where the rules ask for them; in the
+      performance formats the figure is listeners, and where listeners are
+      missing the column is left blank rather than filled with a play count.
     </div>
+    <p class="muted">This is a tool, not legal advice. Confirm your license type
+      and reporting option with SoundExchange.</p>
 
     <h2 id="settings">Settings</h2>
     <p>Everything you configure lives under <strong>Settings</strong>. The common

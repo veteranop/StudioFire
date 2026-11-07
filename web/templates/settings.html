@@ -211,6 +211,101 @@
         <div class="st-card-head"><h3>Live status</h3></div>
         <div id="st-monitor" class="st-empty">Checking&hellip;</div>
       </div>
+
+      {% if is_admin %}
+      <div class="st-card" id="sx-card">
+        <div class="st-card-head">
+          <h3>Royalty reporting</h3>
+          <div class="st-tools">
+            <span class="st-help" style="margin:0">SoundExchange Report of Use</span>
+          </div>
+        </div>
+        <p class="st-help">Who the station files as, and which reporting option it
+          uses. Build the report itself from Reports &rarr; Royalty report.</p>
+
+        <div class="st-fields" style="margin-top:.7rem">
+          <div class="st-field">
+            <label for="sx-service">Service name</label>
+            <input id="sx-service" autocomplete="off"
+                   placeholder="The name the station files under">
+            <p class="st-help">Exactly as SoundExchange knows the station</p>
+          </div>
+          <div class="st-field">
+            <label for="sx-filer">Filed by (optional)</label>
+            <input id="sx-filer" autocomplete="off"
+                   placeholder="Only if somebody else signs">
+          </div>
+          <div class="st-field">
+            <label for="sx-contact-name">Contact name</label>
+            <input id="sx-contact-name" autocomplete="off">
+          </div>
+          <div class="st-field">
+            <label for="sx-street">Street</label>
+            <input id="sx-street" autocomplete="off">
+          </div>
+          <div class="st-field">
+            <label for="sx-city">City, state, ZIP</label>
+            <input id="sx-city" autocomplete="off">
+          </div>
+          <div class="st-field">
+            <label for="sx-phone">Phone</label>
+            <input id="sx-phone" autocomplete="off">
+          </div>
+          <div class="st-field">
+            <label for="sx-email">Email</label>
+            <input id="sx-email" autocomplete="off">
+          </div>
+          <div class="st-field">
+            <label for="sx-category">Category</label>
+            <select id="sx-category">
+              <option value="A">A &mdash; webcast only (not a simulcast)</option>
+              <option value="B">B &mdash; broadcast simulcast, music</option>
+              <option value="C">C &mdash; news, talk, sports or business</option>
+            </select>
+          </div>
+          <div class="st-field">
+            <label for="sx-mode">Reporting option</label>
+            <select id="sx-mode">
+              <option value="census_atp">Monthly census, actual performances</option>
+              <option value="sample_atp">Quarterly sample, actual performances</option>
+              <option value="sample_ath">Quarterly sample, listening hours</option>
+            </select>
+            <p class="st-help">The last two are only for eligible minimum-fee
+              AM/FM webcasters</p>
+          </div>
+          <div class="st-field">
+            <label for="sx-channel">Channel or program name (optional)</label>
+            <input id="sx-channel" autocomplete="off"
+                   placeholder="Defaults to the service name">
+          </div>
+          <div class="st-field">
+            <label for="sx-format">File layout</label>
+            <select id="sx-format">
+              <option value="headerless">Data rows only</option>
+              <option value="headered">With the 14-line header</option>
+            </select>
+          </div>
+          <div class="st-field">
+            <label for="sx-aliases">Share addresses for the music library</label>
+            <input id="sx-aliases" autocomplete="off"
+                   placeholder="\\NAS\music, \\192.168.0.10\music">
+            <p class="st-help">Comma separated. Only needed if the library is
+              reached by more than one name.</p>
+          </div>
+          <div class="st-field">
+            <label for="sx-drive">Drive letter (if the share is mapped)</label>
+            <input id="sx-drive" autocomplete="off" placeholder="Z:">
+          </div>
+        </div>
+
+        <div class="st-foot">
+          <button class="btn btn-green" onclick="saveSxSettings()">Save</button>
+        </div>
+        <div class="st-flash" id="sx-msg" aria-live="polite"></div>
+      </div>
+      {% endif %}
+
+
     </section>
 
     <!-- ===== 3. EQUIPMENT ============================================= -->
@@ -1305,12 +1400,60 @@ window.matchMedia("(max-width: 720px)").addEventListener("change", () => {
   if (typeof renderDirs === "function") renderDirs();
 });
 
+
+/* ======================================================== royalty reporting */
+async function loadSxSettings() {
+  const el = document.getElementById("sx-service");
+  if (!el) return;
+  const d = await (await fetch("/api/sx/config")).json();
+  el.value = d.service_name || "";
+  document.getElementById("sx-filer").value = d.filer_name || "";
+  const c = d.contact || {};
+  document.getElementById("sx-contact-name").value = c.name || "";
+  document.getElementById("sx-street").value = c.street || "";
+  document.getElementById("sx-city").value = c.city_state_zip || "";
+  document.getElementById("sx-phone").value = c.phone || "";
+  document.getElementById("sx-email").value = c.email || "";
+  document.getElementById("sx-category").value = d.category || "B";
+  document.getElementById("sx-mode").value = d.mode || "census_atp";
+  document.getElementById("sx-channel").value = d.channel_name || "";
+  document.getElementById("sx-format").value = d.output_format || "headerless";
+  document.getElementById("sx-aliases").value = (d.share_aliases || []).join(", ");
+  document.getElementById("sx-drive").value = d.music_drive_letter || "";
+}
+
+async function saveSxSettings() {
+  const body = {
+    service_name: document.getElementById("sx-service").value.trim(),
+    filer_name: document.getElementById("sx-filer").value.trim(),
+    contact: {
+      name: document.getElementById("sx-contact-name").value.trim(),
+      street: document.getElementById("sx-street").value.trim(),
+      city_state_zip: document.getElementById("sx-city").value.trim(),
+      phone: document.getElementById("sx-phone").value.trim(),
+      email: document.getElementById("sx-email").value.trim()
+    },
+    category: document.getElementById("sx-category").value,
+    mode: document.getElementById("sx-mode").value,
+    channel_name: document.getElementById("sx-channel").value.trim(),
+    output_format: document.getElementById("sx-format").value,
+    share_aliases: document.getElementById("sx-aliases").value,
+    music_drive_letter: document.getElementById("sx-drive").value.trim()
+  };
+  const r = await fetch("/api/sx/settings", {method: "POST",
+    headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) { flash("sx-msg", d.detail || "Could not save.", true); return; }
+  flash("sx-msg", "Saved \u2713");
+}
+
 /* ============================================================ boot */
 stShow(stGroupFromHash(), false);
 loadDirs();
 loadStreaming();
 loadUsers();
 loadDevices();
+loadSxSettings();
 updRefresh();
 setInterval(loadDevices, 10000);
 </script>
