@@ -21,9 +21,37 @@
   },
   "poller": {
     "interval_sec": 60,
-    "unifi": { "host": "", "api_key": "" },
-    "barix": [ { "name": "Studio Instreamer", "host": "" } ],
-    "tx150": { "host": "", "port": 0 },
+    "unifi": {
+      "host": "",
+      "api_key": ""
+    },
+    "barix": [
+      {
+        "name": "Studio Instreamer",
+        "host": ""
+      }
+    ],
+    "tx150": {
+      "host": "",
+      "port": 0
+    },
     "wireguard_peer_ip": ""
+  },
+  "royalty_reporting": {
+    "service_name": "",
+    "filer_name": "",
+    "contact": {
+      "name": "",
+      "street": "",
+      "city_state_zip": "",
+      "phone": "",
+      "email": ""
+    },
+    "category": "B",
+    "mode": "census_atp",
+    "channel_name": "",
+    "output_format": "headerless",
+    "share_aliases": [],
+    "music_drive_letter": ""
   }
 }
