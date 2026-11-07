@@ -89,6 +89,23 @@ resolves from anywhere with no cwd or PATH assumptions. `start-all.bat`,
 `<install>\runtime\python.exe` when it exists and fall back to Anaconda/PATH
 on dev boxes.
 
+## Installing on a station PC (the helper script)
+
+`INSTALL-Production.ps1` next to the built exe does the pre-flight and the proof:
+
+```powershell
+# copy the whole installer\Output folder to the station PC, then
+.\INSTALL-Production.ps1 -PreflightOnly   # check only, changes nothing
+.\INSTALL-Production.ps1                  # walk the setup screens
+.\INSTALL-Production.ps1 -Silent          # unattended
+```
+
+It verifies the exe against `SHA256SUMS.txt`, reports leftover services or an old
+install folder, **backs up an existing `%ProgramData%\StudioFire\data\studiofire.db`
+before installing**, checks free space / audio devices / whether the web port is
+free, then runs the installer and verifies services, the listening port and
+`GET /health`. Every run writes `install-<timestamp>.log` beside itself.
+
 ## Related
 
 - [[StudioFire/DEPLOY|DEPLOY]] — manual deploy / dev→deploy workflow
