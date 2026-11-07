@@ -45,6 +45,11 @@ from . import nowplaying_file
 log = logging.getLogger("core.bridge")
 
 
+# last good answer from /api/queue, so a feeder tick that is busy on the
+# music share cannot stall the On Air page (see api_queue).
+_QUEUE_SNAPSHOT: dict = {}
+
+
 def record_skip(conn: sqlite3.Connection, path: str,
                 reason: str = "missing") -> None:
     """Persist a skipped-as-missing playlist item so the GUI can show it.
@@ -1381,27 +1386,48 @@ def register(app: FastAPI) -> None:
         """Now playing + the pending titles the feeder has queued into P1."""
         st = engine.status()
         now_id = (st or {}).get("now_id")
-        with feeder._lock:  # consistent snapshot of feeder_state vs a live tick
-            fst = feeder._load_state(conn)
-            pending = fst["fed"]
-            # the currently-playing fed entry carries full artist/album/song
-            now_e = next((e for e in pending if e["id"] == now_id), None) \
-                if now_id else None
-            if st is not None and "pending_ids" in st:
-                order = {i: k for k, i in enumerate(st["pending_ids"])}
-                pending = sorted((e for e in pending if e["id"] in order),
-                                 key=lambda e: order[e["id"]])
-            elif st is not None:
-                n = max(0, st["queue_len"] - st["current_index"] - 1)
-                if len(pending) > n:
-                    pending = pending[len(pending) - n:]
-            pending_view = [{"id": e["id"],
-                             "title": e.get("title") or "(untitled)",
-                             "duration": e.get("duration")}
-                            for e in pending]
-            now_artist = (now_e or {}).get("artist")
-            now_album = (now_e or {}).get("album")
-            now_song = (now_e or {}).get("song")
+        # The feeder holds this lock while it lays out the next hour, which
+        # means stat-ing files on the music share. Waiting for it made this
+        # endpoint take seconds (measured 5.2s on a NAS library), and the page
+        # polls it every 2s - so the whole On Air screen fell behind and showed
+        # a false "audio engine not responding" banner. Take the lock only if it
+        # is free; otherwise answer from the last good snapshot and let the next
+        # poll catch up.
+        got = feeder._lock.acquire(timeout=0.25)
+        try:
+            if got:
+                fst = feeder._load_state(conn)
+                pending = fst["fed"]
+                # the currently-playing fed entry carries full artist/album/song
+                now_e = next((e for e in pending if e["id"] == now_id), None) \
+                    if now_id else None
+                if st is not None and "pending_ids" in st:
+                    order = {i: k for k, i in enumerate(st["pending_ids"])}
+                    pending = sorted((e for e in pending if e["id"] in order),
+                                     key=lambda e: order[e["id"]])
+                elif st is not None:
+                    n = max(0, st["queue_len"] - st["current_index"] - 1)
+                    if len(pending) > n:
+                        pending = pending[len(pending) - n:]
+                pending_view = [{"id": e["id"],
+                                 "title": e.get("title") or "(untitled)",
+                                 "duration": e.get("duration")}
+                                for e in pending]
+                now_artist = (now_e or {}).get("artist")
+                now_album = (now_e or {}).get("album")
+                now_song = (now_e or {}).get("song")
+                _QUEUE_SNAPSHOT.update(now_id=now_id, pending=pending_view,
+                                       artist=now_artist, album=now_album,
+                                       song=now_song)
+            else:
+                snap = dict(_QUEUE_SNAPSHOT)
+                pending_view = snap.get("pending") or []
+                now_artist = snap.get("artist")
+                now_album = snap.get("album")
+                now_song = snap.get("song")
+        finally:
+            if got:
+                feeder._lock.release()
         return {"engine_online": st is not None,
                 "now_playing": (st or {}).get("now_playing"),
                 "now_title": (st or {}).get("now_title"),

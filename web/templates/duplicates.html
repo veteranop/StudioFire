@@ -16,18 +16,15 @@
 {% block content %}
 <div class="card">
   <h1>Duplicate cleanup</h1>
-  <p class="muted">
-    Finds songs that appear more than once in the music library (same file name,
-    ignoring a "(1)" or "- copy" on the end). <strong>Look first, then choose.</strong>
-    Anything you leave unticked is <strong>moved</strong> — not deleted — into a
+  <p class="muted"> Finds songs that appear more than once in the music library (same file name,
+    ignoring a "(1)" or "- copy" on the end). <strong>Look first, then choose.</strong> Anything you leave unticked is <strong>moved</strong> — not deleted — into a
     <code>_Duplicates</code> folder inside your music library, so it can always be
     brought back. Songs used by a playlist, a show or a spot are protected and
     won't be moved.
   </p>
   <div class="row">
-    <button class="btn btn-green" id="dup-find" onclick="findDupes()">🔍 Find duplicates</button>
-    <button class="btn btn-yellow" id="dup-go" onclick="doQuarantine()" hidden>
-      🧹 Move unticked duplicates to _Duplicates</button>
+    <button class="btn btn-green" id="dup-find" onclick="findDupes()">Find duplicates</button>
+    <button class="btn btn-yellow" id="dup-go" onclick="doQuarantine()" hidden> Move unticked duplicates to _Duplicates</button>
   </div>
   <div id="dup-summary" class="muted" style="margin-top:.6rem"></div>
 </div>
@@ -64,14 +61,14 @@ async function findDupes() {
   } catch (e) {
     box.innerHTML = ""; document.getElementById("dup-summary").textContent =
       "Could not read the library."; btn.disabled = false; btn.textContent =
-      "🔍 Find duplicates"; return;
+      "Find duplicates"; return;
   }
   dupGroups = d.groups || [];
-  btn.disabled = false; btn.textContent = "🔍 Find duplicates";
+  btn.disabled = false; btn.textContent = "Find duplicates";
   const sum = document.getElementById("dup-summary");
   if (!dupGroups.length) {
     box.innerHTML = "";
-    sum.textContent = "No duplicates found. Nothing to clean up. 🎉";
+    sum.textContent = "No duplicates found. Nothing to clean up. ";
     document.getElementById("dup-go").hidden = true;
     return;
   }
@@ -160,10 +157,10 @@ async function doQuarantine() {
   } catch (e) {
     alert(e.message || "Could not move the files.");
     btn.disabled = false; btn.textContent =
-      "🧹 Move unticked duplicates to _Duplicates"; return;
+      "Move unticked duplicates to _Duplicates"; return;
   }
   btn.disabled = false; btn.textContent =
-    "🧹 Move unticked duplicates to _Duplicates";
+    "Move unticked duplicates to _Duplicates";
   let msg = "Moved " + d.moved.length + " file(s) to " + (d.dest || "_Duplicates") + ".";
   if (d.skipped.length) msg += " " + d.skipped.length + " skipped (protected).";
   if (d.errors.length) msg += " " + d.errors.length + " error(s).";

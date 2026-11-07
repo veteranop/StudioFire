@@ -20,13 +20,12 @@
     Open one, change it on the next screen, and every change saves straight
     back to the same file.</p>
 
-  <h2>📂 Open a playlist</h2>
+  <h2>Open a playlist</h2>
   <div class="row">
-    <button class="btn btn-green btn-big" onclick="openBrowse()">
-      Open a playlist (.lst)…</button>
+    <button class="btn btn-green btn-big" onclick="openBrowse()"> Open a playlist (.lst)…</button>
   </div>
 
-  <h2>➕ Start a new playlist</h2>
+  <h2>Start a new playlist</h2>
   <div class="row">
     <input id="new-name" placeholder="Name it… e.g. Saturday Night Mix"
            onkeydown="if (event.key === 'Enter') createPl()">
@@ -40,7 +39,7 @@
     locations. This finds each stale track and re-points it to the real file in
     your library (matched by file name) — no re-import needed. Best run after
     the library has finished indexing.</p>
-  <button class="btn btn-green" onclick="relinkAll()">🔧 Fix broken paths in
+  <button class="btn btn-green" onclick="relinkAll()">Fix broken paths in
     all playlists</button>
   <div id="relink-result" style="margin-top:.7rem"></div>
 </div>
@@ -50,11 +49,11 @@
   <div class="fp-box card">
     <div class="row" style="justify-content:space-between;margin-top:0">
       <strong id="fp-title">Open a playlist (.lst)</strong>
-      <button class="btn btn-sm" onclick="fpClose()">✕ Close</button>
+      <button class="btn btn-sm" onclick="fpClose()">× Close</button>
     </div>
     <div class="row">
-      <button class="btn btn-sm" onclick="fpGo('')">💻 Drives</button>
-      <button class="btn btn-sm" id="fp-up" onclick="fpUp()">⬆ Up</button>
+      <button class="btn btn-sm" onclick="fpGo('')">Drives</button>
+      <button class="btn btn-sm" id="fp-up" onclick="fpUp()">Up</button>
       <span id="fp-path" class="muted"></span>
     </div>
     <div id="fp-list" class="picker"></div>
@@ -100,13 +99,13 @@ async function fpGo(path) {
   list.innerHTML = "";
   for (const name of d.dirs) {
     const b = document.createElement("button");
-    b.className = "pickdir"; b.textContent = "📁 " + name;
+    b.className = "pickdir"; b.textContent = name;
     b.onclick = () => fpGo(joinPath(d.path, name));
     list.appendChild(b);
   }
   for (const name of (d.files || [])) {
     const b = document.createElement("button");
-    b.className = "pickdir pickfile"; b.textContent = "📻 " + name;
+    b.className = "pickdir pickfile"; b.textContent = name;
     b.onclick = () => openLst(joinPath(d.path, name));
     list.appendChild(b);
   }

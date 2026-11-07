@@ -11,7 +11,7 @@
 </nav>
 <div class="nav-right topbar-right">
   <a id="upd-pill" class="upd-pill" href="/settings#updates" hidden
-     title="A new StudioFire version is available — see Settings">⬆ Update</a>
+     title="A new StudioFire version is available — see Settings">Update</a>
   <div class="onair" id="onair">OFF AIR</div>
   {% if allow_restart %}
   <button id="btn-restart" class="restart-btn" onclick="restartSystem()"
@@ -36,12 +36,10 @@
 {% endblock %}
 {% block content %}
 
-<div id="offline-banner" class="banner banner-red" hidden>
-  AUDIO ENGINE NOT RESPONDING — music may still be playing; do not panic,
+<div id="offline-banner" class="banner banner-red" hidden> AUDIO ENGINE NOT RESPONDING — music may still be playing; do not panic,
   check the on-air PC.
 </div>
-<div id="emergency-banner" class="banner banner-yellow" hidden>
-  EMERGENCY FILLER IS ON AIR — the normal playlist could not continue.
+<div id="emergency-banner" class="banner banner-yellow" hidden> EMERGENCY FILLER IS ON AIR — the normal playlist could not continue.
 </div>
 
 <div class="onair-wrap">
@@ -104,14 +102,14 @@
     <h2>Upcoming spots</h2>
     <div id="spot-empty-banner" class="alert-banner" hidden></div>
     <input type="text" id="spot-search" class="rot-search" autocomplete="off"
-           placeholder="🔎 Search spots by name…" oninput="renderSpots()">
+           placeholder="Search spots by name…" oninput="renderSpots()">
     <ol id="spot-list" class="schedlist"><li class="muted">loading…</li></ol>
     <div id="spot-undo" class="spot-undo" hidden>
       <div class="spot-undo-head">Recently deleted — Undo</div>
       <ul id="spot-undo-list" class="schedlist"></ul>
     </div>
     <details class="advanced">
-      <summary>➕ Add a spot rule</summary>
+      <summary>Add a spot rule</summary>
       <label>Play
         <select id="spot-target" style="width:100%"
                 onchange="spotTargetChange()">
@@ -124,7 +122,7 @@
         <label id="spot-pick-label">Folder
           <div class="row">
             <button type="button" class="btn btn-sm" id="spot-pick-btn"
-                    onclick="pickSpotTarget()">📁 Choose folder…</button>
+                    onclick="pickSpotTarget()">Choose folder…</button>
             <span id="spot-pick-name" class="muted">none chosen</span>
           </div>
         </label>
@@ -187,13 +185,13 @@
     <div class="row" style="justify-content:space-between;margin:0 0 .4rem">
       <h2 id="rot-title" style="margin:0">Now playing list</h2>
       <span id="rot-shuffled" class="rot-shufflebadge" style="display:none"
-            title="The running order on air came from Shuffle">🔀 Shuffled</span>
+            title="The running order on air came from Shuffle">Shuffled</span>
       <span id="rot-shuffled-msg" class="rot-shuffled-msg"></span>
       <button class="btn btn-sm" id="rot-shuffle" onclick="shuffleRotation()"
-              title="Play this playlist in a random order" disabled>🔀 Shuffle</button>
+              title="Play this playlist in a random order" disabled>Shuffle</button>
     </div>
     <input type="text" id="rot-search" class="rot-search" autocomplete="off"
-           placeholder="🔎 Search this playlist…" oninput="renderRotation()">
+           placeholder="Search this playlist…" oninput="renderRotation()">
     <div id="skip-warning" class="alert-banner" hidden></div>
     <ol id="rot-list" class="queue"><li class="muted">loading…</li></ol>
   </div>
@@ -203,7 +201,7 @@
     <h3 class="sched-h">Up next</h3>
     <ol id="sched-list" class="schedlist"><li class="muted">—</li></ol>
     <details class="advanced">
-      <summary>➕ Add to the schedule</summary>
+      <summary>Add to the schedule</summary>
       <label>What to play
         <select id="sched-kind" style="width:100%" onchange="schedKindChange()">
           <option value="lst">Playlist</option>
@@ -215,7 +213,7 @@
         <label id="sched-file-label">Playlist
           <div class="row">
             <button type="button" class="btn btn-sm" id="sched-file-btn"
-                    onclick="pickSchedFile()">📁 Choose file…</button>
+                    onclick="pickSchedFile()">Choose file…</button>
             <span id="sched-file-name" class="muted">none chosen</span>
           </div>
         </label>
@@ -263,11 +261,11 @@
   <div class="fp-box card">
     <div class="row" style="justify-content:space-between;margin-top:0">
       <strong id="fp-title">Pick a file</strong>
-      <button class="btn btn-sm" onclick="fpClose()">✕ Close</button>
+      <button class="btn btn-sm" onclick="fpClose()">× Close</button>
     </div>
     <div class="row">
-      <button class="btn btn-sm" onclick="fpGo('')">💻 Drives</button>
-      <button class="btn btn-sm" id="fp-up" onclick="fpUp()">⬆ Up</button>
+      <button class="btn btn-sm" onclick="fpGo('')">Drives</button>
+      <button class="btn btn-sm" id="fp-up" onclick="fpUp()">Up</button>
       <button class="btn btn-sm btn-green" id="fp-usedir" onclick="fpUseDir()"
               hidden>✓ Use this folder</button>
       <span id="fp-path" class="muted"></span>
@@ -278,7 +276,7 @@
 <div class="card">
   <h2>Library search</h2>
   <input type="text" id="lib-search" class="rot-search" autocomplete="off"
-         placeholder="🔎 Search the whole music library…"
+         placeholder="Search the whole music library…"
          oninput="libSearchInput()">
   <ol id="lib-results" class="results"></ol>
 </div>
@@ -298,8 +296,7 @@
   <div class="sf-modal-card" role="dialog" aria-modal="true" aria-labelledby="sf-modal-title">
     <h3 id="sf-modal-title">Confirm</h3>
     <div id="sf-modal-msg" class="sf-modal-msg"></div>
-    <label id="sf-modal-type-wrap" class="sf-modal-type" hidden>
-      Type <b id="sf-modal-word">DELETE</b> to confirm
+    <label id="sf-modal-type-wrap" class="sf-modal-type" hidden> Type <b id="sf-modal-word">DELETE</b> to confirm
       <input type="text" id="sf-modal-type" autocomplete="off" spellcheck="false">
     </label>
     <div class="sf-modal-btns">
@@ -386,13 +383,13 @@ async function fpGo(path) {
   list.innerHTML = "";
   for (const name of d.dirs) {
     const b = document.createElement("button");
-    b.className = "pickdir"; b.textContent = "📁 " + name;
+    b.className = "pickdir"; b.textContent = name;
     b.onclick = () => fpGo(joinPath(d.path, name));
     list.appendChild(b);
   }
   for (const name of (d.files || [])) {
     const b = document.createElement("button");
-    b.className = "pickdir pickfile"; b.textContent = "🎵 " + name;
+    b.className = "pickdir pickfile"; b.textContent = name;
     b.onclick = () => {
       const p = joinPath(d.path, name);
       const cb = fpOnPick;
@@ -435,7 +432,7 @@ async function refreshSchedule() {
       const kindTag = e.source_kind === "file" ? " <span class='src-tag'>file</span>"
         : e.source_kind === "lst" ? " <span class='src-tag'>.lst</span>" : "";
       const recTag = e.recurrence && e.recurrence !== "once"
-        ? " <span class='src-tag rep-tag'>🔁 " + esc(e.recurrence) + "</span>" : "";
+        ? " <span class='src-tag rep-tag'>" + esc(e.recurrence) + "</span>" : "";
       const stopTag = e.end_date
         ? " <span class='src-tag stop-tag'>⏳ until " + esc(e.end_date) + "</span>" : "";
       // lead with WHEN it actually airs next (the list is sorted by it);
@@ -477,8 +474,8 @@ function schedKindChange() {
     : k === "file" ? "File" : "Playlist";
   document.getElementById("sched-file-label").firstChild.textContent = label;
   document.getElementById("sched-file-btn").textContent =
-    k === "folder" ? "📁 Choose folder…"
-    : k === "file" ? "📁 Choose file…" : "📁 Choose playlist…";
+    k === "folder" ? "Choose folder…"
+    : k === "file" ? "Choose file…" : "Choose playlist…";
   schedFilePath = null;
   document.getElementById("sched-file-name").textContent = "none chosen";
 }
@@ -681,7 +678,7 @@ function spotTargetChange() {
   document.getElementById("spot-pick-label").firstChild.textContent =
     isFile ? "File" : "Folder";
   document.getElementById("spot-pick-btn").textContent =
-    isFile ? "📁 Choose file…" : "📁 Choose folder…";
+    isFile ? "Choose file…" : "Choose folder…";
   spotFilePath = null; spotFolderPath = null;
   document.getElementById("spot-pick-name").textContent = "none chosen";
 }
@@ -770,12 +767,12 @@ function renderSpots() {
     en.className = "btn btn-sm"; en.textContent = r.enabled ? "Pause" : "Resume";
     en.onclick = () => toggleSpot(r.id);
     btns.appendChild(play); btns.appendChild(en);
-    // only an admin may delete a rule — a DJ sees no ✕ at all (the API refuses
+    // only an admin may delete a rule — a DJ sees no × at all (the API refuses
     // it too; this is just honest UI)
     if (IS_ADMIN) {
       const del = document.createElement("button");
       del.className = "btn btn-sm btn-danger-ghost";
-      del.textContent = "✕";
+      del.textContent = "×";
       del.title = "Delete this rule (asks to confirm; Undo for 72 hours)";
       del.onclick = () => removeSpot(r.id);
       btns.appendChild(del);
@@ -1008,7 +1005,7 @@ async function refreshSpotUndo() {
         esc(r.summary || "") + " · deleted " + esc(when) +
         (r.deleted_by ? " by " + esc(r.deleted_by) : "") + "</small>";
       const btn = document.createElement("button");
-      btn.className = "btn btn-sm btn-green"; btn.textContent = "↺ Undo";
+      btn.className = "btn btn-sm btn-green"; btn.textContent = "Undo";
       btn.onclick = async () => {
         await fetch("/api/spots/" + r.id + "/restore", {method: "POST"});
         refreshSpots();
@@ -1068,11 +1065,18 @@ async function refreshRotation() {
     if (shBtn) shBtn.disabled = !!d.is_show || !d.playlist;
     const sig = rotItems.map(i => i.id).join(",") + "|" + rotNowId +
                 "|" + rotIsShow;
-    if (!rotBusy && sig !== rotSig) { rotSig = sig; renderRotation(); }
+    // Also draw when the list still holds its "loading…" placeholder: the very
+    // first poll could be skipped (a drag, or a poll that arrived while busy),
+    // and then the panel stayed on "loading…" until something else forced a
+    // redraw - which is how the On Air screen ended up with an empty Now
+    // Playing list on a live station.
+    const list = document.getElementById("rot-list");
+    const blank = !list || !list.querySelector(".qitem");
+    if (!rotBusy && (sig !== rotSig || blank)) { rotSig = sig; renderRotation(); }
   } catch (e) { /* next poll */ }
 }
 function rotIcon(t) {
-  return t === "file" ? "" : "📁 ";  // folder-rotation / folder-newest
+  return t === "file" ? "" : "";  // folder-rotation / folder-newest
 }
 function renderRotation() {
   const ol = document.getElementById("rot-list");
@@ -1102,7 +1106,7 @@ function renderRotation() {
       const title = document.createElement("span");
       title.className = "qtitle"; title.textContent = it.title;
       const del = document.createElement("button");
-      del.className = "btn btn-sm rot-x"; del.textContent = "✕";
+      del.className = "btn btn-sm rot-x"; del.textContent = "×";
       del.title = "Cancel this cue";
       del.onclick = (ev) => { ev.stopPropagation(); cancelCue(it.id); };
       row.appendChild(badge); row.appendChild(title); row.appendChild(del);
@@ -1133,7 +1137,7 @@ function renderRotation() {
       row.appendChild(dur);
     }
     const del = document.createElement("button");
-    del.className = "btn btn-sm rot-x"; del.textContent = "✕";
+    del.className = "btn btn-sm rot-x"; del.textContent = "×";
     del.title = rotIsShow ? "Remove from this show" : "Remove from playlist";
     del.onclick = (ev) => {
       ev.stopPropagation(); removeRotItem(it.id, it.title);
@@ -1274,7 +1278,7 @@ async function refresh() {
     // "Stop after current song": highlight while armed, click again to cancel
     const sa = document.getElementById("btn-stopafter");
     if (q.stop_after_current) {
-      sa.textContent = "✖ Cancel stop-after";
+      sa.textContent = "Cancel stop-after";
       sa.classList.add("btn-green"); sa.classList.remove("btn-yellow");
     } else {
       sa.textContent = "⏏ Stop after current Song";
@@ -1482,7 +1486,7 @@ function drawVu(now) {
     vu.quietSince = vu.quietSince || now;
     const s = Math.floor((now - vu.quietSince) / 1000);
     if (s >= VU_SILENCE_WARN_S) {
-      state = "silent"; chip = "⚠ NO AUDIO " + s + "s";
+      state = "silent"; chip = "NO AUDIO " + s + "s";
       note = "The players are sending silence while on air. Check what's " +
         "playing.";
     }

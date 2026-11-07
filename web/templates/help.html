@@ -56,6 +56,7 @@
     <a href="#streaming">Song titles &amp; streaming</a>
     <a href="#royalty">The royalty report</a>
     <a href="#settings">Settings</a>
+    <a href="#start-at-boot">Start at boot — services</a>
     <a href="#cleanup">Duplicate cleanup</a>
     <a href="#whats-new">What's new</a>
     <a href="#trouble">If something looks wrong</a>
@@ -165,9 +166,15 @@
 
     <h2 id="reports">Reports — what aired</h2>
     <p>The <strong>Reports</strong> page is your proof of what actually played.
-      Pick a date range and run it. It can export a CSV you can open in Excel or
-      hand to an underwriter. This is the record you'd use to show that a credit,
-      ID or PSA really aired.</p>
+      Pick a report, pick the dates, and it builds: <em>as aired</em> (everything,
+      in order), <em>playlist airings</em>, <em>spot airings</em> (which
+      underwriter, ID or PSA ran and when), <em>legal-ID hours</em> (hour by hour,
+      did the ID air), <em>play census</em>, <em>genre mix</em> and
+      <em>artist spins</em>. Each one exports CSV for Excel or an underwriter, and
+      opens a print layout for a PDF — the charts print with it.</p>
+    <p>Because the play log is the same one the royalty report uses, the numbers
+      here and the numbers you file cannot disagree. Where a figure had to be
+      reconstructed rather than observed, the report says so on the page.</p>
 
     <h2 id="streaming">Song titles &amp; streaming</h2>
     <p>The player on the station website can show the song that is playing. StudioFire
@@ -294,11 +301,22 @@
       <tr><td>Station equipment</td><td>Pings the studio gear and shows green
         (reachable) or red (not responding). Red is your cue to call support with
         the name of the device.</td></tr>
+      <tr><td>Support contact</td><td>The name and number shown on this Help page
+        and anywhere the station is told to call someone. Leave it blank and Help
+        says "ask whoever set up StudioFire".</td></tr>
+      <tr><td>Royalty reporting</td><td>Your service name, contact details,
+        category and reporting option for the SoundExchange report. See
+        <a href="#royalty">The royalty report</a>.</td></tr>
       <tr><td>Software updates</td><td>Installs new StudioFire versions. See the
         note below.</td></tr>
       <tr><td>Backup / restore</td><td>Save a copy of your setup, or restore
         one.</td></tr>
+      <tr><td>What's new</td><td>The full history of this version and the ones
+        before it — also on the <strong>Changelog</strong> page.</td></tr>
     </table>
+    <p class="muted">Settings is grouped down the left: Station, Streaming,
+      Equipment, Users, Maintenance, About &amp; updates. Anything you change is
+      saved as you leave the field — there is no Save button to forget.</p>
     <div class="help-callout warn">
       <strong>About updates.</strong> <span class="help-key">Install update</span>
       only installs the same version series you're already on (1.x). A whole new
@@ -306,6 +324,25 @@
       accident — it needs an admin to type the version number in on purpose. So
       it's safe to click the normal update button.
     </div>
+
+    <h2 id="start-at-boot">Start at boot — Windows services</h2>
+    <p>If the installer set StudioFire up to run as Windows services (the
+      "start automatically" option), the station starts by itself when the PC
+      boots — <strong>before anyone logs in</strong> — and restarts itself if a
+      part crashes. That is the normal setup for an on-air machine.</p>
+    <ul>
+      <li>One thing to know: Windows services cannot see mapped drive letters or
+        saved passwords. The account chosen during setup must be one that can open
+        the music library itself (a network path like
+        <code>\\NAS\Music</code> always works; a mapped <code>Z:</code> usually
+        does not).</li>
+      <li>If the On Air screen ever says the engine is answering but its heartbeat
+        is missing, the services are writing to a different folder than the web
+        page reads — call support rather than poking at it.</li>
+      <li>To stop or start the station without a terminal, use the
+        <strong>Stop StudioFire</strong> / <strong>Start StudioFire</strong>
+        shortcuts, or Windows <em>Services</em>.</li>
+    </ul>
 
     <h2 id="cleanup">Duplicate cleanup</h2>
     <p>Over time the library collects the same song more than once. Settings →
@@ -353,6 +390,17 @@
         <td>The web page lost contact with the audio engine. The music may still
           be playing. Try <span class="help-key">Restart</span>; if it persists,
           call support.</td></tr>
+      <tr><td>The health pill reads <strong>Check</strong> or
+        <strong>FAULT</strong></td>
+        <td>That one pill is the whole verdict, and the line under it says exactly
+          what is wrong (no spot rules, silent program audio, emergency filler,
+          heartbeat missing). You are still on air unless it says otherwise.
+          Read the sentence, then call support with it.</td></tr>
+      <tr><td><strong>"N playlist files were missing and skipped"</strong></td>
+        <td>A file listed in a playlist isn't on the disk or share any more, so
+          StudioFire skipped it and kept playing. Nothing is broken and nothing
+          stopped. Add the missing files back, or remove them from the playlist
+          when it's convenient.</td></tr>
       <tr><td>Meters flat, no sound, <strong>OFF AIR</strong></td>
         <td>Check the on-air PC is powered and the studio gear is on, then call
           support. Don't unplug anything while it's running.</td></tr>

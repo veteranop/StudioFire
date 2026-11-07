@@ -19,18 +19,18 @@
     <h1>{{ playlist.name }}
       <span id="pl-shuffled" class="rot-shufflebadge"
             {% if not playlist.shuffled_at %}style="display:none"{% endif %}
-            title="The running order came from Shuffle">🔀 Shuffled</span></h1>
+            title="The running order came from Shuffle">Shuffled</span></h1>
     <p id="pl-stats" class="pl-stats">…</p>
     {% if playlist.source_path %}
     <p class="muted" title="Every change on this page saves straight back to this file.">
-      💾 {{ playlist.source_path }}</p>
+      {{ playlist.source_path }}</p>
     {% endif %}
     <ol id="items" class="editlist">
     {% for it in items %}
       <li data-id="{{ it.id }}">
         <span class="item-label">
-          {% if it.item_type == 'folder-newest' %}📻{% endif %}
-          {% if it.item_type == 'folder-rotation' %}🔁{% endif %}
+          {% if it.item_type == 'folder-newest' %}{% endif %}
+          {% if it.item_type == 'folder-rotation' %}{% endif %}
           {{ it.title or it.path }}
           {% if it.item_type != 'file' %}
             <small class="muted">({{ it.item_type }})</small>
@@ -43,7 +43,7 @@
           <button class="btn btn-sm" onclick="move(this, -1)">▲</button>
           <button class="btn btn-sm" onclick="move(this, 1)">▼</button>
           <button class="btn btn-sm btn-red"
-                  onclick="removeItem(this)">✕</button>
+                  onclick="removeItem(this)">×</button>
         </span>
       </li>
     {% else %}
@@ -54,22 +54,22 @@
     <div class="row">
       <button class="btn btn-green btn-big" onclick="activateThis()">
         ▶ PUT ON AIR</button>
-      <button class="btn" onclick="shuffleThis()" title="Play this playlist in a random order">🔀 Shuffle</button>
+      <button class="btn" onclick="shuffleThis()" title="Play this playlist in a random order">Shuffle</button>
       <span id="pl-shuffled-msg" class="rot-shuffled-msg"></span>
       <button class="btn" onclick="duplicateThis()">Duplicate</button>
       <button class="btn btn-red" onclick="deleteThis()">Delete playlist</button>
     </div>
     <details class="advanced">
       <summary>Advanced: add a folder item</summary>
-      <p class="muted">📻 <strong>Newest from folder</strong> always plays the
-        most recent file (syndicated shows). 🔁 <strong>Rotate through
+      <p class="muted"><strong>Newest from folder</strong> always plays the
+        most recent file (syndicated shows). <strong>Rotate through
         folder</strong> plays a different file each time (ads/spots).</p>
       <div class="row">
         <input id="folder-path" placeholder="Folder path, e.g. \\NAS\shows\TheMorningShow"
                onkeydown="if (event.key === 'Enter') addFolder()">
         <select id="folder-type">
-          <option value="folder-newest">📻 Newest from folder</option>
-          <option value="folder-rotation">🔁 Rotate through folder</option>
+          <option value="folder-newest">Newest from folder</option>
+          <option value="folder-rotation">Rotate through folder</option>
         </select>
         <button class="btn" onclick="addFolder()">Add</button>
       </div>
@@ -85,14 +85,14 @@
   </div>
 
   <div class="card">
-    <h2>📁 Browse files</h2>
+    <h2>Browse files</h2>
     <p class="muted fb-hint">Open any folder the studio PC can see (NAS
       included). <strong>+ Add</strong> puts a song at the end of this
       playlist; <strong>▶ Next</strong> plays it on air right after the
       current song.</p>
     <div class="row fb-bar">
-      <button class="btn btn-sm" onclick="fbGo('')">💻 Drives</button>
-      <button class="btn btn-sm" id="fb-up" onclick="fbUp()">⬆ Up</button>
+      <button class="btn btn-sm" onclick="fbGo('')">Drives</button>
+      <button class="btn btn-sm" id="fb-up" onclick="fbUp()">Up</button>
       <button class="btn btn-sm btn-green" id="fb-addall" onclick="fbAddAll()"
               hidden>+ Add all songs in this folder</button>
     </div>
@@ -173,7 +173,7 @@ function appendItemLi(id, label, durSec) {
   btns.innerHTML =
     '<button class="btn btn-sm" onclick="move(this, -1)">▲</button> ' +
     '<button class="btn btn-sm" onclick="move(this, 1)">▼</button> ' +
-    '<button class="btn btn-sm btn-red" onclick="removeItem(this)">✕</button>';
+    '<button class="btn btn-sm btn-red" onclick="removeItem(this)">×</button>';
   li.append(span, btns);
   document.getElementById("items").appendChild(li);
 }
@@ -315,7 +315,7 @@ async function fbGo(path, silent = false) {
   for (const name of d.dirs) {
     const li = document.createElement("li");
     const b = document.createElement("button");
-    b.className = "pickdir"; b.textContent = "📁 " + name;
+    b.className = "pickdir"; b.textContent = name;
     b.onclick = () => fbGo(fbJoin(d.path, name));
     li.appendChild(b); ul.appendChild(li);
   }
@@ -335,7 +335,7 @@ async function fbGo(path, silent = false) {
     cue.title = "Play this on air right after the current song";
     cue.onclick = () => playNext(full, title, cue);
     const span = document.createElement("span");
-    span.className = "lib-info"; span.textContent = "🎵 " + name;
+    span.className = "lib-info"; span.textContent = name;
     li.append(add, cue, span); ul.appendChild(li);
   }
   if (!d.dirs.length && !fbFiles.length)
