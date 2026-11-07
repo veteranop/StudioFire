@@ -50,7 +50,25 @@ def fetch(url: str) -> bytes:
 def build_runtime() -> None:
     if os.path.isdir(RUNTIME):
         print(f"[runtime] removing stale {RUNTIME}")
-        shutil.rmtree(RUNTIME)
+        try:
+            shutil.rmtree(RUNTIME)
+        except PermissionError:
+            # Windows will not delete a payload whose python.exe is still open
+            # (an interrupted build, a virus scanner, or a stray `runtime\python
+            # -c ...` probe). Renaming works even then, so move it aside and let
+            # a fresh tree be built; the old one is cleaned on the next quiet run.
+            aside = RUNTIME + ".stale"
+            if os.path.isdir(aside):
+                shutil.rmtree(aside, ignore_errors=True)
+            try:
+                os.rename(RUNTIME, aside)
+            except OSError as exc:
+                raise SystemExit(
+                    f"cannot clear {RUNTIME} ({exc}). Close anything using "
+                    f"runtime\\python.exe - a previous build, a scanner, or a "
+                    f"terminal in that folder - then run this again.")
+            print(f"[runtime] something had it open - moved it aside to {aside}")
+            shutil.rmtree(aside, ignore_errors=True)
     os.makedirs(RUNTIME)
 
     print(f"[runtime] embedded Python {PYTHON_VERSION}")
