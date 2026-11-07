@@ -1,4 +1,4 @@
-"""Prepare the installer payload: embedded Python runtime + NSSM.
+r"""Prepare the installer payload: embedded Python runtime + NSSM.
 
 Run this ONCE on the build box (needs internet) before compiling
 StudioFire.iss with Inno Setup 6:
