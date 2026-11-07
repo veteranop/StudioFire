@@ -99,6 +99,12 @@ def read_tags(path: str) -> dict:
                                            "organization", "\xa9pub"))
     if not out["title"]:
         out["title"] = os.path.splitext(os.path.basename(path))[0]
+    # Did we really get tags, or did the file open and come back empty? An MP3
+    # yielding no artist/album/genre is almost always a transient read failure
+    # (a share hiccup), not an untagged file — and marking it "done" anyway is
+    # how 2,413 played songs ended up with no artist in the index while the
+    # files themselves were perfectly tagged.
+    out["_tagged"] = bool(out["artist"] or out["album"] or out["genre"])
     return out
 
 
@@ -243,11 +249,18 @@ def _backfill_tags(conn: sqlite3.Connection, root: str, t0: float,
                 conn.execute(
                     "UPDATE tracks SET title = ?, artist = ?, album = ?, "
                     "  genre = ?, year = ?, label = ?, "
-                    "  duration_sec = ?, format = ?, tags_read = 1, meta_read = 1 "
+                    "  duration_sec = ?, format = ?, "
+                    "  tags_read = MAX(COALESCE(tags_read, 0), ?), meta_read = 1 "
                     "WHERE path = ?",
                     (tags["title"], tags["artist"], tags["album"],
                      tags.get("genre"), tags.get("year"), tags.get("label"),
-                     tags["duration_sec"], tags["format"], path))
+                     tags["duration_sec"], tags["format"],
+                     # Formats that essentially always carry tags: leave
+                     # tags_read at 0 on an empty read so a later scan retries it.
+                     1 if (tags.get("_tagged") or tags["format"] not in
+                           ("MP3", "MP4", "FLAC", "OggVorbis", "OggOpus"))
+                     else 0,
+                     path))
             tagged += 1
             if tagged % THROTTLE_EVERY == 0:
                 time.sleep(THROTTLE_NAP)
