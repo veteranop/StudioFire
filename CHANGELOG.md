@@ -7,6 +7,8 @@ plain English a non-technical operator can understand.
 
 ## [Unreleased]
 
+## [1.6.4] - 2026-11-07
+
 ### Added
 - **The royalty report is now a button, in the format SoundExchange asks for.**
   Reports → **Royalty report** builds the Report of Use for a month (or a
