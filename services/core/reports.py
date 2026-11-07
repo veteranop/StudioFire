@@ -460,7 +460,7 @@ def play_census(conn, start: str, end: str) -> dict:
                MAX(ph.ts) AS last_ts
           FROM play_history ph
          WHERE ph.event = 'track_start'
-           AND ph.source IN ('playlist', 'show', 'manual')
+           AND ph.source = 'playlist'
            AND julianday(ph.ts) BETWEEN julianday(?) AND julianday(?)
       GROUP BY ph.title ORDER BY spins DESC""", (lo, hi))
     out = [{
@@ -564,7 +564,7 @@ def _attribution_coverage(conn, lo: str, hi: str) -> dict:
     total = row["total"] if row else 0
     matched = row["matched"] if row else 0
     return {"total": total, "matched": matched or 0,
-            "label": "tied to a playlist",
+            "label": "could be tied to a playlist",
             "pct": round(100.0 * (matched or 0) / total, 1) if total else 0.0}
 
 
@@ -691,36 +691,50 @@ def _music_join(conn, lo: str, hi: str, group_col: str, limit: int | None = None
                          t2.meta_read DESC, t2.id
                 LIMIT 1)
          WHERE ph.event = 'track_start'
-           AND ph.source IN ('playlist', 'show', 'manual')
-           %s           AND julianday(ph.ts) BETWEEN julianday(?) AND julianday(?)
+           AND ph.source = 'playlist'
+           %s           AND COALESCE(TRIM(t.%s), '') <> ''
+           AND julianday(ph.ts) BETWEEN julianday(?) AND julianday(?)
       GROUP BY grp
-      ORDER BY spins DESC""" % (group_col, furniture_sql)
+      ORDER BY spins DESC""" % (group_col, furniture_sql, group_col)
     args = furniture_params + [lo, hi]
     if limit:
         sql += " LIMIT %d" % int(limit)
     return _rows(conn, sql, tuple(args))
 
 
-def _music_coverage(conn, lo: str, hi: str) -> dict:
+def _music_coverage(conn, lo: str, hi: str, column: str) -> dict:
+    """How many music plays carried a usable tag for the column we report on.
+
+    Mark's rule: an artist report is only worth printing where the artist is
+    actually known, so plays with no tag are counted here and left out of the
+    rows — never shown as a lump of "Unknown" that hides the real coverage.
+    """
     furniture_sql, furniture_params = _furniture_clause(conn)
-    # same exclusion as the counts, so coverage and rows describe the same set
     row = conn.execute(
         "SELECT COUNT(*) AS total, "
-        "       SUM(CASE WHEN json_extract(extra, '$.item_id') IS NOT NULL "
-        "                THEN 1 ELSE 0 END) AS linked "
+        "       SUM(CASE WHEN COALESCE(TRIM(t." + column + "), '') <> '' "
+        "                THEN 1 ELSE 0 END) AS matched "
         "  FROM play_history ph "
-        "  LEFT JOIN playlist_items pi "
-        "         ON pi.id = json_extract(ph.extra, '$.item_id') "
-        " WHERE ph.event='track_start' "
-        "   AND ph.source IN ('playlist','show','manual') "
+        "  JOIN playlist_items pi "
+        "    ON pi.id = json_extract(ph.extra, '$.item_id') "
+        "  LEFT JOIN tracks t ON t.id = ("
+        "       SELECT t2.id FROM tracks t2"
+        "        WHERE lower(replace(t2.path, '/', char(92)))"
+        "            = lower(replace(pi.path, '/', char(92)))"
+        "        ORDER BY (t2.missing = 0) DESC,"
+        "                 (COALESCE(TRIM(t2." + column + "), '') <> '') DESC,"
+        "                 t2.meta_read DESC, t2.id LIMIT 1) "
+        " WHERE ph.event = 'track_start' "
+        "   AND ph.source = 'playlist' "
         + furniture_sql +
         "   AND julianday(ph.ts) BETWEEN julianday(?) AND julianday(?)",
         tuple(furniture_params) + (lo, hi)).fetchone()
     total = row["total"] if row else 0
-    linked = (row["linked"] if row else 0) or 0
-    return {"total": total, "matched": linked,
-            "label": "tied to a library file",
-            "pct": round(100.0 * linked / total, 1) if total else 0.0}
+    matched = (row["matched"] if row else 0) or 0
+    return {"total": total, "matched": matched,
+            "label": ("had an artist tag" if column == "artist"
+                      else "had a genre tag"),
+            "pct": round(100.0 * matched / total, 1) if total else 0.0}
 
 
 # ------------------------------------------------------------------- report 8
@@ -734,7 +748,7 @@ def genre_mix(conn, start: str, end: str) -> dict:
     """
     lo, hi = _day_bounds(start, end)
     plays = _music_join(conn, lo, hi, "genre")
-    cov = _music_coverage(conn, lo, hi)
+    cov = _music_coverage(conn, lo, hi, "genre")
     lib = conn.execute(
         "SELECT genre, COUNT(*) n FROM tracks WHERE missing = 0 "
         "GROUP BY genre ORDER BY n DESC").fetchall()
@@ -766,10 +780,11 @@ def genre_mix(conn, start: str, end: str) -> dict:
         "rows": rows,
         "charts": charts,
         "coverage": cov,
-        "note": ("Genre comes from each file's own tags, read offline; a song "
-                 "with no genre tag is 'Unknown' and is never guessed from its "
-                 "folder name. Only plays that can be tied to a library file "
-                 "are counted — the coverage line says how many that was."),
+        "note": ("Playlist airings only — shows are excluded, since a show's "
+                 "mp3 does not carry a per-song artist we can trust. Genre "
+                 "comes from each file's own tag, read offline and never "
+                 "guessed from a folder name; a song with no genre tag is "
+                 "counted in the coverage line, not printed as 'Unknown'."),
     }
 
 
@@ -779,7 +794,7 @@ def artist_spins(conn, start: str, end: str) -> dict:
     """How many times each artist aired (spins, not songs)."""
     lo, hi = _day_bounds(start, end)
     plays = _music_join(conn, lo, hi, "artist")
-    cov = _music_coverage(conn, lo, hi)
+    cov = _music_coverage(conn, lo, hi, "artist")
     series = [(r["grp"], r["spins"]) for r in plays]
     total = sum(v for _, v in series)
     rows = [{"artist": a, "spins": n,
@@ -797,9 +812,11 @@ def artist_spins(conn, start: str, end: str) -> dict:
         "rows": rows,
         "charts": charts,
         "coverage": cov,
-        "note": ("A spin is one play of one song; an artist with three songs in "
-                 "rotation can out-count one with a single hit. 'Unknown' "
-                 "means the file had no artist tag."),
+        "note": ("Playlist airings only — shows are excluded, because a show "
+                 "mp3 does not carry a per-song artist we can trust. A spin is "
+                 "one play of one song; an artist with three songs in rotation "
+                 "can out-count one with a single hit. Songs with no artist tag "
+                 "are counted in the coverage line, not printed as 'Unknown'."),
     }
 
 

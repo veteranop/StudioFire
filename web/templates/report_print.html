@@ -100,9 +100,9 @@
 {% if rep.coverage %}
 <div class="gapband">
   <b>How complete this is:</b> {{ rep.coverage.matched }} of
-  {{ rep.coverage.total }} songs in this period can be
-  {{ rep.coverage.label | default('attributed') }} ({{ rep.coverage.pct }}%).
-  Songs without that link are counted here rather than smoothed over.
+  {{ rep.coverage.total }} playlist airings in this period
+  {{ rep.coverage.label | default('are attributable') }} ({{ rep.coverage.pct }}%).
+  The rest are counted here rather than smoothed over or shown as "Unknown".
 </div>
 {% endif %}
 
