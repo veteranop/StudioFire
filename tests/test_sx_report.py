@@ -62,7 +62,192 @@ def add_play(conn, jid, ts, precache_path, title, source="show"):
     conn.commit()
 
 
+
+# ============================================================ filing format
+# 37 CFR 370.4's layout: ASCII, "|" delimiter, "^" text quotes, CRLF, a fixed
+# column order, and a verdict on line 1 of the warnings file.
+
+def _cfg(**over):
+    cfg = {
+        "service_name": "Drop In Radio, Inc.",
+        "filer_name": "",
+        "contact": {"name": "Pat Doe", "street": "1 Main St",
+                    "city_state_zip": "Ketchum, ID 83340",
+                    "phone": "208-555-0100", "email": "pat@example.org"},
+        "category": "B", "mode": "census_atp", "channel_name": "",
+        "output_format": "headerless", "share_aliases": [],
+        "music_drive_letter": "",
+    }
+    cfg.update(over)
+    return cfg
+
+
+def _rows():
+    return [
+        {"artist": "Björk", "title": "Jóga | ^live^", "isrc": "us-abc-12-34567",
+         "album": "Homogenic", "label": "One Little", "plays": 3,
+         "performances": 30.0, "listener_complete": True, "ath": None},
+        {"artist": "", "title": "Untagged Thing", "isrc": "", "album": "",
+         "label": "", "plays": 1, "performances": None,
+         "listener_complete": False, "ath": None},
+    ]
+
+
+def _period():
+    return (dt.datetime(2026, 10, 1, tzinfo=dt.timezone.utc),
+            dt.datetime(2026, 10, 31, tzinfo=dt.timezone.utc))
+
+
+def test_filing_filename():
+    start, end = _period()
+    name = sx_report.filing_filename("Example FM, Inc.", start, end)
+    check("filename = letters+digits, ISO dates, .txt",
+          name == "ExampleFMInc20261001-20261031.txt")
+    check("filename drops accents and punctuation",
+          sx_report.filing_filename("Képi & Sons, Inc.", start, end)
+          .startswith("KepiSonsInc"))
+
+
+def test_headerless_format():
+    out = tempfile.mkdtemp(prefix="sf-sx-file-")
+    path = os.path.join(out, "f.txt")
+    start, end = _period()
+    res = sx_report.write_filing(path, _rows(), "census_atp", _cfg(), start,
+                                 end, dt.datetime(2026, 11, 6), False)
+    raw = open(path, "rb").read()
+    lines = raw.split(b"\r\n")
+    check("headerless: no header, one record per line",
+          len([l for l in lines if l]) == 2)
+    check("CRLF line endings", b"\r\n" in raw and b"\n\r" not in raw)
+    first = lines[0].decode("ascii")
+    cells = first.split("|")
+    check("eight columns in the 370.4 order", len(cells) == 8)
+    check("strings are caret-wrapped, numbers are bare",
+          cells[0] == "^Drop In Radio, Inc.^" and cells[1] == "B"
+          and cells[7] == "30")
+    check("ISRC normalised (hyphens stripped, upper-case)",
+          cells[4] == "^USABC1234567^")
+    check("accents folded to ASCII", "Bjork" in cells[2])
+    check("delimiter characters inside a value become spaces",
+          "^Joga live^" == cells[3])
+    check("empty string is written as ^^", lines[1].decode().split("|")[2] == "^^")
+    check("a row with no listener figure leaves performances blank",
+          lines[1].decode().split("|")[7] == "")
+    check("write_filing reports the row count", res["rows"] == 2)
+
+
+def test_headered_format():
+    out = tempfile.mkdtemp(prefix="sf-sx-head-")
+    path = os.path.join(out, "f.txt")
+    start, end = _period()
+    sx_report.write_filing(path, _rows(), "census_atp",
+                           _cfg(output_format="headered"), start, end,
+                           dt.datetime(2026, 11, 6), True)
+    lines = open(path, "rb").read().decode("ascii").split("\r\n")
+    check("headered: data starts on line 15", lines[14].startswith("^"))
+    check("headered: line 10 is the data-row count", lines[9] == "2")
+    check("headered: line 11 is the text indicator", lines[10] == "^")
+    check("headered: line 12 is the delimiter", lines[11] == "|")
+    check("headered: line 13 is blank", lines[12] == "")
+    check("headered: line 14 carries the column names",
+          lines[13].startswith("^Service Name^|^Category"))
+    check("headered: contact block present",
+          lines[1] == "Pat Doe" and lines[5] == "pat@example.org")
+    check("headered: every header line <= 255 chars",
+          all(len(l) <= 255 for l in lines[:6]))
+
+
+def test_ascii_and_isrc():
+    check("accent folding", sx_report.clean_ascii("Björk")[0] == "Bjork")
+    check("delimiter characters replaced",
+          sx_report.clean_ascii("a|b^c")[0] == "a b c")
+    check("non-ASCII dropped and reported",
+          sx_report.clean_ascii("snow ☃ man")[1] == ["\u2603"])
+    check("ISRC normalisation", sx_report.normalize_isrc(" us-abc-123456 ")[0]
+          == "USABC123456")
+    check("malformed ISRC warns but survives",
+          sx_report.normalize_isrc("ABC")[1] is not None)
+
+
+def test_sample_weeks():
+    ok = sx_report.validate_weeks("2026-10-01", "2026-11-01", "2026-Q4")
+    check("two valid weeks inside the quarter",
+          ok[0][0].date().isoformat() == "2026-10-01"
+          and (ok[0][1] - ok[0][0]).days == 7
+          and (ok[1][1] - ok[1][0]).days == 7)
+    try:
+        sx_report.validate_weeks("2026-09-20", "2026-11-01", "2026-Q4")
+        check("a week outside the quarter is refused", False)
+    except ValueError as exc:
+        check("a week outside the quarter is refused",
+              "not wholly inside" in str(exc))
+    try:
+        sx_report.validate_weeks("2026-10-01", "2026-10-03", "2026-Q4")
+        check("overlapping weeks are refused", False)
+    except ValueError as exc:
+        check("overlapping weeks are refused", "overlap" in str(exc))
+
+
+def test_ath_columns():
+    out = tempfile.mkdtemp(prefix="sf-sx-ath-")
+    path = os.path.join(out, "f.txt")
+    start = dt.datetime(2026, 10, 1, tzinfo=dt.timezone.utc)
+    end = dt.datetime(2026, 12, 31, tzinfo=dt.timezone.utc)
+    rows = _rows()
+    for r in rows:
+        r["ath"] = 1234.5
+    sx_report.write_filing(path, rows, "sample_ath",
+                           _cfg(mode="sample_ath", channel_name="Example FM"),
+                           start, end, dt.datetime(2026, 12, 31), False)
+    cells = (open(path, "rb").read().split(b"\r\n")[0]
+             .decode("ascii").split("|"))
+    check("sample_ath: ten columns", len(cells) == 10)
+    check("sample_ath: ATH bare and repeated", cells[7] == "1234.50")
+    check("sample_ath: channel name column", cells[8] == "^Example FM^")
+    check("sample_ath: play frequency is the only count", cells[9] == "3")
+
+
+def test_preflight_verdicts():
+    rows = _rows()
+    reasons = sx_report.preflight(rows, [], "census_atp", _cfg(), None, [], False)
+    check("ATP without listeners is NOT READY",
+          any("listener figure" in r for r in reasons))
+    reasons = sx_report.preflight(rows, [], "sample_ath",
+                                  _cfg(mode="sample_ath"), None, [], False)
+    check("sample_ath without ATH is NOT READY",
+          any("aggregate tuning hours" in r for r in reasons))
+    reasons = sx_report.preflight(rows, [], "sample_ath",
+                                  _cfg(service_name=""), 500, [], False)
+    check("missing service name is NOT READY",
+          any("service_name" in r for r in reasons))
+    reasons = sx_report.preflight(rows, [], "census_atp",
+                                  _cfg(output_format="headered", contact={}),
+                                  None, [], True)
+    check("headered without contact details is NOT READY",
+          any("contact field" in r for r in reasons))
+    clean = [{"artist": "A", "title": "T", "isrc": "USABC1234567", "album": "Al",
+              "label": "Lb", "plays": 1, "performances": 5.0,
+              "listener_complete": True, "ath": None}]
+    check("a complete row is READY",
+          sx_report.preflight(clean, [], "census_atp", _cfg(), None, [], False)
+          == [])
+
+
+def test_main_refuses_without_service_name():
+    import services.core.config as core_config
+    real = core_config.load_config
+    try:
+        core_config.load_config = lambda *a, **k: {
+            "paths": {"data_dir": tempfile.mkdtemp(prefix="sf-sx-cfg-")},
+            "royalty_reporting": _cfg(service_name="")}
+        rc = sx_report.main(["--month", "2026-10", "--no-tags"])
+        check("CLI exits 2 when no service name is configured", rc == 2)
+    finally:
+        core_config.load_config = real
+
+
 def main():
+
     # -- digest parity with the engine's own function -----------------------
     src = r"Z:\John\New PSAs\spot.mp3"
     p = Precache("C:\\tmp\\precache")
@@ -79,22 +264,25 @@ def main():
           sx_report.digest_from_precache_path("C:\\SF\\logs\\x.log") is None)
 
     # -- drive-letter variants ---------------------------------------------
+    # the share root(s) and the drive letter now come from config, not from a
+    # hard-coded "Z:" — this checks the mapping itself
     variants = sx_report._path_variants(
-        "//KDPI-Media/music/G\\Artist\\Album\\01 - Song.mp3", "\\\\KDPI-Media\\music")
+        "//NAS/music/Library\\Artist\\Album\\01 - Song.mp3",
+        ["\\\\NAS\\music"], "Z:")
     check("path variants include the Z: form",
-          "Z:\\G\\Artist\\Album\\01 - Song.mp3" in variants)
+          "Z:\\Library\\Artist\\Album\\01 - Song.mp3" in variants)
     check("path variants always include the stored form",
-          "//KDPI-Media/music/G\\Artist\\Album\\01 - Song.mp3" in variants)
+          "//NAS/music/Library\\Artist\\Album\\01 - Song.mp3" in variants)
 
     # -- period collection / join / fallback --------------------------------
     conn = fresh_conn()
-    lib = "//KDPI-Media/music/G\\Artist\\Album\\01 - Song.mp3"
+    lib = "//NAS/music/Library\\Artist\\Album\\01 - Song.mp3"
     add_track(conn, lib, "Song", "Artist", "Album", 201.0)
     cached = "C:\\SF\\precache\\" + sx_report.precache_digest(lib) + ".mp3"
     add_play(conn, "1-1", "2026-09-01T10:00:00.000-06:00", cached,
              "Artist - Song")
     # same file, but the feeder handed the engine the drive-letter form
-    zform = "Z:\\G\\Artist\\Album\\01 - Song.mp3"
+    zform = "Z:\\Library\\Artist\\Album\\01 - Song.mp3"
     add_play(conn, "1-2", "2026-09-01T10:05:00.000-06:00",
              "C:\\SF\\precache\\" + sx_report.precache_digest(zform) + ".mp3",
              "Artist - Song")
@@ -116,7 +304,7 @@ def main():
     tz = dt.timezone(dt.timedelta(hours=-6))
     start = dt.datetime(2026, 9, 1, tzinfo=tz)
     end = dt.datetime(2026, 9, 2, tzinfo=tz)
-    idx = sx_report.build_precache_index(conn, "//KDPI-Media/music/G")
+    idx = sx_report.build_precache_index(conn, ["//NAS/music/Library"], "Z:")
     plays = sx_report.collect_period(conn, start, end, index=idx)
 
     check("period is start-inclusive / end-exclusive", len(plays) == 4)
@@ -175,6 +363,15 @@ def main():
         log_header = fh.readline().strip()
     check("track log carries the audit columns",
           log_header.startswith("start_local,start_utc,artist,title"))
+
+    test_filing_filename()
+    test_headerless_format()
+    test_headered_format()
+    test_ascii_and_isrc()
+    test_sample_weeks()
+    test_ath_columns()
+    test_preflight_verdicts()
+    test_main_refuses_without_service_name()
 
     print(f"\nPASS {passed} checks")
     return 0

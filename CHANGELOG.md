@@ -7,6 +7,49 @@ plain English a non-technical operator can understand.
 
 ## [Unreleased]
 
+### Added
+- **The royalty report is now a button, in the format SoundExchange asks for.**
+  Reports → **Royalty report** builds the Report of Use for a month (or a
+  quarter, for the two sample options), shows **READY TO FILE** or **NOT READY**
+  with the reasons, and hands you one zip: the filing itself (plain text, pipe
+  delimited, caret quoted, exactly the 37 CFR 370.4 layout), a review
+  spreadsheet, the per-song track log, the warnings sheet and an attestation to
+  sign.
+  * The station's name, contact details, category and reporting option live in
+    **Settings → Streaming → Royalty reporting** — nothing is hard-coded for one
+    station any more.
+  * It refuses to run without a service name, and it never fills the
+    performances column with a play count.
+  * Play counts appear only in the quarterly listening-hours format, where the
+    rules ask for them.
+- **Deleting a spot rule can no longer silence your IDs and underwriting by
+  accident.** It was one click on a ✕ with no warning — which is how a station
+  can end up with no legal IDs and no paid credits airing for a day while the
+  music keeps playing and nothing looks wrong. Now:
+  * deleting asks you to confirm, and removing the **last** legal-ID or
+    underwriting rule needs you to type `DELETE`;
+  * a deleted rule is kept for **72 hours** so you can Undo it (same rule, same
+    place);
+  * the On Air screen shows a red warning whenever **no spot rules are running**.
+- **The Studio health pill now tells the truth.** It used to show green from a
+  pile of independent checks, so it could be green while quiet air, a stopped
+  engine or an empty spot policy was the real story. It is now one verdict —
+  **OK**, **Check** or **FAULT** — and clicking it lists the reasons: audio
+  silent, engine not feeding, no spot rules, no legal-ID rule, music library
+  unreachable, or songs missing from the playlist.
+- **Songs missing from a playlist are now visible instead of silent.** If a
+  file has moved or been renamed, StudioFire always skipped it and only wrote a
+  line in a log file. The On Air screen now says how many songs are missing from
+  the playlist on air (hover for the names), and the health pill warns while it
+  is happening.
+
+### Changed
+- **In-app Help corrected in three places.** It said spot rules were edited on
+  the Schedule page (they are on **On Air**), that green meant "you're fine" and
+  that nothing on the screen could take the station off air (both untrue — a
+  deleted spot rule takes IDs and underwriting off air), and it promised a
+  legal-ID gap report that does not exist yet. The words now match the product.
+
 ## [1.6.3] - 2026-10-30
 
 ### Added
@@ -82,7 +125,7 @@ plain English a non-technical operator can understand.
 - **Now-playing file for the stream encoder (the song titles on the website).**
   StudioFire now writes the song that is on air into a plain text file every time
   the track changes. Point it at the file your streaming encoder already watches
-  — for KDPI that is BUTT on the stream PC — and the website player starts showing
+  — for example BUTT on the stream PC — and the website player starts showing
   song titles with nothing else to set up. Configure it under **Settings →
   Streaming → Now-playing file**; use the full network path
   (`\server\share\...`) rather than a drive letter, and press **Write the
@@ -205,7 +248,7 @@ plain English a non-technical operator can understand.
   A fired spot was correctly handed to the player, but a housekeeping pass could
   briefly forget about it and then delete its ready-to-play copy from the local
   cache before it reached the air — so the spot was silently skipped and the next
-  song/show played instead (seen on the KDPI on-air PC on 2026-09-29: rules fired
+  song/show played instead (seen on the reference station's on-air PC on 2026-09-29: rules fired
   every hour but nothing aired). StudioFire now holds on to a just-queued spot or
   cued track until the player confirms it, so it can't be dropped before it plays.
 
@@ -227,7 +270,7 @@ plain English a non-technical operator can understand.
   come back up without it — and then the file browser showed only `C:\`, the
   station folders in Settings read "does not exist", and scheduled items could
   silently miss their windows (on 2026-09-29 a Windows-update reboot dropped the
-  drive on the KDPI on-air PC and the legal-ID, PSA and underwriter rules missed
+  drive on the on-air PC and the legal-ID, PSA and underwriter rules missed
   every window for the rest of the afternoon). StudioFire now finds those files
   through the music library's own address instead of the drive letter, so
   playlists, shows, IDs and PSAs keep working whether the drive is mapped or not.
@@ -243,7 +286,7 @@ plain English a non-technical operator can understand.
 
 ## [1.1.0] - 2026-09-27
 
-### Added (operator feedback from KDPI, 2026-09-25, TimeTrax #644)
+### Added (operator feedback from the reference station, 2026-09-25)
 These came from John after the first live show on the new system.
 - **Songs crossfade.** In the last 4 seconds of a song, the next song
   starts underneath it and rises while the old one falls, with no gap and no
@@ -346,7 +389,8 @@ These came from John after the first live show on the new system.
 
 ## [1.0.0] - 2026-07-30
 
-First public release. StudioFire has been on air 24/7 at KDPI since July 2026 —
+First public release. StudioFire has been on air 24/7 at the reference station
+since July 2026 —
 everything below is running in production at a real FM station.
 
 ### Added
@@ -377,7 +421,7 @@ everything below is running in production at a real FM station.
   the search index fresh without hammering the network.
 - Import your old ZaraRadio playlists: upload a .lst file on the Playlists
   page and it becomes a normal StudioFire playlist. Paths written on another
-  computer (like \\KDPI-Media\music) are automatically translated to where
+  computer (like \\NAS\Music) are automatically translated to where
   the music lives on this machine.
 - Big blinking ON AIR light at the top of the screen: glows red while audio is
   actually going out, goes dim to OFF AIR when paused or nothing is playing.

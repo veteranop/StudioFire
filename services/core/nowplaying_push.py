@@ -1,7 +1,7 @@
 """P2 now-playing push — transport-agnostic scaffold (#747).
 
 Mirrors StudioFire's current on-air title to the stream CDN's metadata
-ingest so the public player (kdpifm.org SGplayer) shows song info. See
+ingest so the public web player shows song info. See
 `docs/NOWPLAYING-CONSENSUS.md` for the locked decision.
 
 DESIGN LAWS (non-negotiable — enforced here):
@@ -18,8 +18,8 @@ DESIGN LAWS (non-negotiable — enforced here):
     nothing; the air log is wholly independent of it.
   * **Transport is pluggable and GATED.** `DryRunTransport` (logs, zero I/O) is
     still the default. `IcecastUpdinfoTransport` is built and unit-tested
-    against a local fake mount, but the feature flag stays OFF until StreamGuys
-    supplies the admin credential for the mount — config alone cannot enable a
+    against a local fake mount, but the feature flag stays OFF until the stream
+    host supplies the admin credential for the mount — config alone cannot enable a
     network push by accident.
 
 Stdlib only — no new dependencies.
@@ -68,7 +68,7 @@ class Transport(ABC):
 
 class DryRunTransport(Transport):
     """Logs the update and performs ZERO I/O. The only transport that exists
-    until StreamGuys' written answer unlocks the real ones (the G0 gate)."""
+    until the stream host's written answer unlocks the real ones (the G0 gate)."""
 
     def send(self, payload: dict, timeout: float) -> None:
         log.info("nowplaying DRYRUN: song=%r source=%r journal_id=%s",
@@ -79,11 +79,11 @@ class DryRunTransport(Transport):
 class IcecastUpdinfoTransport(Transport):
     """Publish the on-air title to an Icecast 2 mount (`updinfo`).
 
-    This is the transport StreamGuys named on 2026-10-09 ("send metadata to an
-    Icecast 2 server"). The mount is Icecast 2.4.0-kh10 and its admin endpoint
-    answers **401** unauthenticated — verified live 2026-10-24:
+    This is the transport the stream host named on 2026-10-09 ("send metadata to
+    an Icecast 2 server"). The reference station's mount is Icecast 2.4.0-kh10 and
+    its admin endpoint answers **401** unauthenticated — verified live 2026-10-24:
 
-        GET http://peridot.streamguys.com:5110/admin/metadata -> 401
+        GET http://stream.example.com:5110/admin/metadata -> 401
 
     so the shape of the call is known and only the credential is outstanding.
     Config supplies `endpoint` (scheme://host:port), `mount` (e.g. `/live`) and
@@ -167,8 +167,8 @@ def build_transport(np_cfg: dict) -> Transport:
         return DryRunTransport()
     if name == "dryrun":
         return DryRunTransport()
-    log.warning("nowplaying transport %r not available yet (gated on "
-                "StreamGuys) — using DryRunTransport", name)
+    log.warning("nowplaying transport %r not available yet (gated on the "
+                "stream host) — using DryRunTransport", name)
     return DryRunTransport()
 
 

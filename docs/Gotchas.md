@@ -39,7 +39,7 @@ Hard-won lessons. Read before touching the audio path or the indexer.
 ## Network / paths
 - **VPN latency, not a slow NAS.** ~30 ms/op over OpenVPN made a folder listing
   take ~176 s; on-site LAN it's instant. Don't chase SMB tuning for it.
-- **Store portable paths.** Prefer a UNC root like `//KDPI-Media/music/G` in
+- **Store portable paths.** Prefer a UNC root like `//NAS/Music` in
   `paths.nas_music_root`; the on-air PC should not depend on a home-only `Z:`.
   Don't rewrite playlist paths to `Z:` (relink would).
 - **Bash heredocs mangle backslashes** — write Python to a file, never inline a

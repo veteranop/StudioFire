@@ -1,6 +1,6 @@
 """Tests for the multi-field now-playing line (#926) — the stream vendor's format.
 
-StreamGuys builds the SoundExchange report of use straight off the ICY
+The stream host builds the SoundExchange report of use straight off the ICY
 StreamTitle we publish, so this line is a FORMAT CONTRACT, not cosmetics.
 What would hurt a live station if it broke:
 

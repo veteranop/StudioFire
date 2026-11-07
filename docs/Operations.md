@@ -13,11 +13,12 @@ up: "[[PROJECTS-INDEX]]"
 Running, restarting, deploying, and soak-testing. Deploy details in [[StudioFire/DEPLOY|DEPLOY]].
 
 ## Dev environment
-- Python = **Anaconda 3.13** (`C:\Users\markd\anaconda3\python.exe`) — mandate.
-  Bare `python` on PATH is the Windows Store stub (lacks our deps).
+- Python = **Anaconda** (a full Anaconda `python.exe`) — mandate. Bare `python`
+  on PATH is the Windows Store stub (lacks our deps).
 - `mpv.exe` in `bin/` (gitignored; the installer fetches it).
-- GitHub is the release/update channel; deploy also mirrors to
-  `\\KDPI-Media\music\StudioFire`.
+- GitHub is the release/update channel; the deploy also mirrors a complete,
+  runnable copy to the NAS. (Station-specific paths are kept privately in
+  `site-notes/operations.md`.)
 
 ## Run / stop the stack
 - `start-all.bat` / `stop-all.bat` — dev box (each service in its own window).

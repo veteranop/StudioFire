@@ -293,7 +293,7 @@ def write_lst(conn: sqlite3.Connection, lst_dir: str, pid: int,
 _PATH_ALIASES: dict = {}
 # nas_music_root, loaded by register(): lets alias_path() fall back to the NAS
 # share root when a stored path's drive letter is gone from this session (the
-# KDPI Z:-drop fix — see services/pathmap.py).
+# dropped-mapped-drive fix — see services/pathmap.py).
 _NAS_ROOT: str = ""
 
 
@@ -306,11 +306,11 @@ def set_path_aliases(aliases: dict | None, nas_root: str | None = None) -> None:
 def alias_path(path: str, aliases: dict | None = None) -> str:
     """Rewrite a path so it resolves on THIS machine even without the drive
     letter it was stored with. Explicit path_aliases are applied first — a
-    playlist written elsewhere (e.g. \\\\KDPI-Media\\music\\... at the studio)
+    playlist written elsewhere (e.g. \\\\NAS\\music\\... at the studio)
     maps here (e.g. Z:\\... over a VPN where that name doesn't resolve). Then,
     if the path is on a drive that doesn't exist in this session, it is
-    re-pointed at the NAS share root (Z:\\John\\... -> \\\\KDPI-Media\\music\\
-    John\\...). Applied at feed time too, not just at import: playlists already
+    re-pointed at the NAS share root (Z:\\Spots\\... -> \\\\NAS\\music\\
+    Spots\\...). Applied at feed time too, not just at import: playlists already
     in the DB keep the paths they were made with."""
     return pathmap.resolve(
         path,
@@ -481,7 +481,7 @@ def relink_broken(conn: sqlite3.Connection, music_root: str,
                   pid: int | None = None) -> dict:
     """Repoint stale playlist file paths to the real file in the library.
 
-    Many playlists (imported before the Synology install) point at old
+    Many playlists (imported before the NAS install) point at old
     locations OUTSIDE the current music root. The files just moved — same
     name, now under music_root. For each file item whose path is not under
     music_root, look up the same-named file in the index (present only) and,
@@ -632,7 +632,7 @@ def register(app: FastAPI) -> None:
         The operator-set folder wins; the fallback (<data>/playlists) exists
         so a playlist is ALWAYS a real file, even before any setup."""
         # resolve so a Z:\ playlists folder still points at the NAS share root
-        # (\\KDPI-Media\music) when this session has no Z: mapping
+        # (\\NAS\music) when this session has no Z: mapping
         d = alias_path(coredb.get_setting(conn, LST_DIR_KEY) or "")
         if d and os.path.isdir(d):
             return d

@@ -19,9 +19,9 @@ Safety rules:
     path needs characters cp1252 can't hold).
 
 Usage (run from the StudioFire folder):
-    python scripts/repair_lst.py "Z:\\John\\*.lst"                 # dry run
-    python scripts/repair_lst.py "Z:\\John\\*.lst" --apply
-    python scripts/repair_lst.py X.lst --share "\\\\KDPI-Media\\music" --local Z:
+    python scripts/repair_lst.py "Z:\\Playlists\\*.lst" --share "\\\\NAS\\music" --local Z:            # dry run
+    python scripts/repair_lst.py "Z:\\Playlists\\*.lst" --share "\\\\NAS\\music" --local Z: --apply
+    python scripts/repair_lst.py X.lst --share "\\\\NAS\\music" --local Z:
 """
 import argparse
 import collections
@@ -168,10 +168,11 @@ def main():
     ap.add_argument("files", nargs="+", help=".lst files or globs")
     ap.add_argument("--apply", action="store_true",
                     help="write the fixes (after backing up)")
-    ap.add_argument("--share", default="\\\\KDPI-Media\\music",
-                    help="station UNC prefix used inside the .lst files")
-    ap.add_argument("--local", default="Z:",
-                    help="where that share is reachable on this PC")
+    ap.add_argument("--share", required=True,
+                    help="UNC prefix used inside the .lst files, "
+                         "e.g. \\\\NAS\\music")
+    ap.add_argument("--local", required=True,
+                    help="where that share is reachable on this PC, e.g. Z:")
     ap.add_argument("--db", default=os.path.join(ROOT, "data", "studiofire.db"))
     ap.add_argument("--also", action="append", default=[], metavar="DIR",
                     help="extra folder to search (recursively) for files the "

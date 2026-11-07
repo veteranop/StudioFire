@@ -7,8 +7,8 @@ by a detached process, and it is gone after a reboot until something re-runs
 `net use`. StudioFire's database is full of Z:\\-rooted paths — playlists, spot
 folders, station-ID folders, the .lst mirror dir — so the moment that mapping
 is missing, every stored path fails os.path.isdir/isfile and legal IDs, PSAs,
-ads and shows silently miss their windows (KDPI, 2026-09-29: 132 spot misses
-after a Windows-Update reboot dropped Z:).
+ads and shows silently miss their windows (the reference station, 2026-09-29:
+132 spot misses after a Windows-Update reboot dropped Z:).
 
 The fix: a drive letter must NEVER be required to resolve a path. A path on a
 drive that does not exist in this session is re-pointed at the configured NAS
@@ -53,8 +53,8 @@ def _drive_letter(path: str) -> str | None:
 def share_root(nas_music_root: str | None) -> str:
     """The NAS share root (\\\\host\\share) that a mapped drive stands in for.
 
-    config\\drive-map.bat maps Z: -> \\\\KDPI-Media\\music while nas_music_root
-    is //KDPI-Media/music/G, so the share root is nas_music_root minus its last
+    A drive map like Z: -> \\\\NAS\\music while nas_music_root is
+    //NAS/music/Library means the share root is nas_music_root minus its last
     path component. Accepts // or \\\\ UNC input and always returns the
     canonical Windows form (\\\\host\\share, backslashes) — that is what is
     already stored inside the .lst files."""
@@ -82,7 +82,7 @@ def resolve(path: str, aliases: dict | None = None,
        written at the studio as \\\\SERVER\\share\\... mapped back to Z:\\...
     2. Otherwise, if the path is on a drive letter that does NOT exist in this
        session, re-point it under the NAS share root derived from nas_root:
-         Z:\\John\\New PSAs  ->  \\\\KDPI-Media\\music\\John\\New PSAs
+         Z:\\Spots\\New PSAs  ->  \\\\NAS\\music\\Spots\\New PSAs
        A path on a drive that DOES exist (e.g. C:\\...) is left untouched, and
        so is any path when no NAS root is configured.
     """

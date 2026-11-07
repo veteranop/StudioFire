@@ -23,7 +23,7 @@ Barix encoder → VPN → transmitter. Non-technical DJs use a **web GUI** to bu
 playlists and run the board. Guiding law from the owner: **"audio on is
 everything"** — dead air is the cardinal sin.
 
-Scale: ~4 TB library on a Synology NAS (SMB), ~40k tracks, mixed mp3/m4a/wav.
+Scale: ~4 TB library on a NAS share (SMB), ~40k tracks, mixed mp3/m4a/wav.
 
 ## 2. Architecture — 4 isolated processes
 Deliberately segmented so nothing can take down playback:
@@ -101,7 +101,7 @@ Phases 0–2 largely done; parts of 3.
   retry on `os.replace`.
 - Indexer only flags a track *missing* when its **folder was actually readable**
   this pass — a slow/hidden NAS folder can no longer wipe the library from search.
-- **Auto-relink**: many playlists (pre-Synology) point at dead paths; a one-click
+- **Auto-relink**: many legacy playlists point at dead paths; a one-click
   pass repoints each out-of-root item to the same-named indexed file.
 
 ### Tests
@@ -148,8 +148,8 @@ correctness, not just "not silent."
    over 72 h" bench predates shows/spots/resync/metadata. Highest-priority thing
    to re-validate before go-live?
 4. **Path/index model.** Playlists should store portable UNC paths like
-   `\\KDPI-Media\music\...` and the index should walk the local NAS root set in
-   `paths.nas_music_root` (`//KDPI-Media/music/G`). Legacy `Z:` playlists are
+   `\\NAS\Music\...` and the index should walk the local NAS root set in
+   `paths.nas_music_root` (`//NAS/Music`). Legacy drive-letter playlists are
    still supported for playback compatibility, but new deployments should avoid
    mapped-drive paths where possible.
 5. **Legal top-of-hour ID** is currently "a spot rule with a clock trigger,"
@@ -229,7 +229,7 @@ error surfaced anywhere. Execution spec: `.claude/upgrade-instructions.md`
   with a `log.error` so a genuinely missed ad/legal-ID is findable in the
   affidavit trail.
 - `.claude/CLAUDE.md`: corrected the `python main.py` / `--dry-run` /
-  "KDPI protocol" inaccuracies flagged in the original spec.
+  station-protocol inaccuracies flagged in the original spec.
 
 **Tests:**
 - New `tests/test_feeder_concurrency.py` (stub P1, no real mpv — isolates
@@ -281,7 +281,7 @@ not P1's.
   before this branch goes anywhere near the on-air PC.**
 - No deploy, no push, no service restarts, `config/config.json` untouched.
 
-## 9. John (KDPI) feedback batch — 2026-09-25 (TimeTrax #644, branch `john-feedback-batch`)
+## 9. Operator feedback batch — 2026-09-25 (branch `operator-feedback-batch`)
 
 Branched off `feeder-hardening` so both ship together. John's nine requests
 after the first live show, plus two latent bugs found along the way.
@@ -535,7 +535,7 @@ real sound card (WASAPI shared mode).
 
 ## 12. Spots fired but never aired — 2026-09-29 (TimeTrax H2627206)
 
-**Symptom (live, KDPI v1.2.0):** after the Z:-drop fix (§ v1.2.0) spot rules
+**Symptom (live, v1.2.0):** after the drive-letter fix (§ v1.2.0) spot rules
 fired again — `spot fired` INFO logged, P1 returned 202, `spot_rules.last_fired`
 advanced — but nothing aired: zero `source='spot'` rows in `play_history`, and
 the boundary after each fire played the next show/rotation item.

@@ -22,7 +22,7 @@ embedded Python runtime with all dependencies pre-installed.
   auto-restart on crash) — check it on the production on-air PC. **After
   installing**, set each service's Log On to a real user account. If the music
   is on a NAS, use a UNC root in `config\config.json` like
-  `//KDPI-Media/music/G`; only create `config\drive-map.bat` when you must
+  `//NAS/music`; only create `config\drive-map.bat` when you must
   support legacy mapped-drive paths in a service session.
   The bundled `runtime\` means Python itself works under any account.
 - Optional task: open firewall port 8080 for the LAN web GUI.
@@ -88,6 +88,23 @@ resolves from anywhere with no cwd or PATH assumptions. `start-all.bat`,
 `healthcheck.bat`, and `scripts\install-services.bat` all prefer
 `<install>\runtime\python.exe` when it exists and fall back to Anaconda/PATH
 on dev boxes.
+
+## Installing on a station PC (the helper script)
+
+`INSTALL-Production.ps1` next to the built exe does the pre-flight and the proof:
+
+```powershell
+# copy the whole installer\Output folder to the station PC, then
+.\INSTALL-Production.ps1 -PreflightOnly   # check only, changes nothing
+.\INSTALL-Production.ps1                  # walk the setup screens
+.\INSTALL-Production.ps1 -Silent          # unattended
+```
+
+It verifies the exe against `SHA256SUMS.txt`, reports leftover services or an old
+install folder, **backs up an existing `%ProgramData%\StudioFire\data\studiofire.db`
+before installing**, checks free space / audio devices / whether the web port is
+free, then runs the installer and verifies services, the listening port and
+`GET /health`. Every run writes `install-<timestamp>.log` beside itself.
 
 ## Related
 

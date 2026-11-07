@@ -108,6 +108,37 @@ def main():
     check("index tile counts tracks", "2 tracks"
           in tiles["Library index"]["detail"])
 
+    # ---- release A: the honest verdict, the guardrail UI, the skips view
+    v = client.get("/api/health/verdict")
+    check("verdict API answers", v.status_code == 200 and "state" in v.json())
+    check("a fresh install with no spot rules is a FAULT (nothing airs)",
+          v.json()["state"] == "fault")
+    _blob = " ".join(r["text"] for r in v.json().get("reasons", [])).lower()
+    check("verdict names the empty spot policy", "spot" in _blob)
+    check("verdict reports the checked facts",
+          isinstance(v.json().get("checked"), dict)
+          and "enabled_spot_rules" in v.json()["checked"])
+
+    sk = client.get("/api/skips")
+    check("skips API answers", sk.status_code == 200
+          and sk.json()["count"] == 0 and isinstance(sk.json()["items"], list))
+    dl = client.get("/api/spots/deleted")
+    check("undo list API answers", dl.status_code == 200
+          and dl.json()["rules"] == [])
+
+    page = client.get("/").content
+    check("dashboard has the in-app confirm dialog",
+          b'id="sf-modal"' in page and b'id="sf-modal-type"' in page)
+    check("no browser pop-ups left in the On Air page",
+          b"alert(" not in page and b"!confirm(" not in page)
+    check("confirmations go through our dialog",
+          b"await confirmBox(" in page and b"function askDialog(" in page)
+    check("dashboard has the Undo toast", b'id="sf-toast"' in page)
+    check("dashboard has the Recently deleted block", b'id="spot-undo"' in page)
+    check("dashboard has the empty-spot alarm", b'id="spot-empty-banner"' in page)
+    check("dashboard has the missing-songs warning", b'id="skip-warning"' in page)
+    check("dashboard knows the user's role", b"const IS_ADMIN =" in page)
+
     # ---- history / log API (as-aired; empty on a fresh DB but must be a list)
     hist = client.get("/api/history")
     check("history API returns a list",
@@ -124,8 +155,14 @@ def main():
           and csv.text.startswith("Time,What aired,Type"))
 
     # ---- settings: station folders + folder browser
+    _settings = client.get("/settings").content
     check("settings page renders",
-          b"Station folders" in client.get("/settings").content)
+          b'id="dir-rows"' in _settings
+          and b'data-goto="station"' in _settings)
+    # the Users list needs the signed-in name as a JS value, not a Jinja one —
+    # referencing the Jinja variable directly threw and left the list blank
+    check("settings passes the username to the page script",
+          b"const SF_ME" in _settings)
     dirs = client.get("/api/settings/dirs").json()
     check("dir settings listed", len(dirs) >= 4
           and all(d["path"] == "" for d in dirs))

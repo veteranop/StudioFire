@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>{{ rep.title }} — {{ station }}</title>
+<style>
+  :root { --ink:#101820; --muted:#5b6b7b; --rule:#d7dee6; --accent:#0b3d63;
+          --band:#f2f5f8; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 22px 26px 40px; color: var(--ink);
+         font: 13px/1.45 "Segoe UI", Arial, sans-serif; background:#fff; }
+
+  /* ---- masthead: station identity, report identity, provenance ---- */
+  .mast { display: flex; justify-content: space-between; align-items: flex-start;
+          border-bottom: 3px solid var(--accent); padding-bottom: 10px; }
+  .brand .station { font-size: 21px; font-weight: 800; letter-spacing: .01em;
+                    color: var(--accent); }
+  .brand .sub { font-size: 11.5px; color: var(--muted); letter-spacing: .08em;
+                text-transform: uppercase; margin-top: 2px; }
+  .meta { text-align: right; font-size: 11.5px; color: var(--muted); }
+  .meta b { color: var(--ink); font-weight: 600; }
+
+  h1 { font-size: 17px; margin: 16px 0 2px; }
+  .window { font-size: 12.5px; color: var(--muted); margin-bottom: 14px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 11.6px; }
+  thead th { background: var(--accent); color: #fff; text-align: left;
+             padding: 7px 8px; font-weight: 600; letter-spacing: .02em; }
+  tbody td { padding: 5px 8px; border-bottom: 1px solid var(--rule);
+             vertical-align: top; }
+  tbody tr:nth-child(even) td { background: var(--band); }
+  tbody tr { page-break-inside: avoid; }
+  thead { display: table-header-group; }        /* repeat the header row on every page */
+
+  .num { text-align: right; font-variant-numeric: tabular-nums; }
+  .rep-missed { color: #a32424; font-weight: 700; }
+  .rep-status { font-weight: 700; }
+  .rep-not-airing { color: #a32424; }
+  .rep-under { color: #8a5a00; }
+  .rep-ok { color: #0d6a3f; }
+
+  footer { margin-top: 18px; border-top: 1px solid var(--rule);
+           padding-top: 8px; font-size: 10.5px; color: var(--muted);
+           display: flex; justify-content: space-between; gap: 16px; }
+  .note { max-width: 62%; }
+  .empty { padding: 18px; text-align: center; color: var(--muted); }
+  .charts { display: flex; flex-direction: column; gap: 12px;
+            margin: 0 0 14px; }
+  .chart-card { margin: 0; padding: 10px 12px 6px; border: 1px solid var(--rule);
+                border-radius: 8px; background: #fbfcfe; page-break-inside: avoid;
+                color: #33404f; }
+  .chart-card figcaption { font-size: 11.5px; font-weight: 700; color: var(--accent);
+                           margin-bottom: 6px; letter-spacing: .02em; }
+  .chart-card svg { display: block; max-width: 100%; height: auto; }
+  .gapband { margin: 0 0 12px; padding: 8px 10px; border-left: 4px solid #8a5a00;
+             background: #fdf6e6; font-size: 11.5px; color: #4a3a12; }
+
+  /* screen-only hint */
+  .hint { font-size: 10.5px; color: var(--muted); text-align: right;
+          margin: 4px 0 6px; }
+
+  @page { size: A4 portrait; margin: 14mm 12mm; }
+  @media print {
+    body { padding: 0; font-size: 10.5px; }
+    .hint { display: none; }
+    .mast { border-bottom-width: 2px; }
+  }
+</style>
+</head>
+<body>
+<div class="hint">To keep a copy: press Ctrl+P (⌘P) and choose “Save as PDF”.</div>
+
+<div class="mast">
+  <div class="brand">
+    <div class="station">{{ station }}</div>
+    <div class="sub">Broadcast automation — as-operated record</div>
+  </div>
+  <div class="meta">
+    <div><b>{{ rep.title }}</b></div>
+    <div>{{ rep.subtitle }}</div>
+    <div>Generated {{ generated }}</div>
+    <div>by StudioFire {{ running_version or "" }}{% if host %} · {{ host }}{% endif %}</div>
+  </div>
+</div>
+
+<h1>{{ rep.title }}</h1>
+<div class="window">{{ rep.subtitle }}{% if rep.rows %} · {{ rep.rows|length }} row(s){% endif %} · inclusive dates, station local time</div>
+
+{% if rep.charts %}
+<div class="charts">
+  {% for c in rep.charts %}
+  <figure class="chart-card">
+    <figcaption>{{ c.title }}</figcaption>
+    {{ c.svg | safe }}
+  </figure>
+  {% endfor %}
+</div>
+{% endif %}
+
+{% if rep.coverage %}
+<div class="gapband">
+  <b>How complete this is:</b> {{ rep.coverage.matched }} of
+  {{ rep.coverage.total }} playlist airings in this period
+  {{ rep.coverage.label | default('are attributable') }} ({{ rep.coverage.pct }}%).
+  The rest are counted here rather than smoothed over or shown as "Unknown".
+</div>
+{% endif %}
+
+{% if rep.rows %}
+<table>
+  <thead>
+    <tr>{% for h in rep.headers %}<th>{{ h }}</th>{% endfor %}</tr>
+  </thead>
+  <tbody>
+    {% for row in rep.rows %}
+    <tr>
+      {% for c in rep.columns %}
+      <td class="{% if c in ('expected','aired','missed','hours','tracks') %}num{% endif %}{% if c == 'status' %} rep-status rep-{{ row[c]|lower|replace(' ','-') }}{% endif %}{% if c == 'missed' and row[c] %} rep-missed{% endif %}">{{ row[c] }}</td>
+      {% endfor %}
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<div class="empty">Nothing to report for this period.</div>
+{% endif %}
+
+<footer>
+  <div class="note">{{ rep.note }}</div>
+  <div>Prepared with StudioFire · VeteranOp</div>
+</footer>
+</body>
+</html>

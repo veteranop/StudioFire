@@ -63,3 +63,9 @@ _deploy/
 
 # editor state
 .vscode/
+
+# station-specific private runbook (hosts, shares, on-air PC, people, procedures)
+site-notes/
+
+# agent handoff scratch
+.hermes/

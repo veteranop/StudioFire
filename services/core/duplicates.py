@@ -88,7 +88,8 @@ def _protected(conn: sqlite3.Connection) -> tuple[set, list[str]]:
         if p:
             exact.add(_np(p))
     for (p,) in conn.execute(
-            "SELECT file_path FROM spot_rules WHERE file_path IS NOT NULL"):
+            "SELECT file_path FROM spot_rules "
+            "WHERE file_path IS NOT NULL AND deleted_at IS NULL"):
         if p:
             exact.add(_np(p))
 
@@ -98,7 +99,8 @@ def _protected(conn: sqlite3.Connection) -> tuple[set, list[str]]:
         if v:
             prefixes.append(_np(v).rstrip("\\/") + os.sep)
     for (p,) in conn.execute(
-            "SELECT folder_path FROM spot_rules WHERE folder_path IS NOT NULL"):
+            "SELECT folder_path FROM spot_rules "
+            "WHERE folder_path IS NOT NULL AND deleted_at IS NULL"):
         if p and p.strip():
             prefixes.append(_np(p).rstrip("\\/") + os.sep)
     return exact, prefixes

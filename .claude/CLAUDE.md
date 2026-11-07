@@ -1,5 +1,7 @@
 # StudioFire — Live Broadcast Automation
-**Production environment. Real-time streaming system for KDPI.**
+**Production environment. Real-time streaming system for a station.**
+Station-specific deployment facts (hosts, shares, the on-air PC, people) live
+in the private, gitignored `site-notes/` folder — never here.
 
 ---
 
@@ -54,7 +56,8 @@ tail -f logs/*.log
 
 - **Language:** Python 3.x
 - **Video:** mpv (media player)
-- **Audio path:** sound card → Barix Instreamer → WireGuard VPN → transmitter (KDPI)
+- **Audio path:** sound card → hardware encoder → VPN link → transmitter site
+  (the exact boxes are listed in `site-notes/`)
 - **Config:** JSON in `config/`
 - **Logging:** `logs/`
 

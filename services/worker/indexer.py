@@ -40,9 +40,35 @@ THROTTLE_NAP = 0.05       # seconds
 TAG_BATCH = 100           # rows fetched per tag-backfill batch
 
 
+def _tag_first(tags, keys):
+    """First non-empty value for any of `keys` — easy-mode names AND the raw
+    frame ids. mutagen's easy mapping does not expose genre for every ID3 file
+    (the value sits in TCON while easy mode hands back raw frames), so a
+    genre report built on easy keys alone silently reads "no genre" for a
+    library that is 100% tagged."""
+    if not tags:
+        return None
+    for k in keys:
+        try:
+            v = tags.get(k)
+        except Exception:      # noqa: BLE001
+            v = None
+        if not v:
+            continue
+        if isinstance(v, (list, tuple)):
+            v = v[0] if v else None
+        if v is None:
+            continue
+        s = str(v).strip()
+        if s:
+            return s
+    return None
+
+
 def read_tags(path: str) -> dict:
     """Best-effort tag read; a corrupt file must never kill the scan."""
     out = {"title": None, "artist": None, "album": None,
+           "genre": None, "year": None, "label": None,
            "duration_sec": None, "format": None}
     try:
         m = mutagen.File(path, easy=True)
@@ -60,8 +86,25 @@ def read_tags(path: str) -> dict:
         out["title"] = first("title")
         out["artist"] = first("artist")
         out["album"] = first("album")
+        # Offline music metadata (migration 16). Genre drives the music-mix
+        # report, year the era view, label the royalty/underwriting evidence.
+        # Swept raw AND easy: easy mode hides genre on some ID3 files (TCON).
+        out["genre"] = _tag_first(m.tags, ("genre", "Genre", "TCON",
+                                           "\xa9gen", "gnre"))
+        _year = _tag_first(m.tags, ("date", "year", "Date", "TDRC", "TYER",
+                                    "\xa9day", "originaldate"))
+        out["year"] = _year[:4] if _year and _year[:4].isdigit() else None
+        out["label"] = _tag_first(m.tags, ("label", "Label", "publisher",
+                                           "Publisher", "TPUB",
+                                           "organization", "\xa9pub"))
     if not out["title"]:
         out["title"] = os.path.splitext(os.path.basename(path))[0]
+    # Did we really get tags, or did the file open and come back empty? An MP3
+    # yielding no artist/album/genre is almost always a transient read failure
+    # (a share hiccup), not an untagged file — and marking it "done" anyway is
+    # how 2,413 played songs ended up with no artist in the index while the
+    # files themselves were perfectly tagged.
+    out["_tagged"] = bool(out["artist"] or out["album"] or out["genre"])
     return out
 
 
@@ -106,6 +149,14 @@ def _walk_paths(conn: sqlite3.Connection, root: str, t0: float,
             except OSError:
                 continue
             if os.path.splitext(e.name)[1].lower() not in AUDIO_EXTS:
+                continue
+            # macOS resource forks ("." + "_" prefix, e.g. "._Track 01.mp3")
+            # carry a .mp3 name but no audio: indexing them puts unplayable rows
+            # in the library and the engine gets a decode error when one is
+            # picked for air. Same for Finder metadata and __MACOSX folders.
+            if e.name.startswith("._") or e.name.startswith(".") \
+                    or os.path.basename(os.path.dirname(e.path)) == "__MACOSX":
+                stats["skipped_junk"] = stats.get("skipped_junk", 0) + 1
                 continue
             path = e.path
             stats["scanned"] += 1
@@ -205,10 +256,19 @@ def _backfill_tags(conn: sqlite3.Connection, root: str, t0: float,
             with conn:
                 conn.execute(
                     "UPDATE tracks SET title = ?, artist = ?, album = ?, "
-                    "  duration_sec = ?, format = ?, tags_read = 1 "
+                    "  genre = ?, year = ?, label = ?, "
+                    "  duration_sec = ?, format = ?, "
+                    "  tags_read = MAX(COALESCE(tags_read, 0), ?), meta_read = 1 "
                     "WHERE path = ?",
                     (tags["title"], tags["artist"], tags["album"],
-                     tags["duration_sec"], tags["format"], path))
+                     tags.get("genre"), tags.get("year"), tags.get("label"),
+                     tags["duration_sec"], tags["format"],
+                     # Formats that essentially always carry tags: leave
+                     # tags_read at 0 on an empty read so a later scan retries it.
+                     1 if (tags.get("_tagged") or tags["format"] not in
+                           ("MP3", "MP4", "FLAC", "OggVorbis", "OggOpus"))
+                     else 0,
+                     path))
             tagged += 1
             if tagged % THROTTLE_EVERY == 0:
                 time.sleep(THROTTLE_NAP)

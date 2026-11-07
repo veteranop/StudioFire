@@ -26,6 +26,8 @@ from .control import ControlServer
 from .supervisor import EngineSupervisor
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from .. import paths as shared_paths      # noqa: E402  (stdlib only)
+
 log = logging.getLogger("engine")
 
 
@@ -42,10 +44,13 @@ def load_config(path: str | None) -> dict:
             log.error("config %s unusable (%s) — using defaults", p, exc)
     paths = cfg.get("paths", {})
     engine = cfg.get("engine", {})
-    data_dir = paths.get("data_dir", os.path.join(ROOT, "data"))
-    logs_dir = paths.get("logs_dir", os.path.join(ROOT, "logs"))
-    os.makedirs(data_dir, exist_ok=True)
-    os.makedirs(logs_dir, exist_ok=True)
+    # P1 and P2 MUST agree on every path: the journal and heartbeat are written
+    # here and read by the core, and the emergency / precache tiers read folders
+    # the core fills. One resolver, both services (services/paths.py).
+    resolved = shared_paths.resolve(paths, ROOT)
+    shared_paths.ensure_dirs(resolved)
+    data_dir = resolved["data_dir"]
+    logs_dir = resolved["logs_dir"]
     return {
         "mpv_path": engine.get("mpv_path", os.path.join(ROOT, "bin", "mpv.exe")),
         "pipe_name": engine.get("pipe_name", "studiofire-engine"),
@@ -53,16 +58,16 @@ def load_config(path: str | None) -> dict:
         "watchdog_interval": engine.get("watchdog_interval_sec", 1.0),
         "ipc_host": engine.get("ipc_host", "127.0.0.1"),
         "ipc_port": int(engine.get("ipc_port", 7701)),
-        "emergency_dir": paths.get("emergency_dir",
-                                   os.path.join(ROOT, "assets", "emergency")),
+        "emergency_dir": resolved["emergency_dir"],
         # filler fallback when the emergency folder is empty: real music
         # from the local precache (must match P2's precache_dir)
-        "precache_dir": paths.get("precache_dir",
-                                  os.path.join(ROOT, "precache")),
+        "precache_dir": resolved["precache_dir"],
         "baked_in_asset": engine.get("baked_in_asset"),
-        "state_path": os.path.join(data_dir, "queue_state.json"),
-        "journal_path": os.path.join(logs_dir, "play_journal.jsonl"),
-        "heartbeat_path": os.path.join(data_dir, "engine_heartbeat.txt"),
+        "state_path": resolved["state_path"],
+        "journal_path": resolved["journal_path"],
+        "heartbeat_path": resolved["heartbeat_path"],
+        "data_root": resolved["data_root"],
+        "data_dir": data_dir,
         "logs_dir": logs_dir,
         "extra_mpv_args": engine.get("extra_mpv_args", []),
         # song crossfade length (seconds; 0 = back to back, no fades). The
@@ -95,6 +100,12 @@ def setup_logging(logs_dir: str) -> None:
 def main() -> int:
     cfg = load_config(sys.argv[1] if len(sys.argv) > 1 else None)
     setup_logging(cfg["logs_dir"])
+    # first run: give the last-resort tier something to play in the folder BOTH
+    # services now agree on (previously it waited for a human to fill it in)
+    copied = shared_paths.seed_emergency(cfg, ROOT)
+    if copied:
+        log.info("seeded %d emergency clip(s) into %s", copied,
+                 cfg["emergency_dir"])
     log.info("StudioFire engine starting (pid %d)", os.getpid())
 
     supervisor = EngineSupervisor(cfg)

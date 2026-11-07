@@ -1,7 +1,11 @@
 # StudioFire — On-Air PC Deployment & Auto-Start Runbook
 
+> This is the generic procedure. Station-specific values (the on-air PC's
+> address, staging shares, copy commands and the chain device IPs) are kept
+> privately in `site-notes/on-air-setup.md`.
+
 > **This file SUPERSEDES the `ON-AIR-SETUP.md` that shipped inside the
-> `StudioFire-OnAir-v1.0.0` kit.** The kit's copy tells you to run the station as
+> `StudioFire-OnAir-kit` kit.** The kit's copy tells you to run the station as
 > NSSM Windows services and calls console mode "fine for testing, not what you
 > want for real on-air". **That guidance is reversed and is wrong for any box that
 > must make sound** — see the errata below. Replace the kit's copy with this one
@@ -26,9 +30,10 @@ ERROR engine.supervisor: decode/play error on deck A
 ERROR engine.supervisor: ENTERING EMERGENCY MODE: track ended
 ```
 
-Proven live on `.200` on 2026-09-29: services installed 19:59:03, and by 20:00:28 the
-engine had logged that on **3,529 tracks and climbing** — while `GET /health` returned
-`{"ok":true,...,"version":"1.3.2"}` and `services.msc` showed every service **Running**.
+Proven live on an on-air box on 2026-09-29: within about a minute of installing the
+services the engine had logged that failure on **thousands of tracks and climbing** —
+while `GET /health` returned `{"ok":true,...}` and `services.msc` showed every service
+**Running**.
 Process health and SCM state can both be green on a silent station. mpv itself launched
 fine (pids present); it was the audio *output* that could not open.
 
@@ -75,7 +80,7 @@ except the log.
 
 | # | Thing | Why |
 |---|-------|-----|
-| 1 | Which NAS share you're staging on | `\\KDPI-Media\music\StudioFire` (canonical) or `\\192.168.6.200\StudioFire` (the `Y:` staging share) |
+| 1 | Which NAS share you're staging on | e.g. `\\NAS\music\StudioFire` (the concrete share/staging path for this station is in `site-notes/on-air-setup.md`) |
 | 2 | **The on-air PC's local admin username + password** | Needed for autologon (stored as an LSA secret) — the box logs itself in with it |
 | 3 | Where on the on-air PC it should live | A **local disk** (`C:\StudioFire`). Never run it from the NAS — playback must not depend on the network |
 
@@ -86,10 +91,10 @@ except the log.
 Fastest is the single ZIP (one file, far less likely to land half-copied over SMB):
 
 ```cmd
-copy "C:\Users\markd\Desktop\StudioFire-OnAir-v1.0.0.zip" "\\KDPI-Media\music\"
+copy "C:\Users\<you>\Desktop\StudioFire-OnAir-kit.zip" "\\NAS\music\"
 REM then on the on-air PC:
-copy "\\KDPI-Media\music\StudioFire-OnAir-v1.0.0.zip" "C:\"
-powershell -Command "Expand-Archive -Path C:\StudioFire-OnAir-v1.0.0.zip -DestinationPath C:\StudioFire -Force"
+copy "\\NAS\music\StudioFire-OnAir-kit.zip" "C:\"
+powershell -Command "Expand-Archive -Path C:\StudioFire-OnAir-kit.zip -DestinationPath C:\StudioFire -Force"
 ```
 
 Verify the ZIP survived: its SHA256 must match the sidecar `...zip.sha256`
@@ -99,7 +104,7 @@ Or copy the folder directly (slower — ~3,694 files). Use `/E` (merge), **not `
 unless the destination holds nothing else you care about:
 
 ```cmd
-robocopy "C:\Users\markd\Desktop\StudioFire-OnAir-Ready" "\\KDPI-Media\music\StudioFire" /E
+robocopy "C:\Users\<you>\Desktop\StudioFire-OnAir-Ready" "\\NAS\music\StudioFire" /E
 ```
 
 Expect ~217 MB on the share (dominated by `bin\mpv.exe` at ~112 MB and `runtime\`).
@@ -109,7 +114,7 @@ Expect ~217 MB on the share (dominated by `bin\mpv.exe` at ~112 MB and `runtime\
 ## Hop 2 — NAS -> on-air PC
 
 ```cmd
-robocopy "\\KDPI-Media\music\StudioFire" "C:\StudioFire" /MIR
+robocopy "\\NAS\music\StudioFire" "C:\StudioFire" /MIR
 ```
 
 Confirm the critical pieces landed — all three must exist:
@@ -189,7 +194,7 @@ Then the **only acceptance test that counts**:
 2. **Reboot the box and do NOT touch the keyboard.**
 3. Confirm it comes back by itself, **with audio**, and `healthcheck.bat` reports ON AIR.
 
-A box can report healthy and be silent — that is exactly what tricked us on `.200`.
+A box can report healthy and be silent — that is exactly what tricked us on the on-air box.
 **Listen to the stream / check the board.** HTTP 200 is not proof of on-air.
 
 ---

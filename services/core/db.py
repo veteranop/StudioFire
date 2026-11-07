@@ -281,6 +281,93 @@ ALTER TABLE playlist_items ADD COLUMN duration_sec REAL;
 -- Cleared by a manual reorder: the order then came from the operator, not us.
 ALTER TABLE playlists ADD COLUMN shuffled_at REAL;
 """),
+    (13, """
+-- Soft-delete + Undo for spot rules. A deleted rule keeps its row (so Undo can
+-- bring it back with the SAME id) but never airs and never lists. deleted_at is
+-- the epoch it was removed, deleted_by the username who did it; both NULL means
+-- the rule is live. Rows older than the undo window are hard-purged
+-- opportunistically (spots.purge_expired). The 2026-11-02 underwriting blackout
+-- was a bare DELETE with no confirm, no undo and no audit — this is the floor
+-- the guardrails (release A) build on.
+ALTER TABLE spot_rules ADD COLUMN deleted_at REAL;
+ALTER TABLE spot_rules ADD COLUMN deleted_by TEXT;
+CREATE INDEX idx_spot_rules_deleted ON spot_rules(deleted_at);
+"""),
+    (14, """
+-- Missing playlist files, made visible. The feeder has always skipped an item
+-- whose file has moved or been renamed, but it only wrote a log line
+-- ("feeder: item unresolvable"), so an operator heard songs missing and had
+-- nothing on screen to explain it (23% of one live playlist was dead this way).
+-- One row per skip event; the On Air screen shows the recent count, and the
+-- status verdict warns while skips are recent. Rows older than a week are
+-- dropped opportunistically so the table stays small.
+CREATE TABLE IF NOT EXISTS skipped_items (
+  id INTEGER PRIMARY KEY,
+  ts REAL NOT NULL,
+  path TEXT NOT NULL,
+  reason TEXT,
+  playlist_id INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_skipped_items_ts ON skipped_items(ts);
+"""),
+    (15, """
+-- Reporting attribution. play_history records what aired but not WHICH playlist
+-- or WHICH spot rule it came from (the source column only says
+-- playlist/show/spot), so "what playlist aired on Tuesday" and "how many times
+-- did this underwriter's spot air" were both unanswerable. Two small tables:
+--
+-- queue_attribution: written by the feeder as it pushes each item, keyed by the
+--   PRECACHE path — which is exactly what the engine's journal reports back on
+--   track_start. The journal ingest joins on it and copies the ids into
+--   play_history.extra. Replaced on re-feed, pruned after a week.
+--
+-- playlist_airings: one row per continuous stretch a playlist (or show) was on
+--   air, opened/closed by the feeder, so a report can say "from 06:00 to 09:00,
+--   MUSIC LIST 10" without guessing from individual tracks.
+CREATE TABLE IF NOT EXISTS queue_attribution (
+  path TEXT PRIMARY KEY,
+  kind TEXT,
+  playlist_id INTEGER,
+  item_id INTEGER,
+  spot_rule_id INTEGER,
+  label TEXT,
+  fed_at REAL
+);
+CREATE INDEX IF NOT EXISTS idx_queue_attr_fed ON queue_attribution(fed_at);
+
+CREATE TABLE IF NOT EXISTS playlist_airings (
+  id INTEGER PRIMARY KEY,
+  playlist_id INTEGER,
+  name TEXT,
+  started_at REAL NOT NULL,
+  ended_at REAL,
+  trigger TEXT,
+  ended_reason TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_airings_started ON playlist_airings(started_at);
+"""),
+    (16, """
+-- Offline music metadata ("what kind of music played"). The library files have
+-- carried genre/year/label tags all along; the indexer simply never read them,
+-- so a genre report was impossible without guessing. These columns are filled
+-- by the indexer (tag phase) and by scripts/backfill_track_meta.py for rows
+-- that were indexed before this migration. meta_read marks an ATTEMPT, so a
+-- file with no genre tag is not re-opened on every scan.
+ALTER TABLE tracks ADD COLUMN genre TEXT;
+ALTER TABLE tracks ADD COLUMN year TEXT;
+ALTER TABLE tracks ADD COLUMN label TEXT;
+ALTER TABLE tracks ADD COLUMN meta_read INTEGER NOT NULL DEFAULT 0;
+CREATE INDEX idx_tracks_genre ON tracks(genre);
+"""),
+    (17, """
+-- Path normalisation index. The library index stores some paths with forward
+-- slashes and playlist rows with backslashes, so matching a played item to its
+-- track row needs a case/separator-insensitive compare — and without an index
+-- that means scanning 283k rows per play (the first run of the genre report
+-- took minutes). This expression index makes those reports instant.
+CREATE INDEX idx_tracks_path_norm
+  ON tracks(lower(replace(path, '/', char(92))));
+"""),
 ]
 
 SCHEMA_VERSION = MIGRATIONS[-1][0]
@@ -368,6 +455,14 @@ def migrate(db_path: str) -> None:
                         (version INTEGER NOT NULL)""")
         row = conn.execute("SELECT version FROM schema_version").fetchone()
         current = row["version"] if row else 0
+        # Running older code against a newer database silently writes the wrong
+        # columns and can lose data (a branch checkout, or a rollback that kept
+        # the migrated file). Refuse, with the way out named.
+        if current > SCHEMA_VERSION:
+            raise RuntimeError(
+                f"this database is schema v{current} but this build only knows "
+                f"v{SCHEMA_VERSION} — it was written by newer code. Restore the "
+                f"pre-migration snapshot in backups/, or update StudioFire.")
         # §6.4: back up + verify the DB BEFORE touching the schema, but only
         # when there is actually a pending migration. A failed/unverifiable
         # backup aborts the whole migrate (raises) — never migrate blind.

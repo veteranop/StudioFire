@@ -30,17 +30,96 @@ import time
 import uuid
 
 import httpx
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Body, Depends, FastAPI, HTTPException
 from pydantic import BaseModel
 
+from . import auth
 from . import db as coredb
 from . import playlists as pl
 from . import schedule as sched
 from . import spots as spotmod
+from . import status as statusmod
 from .nowplaying_push import NowPlayingPusher
 from . import nowplaying_file
 
 log = logging.getLogger("core.bridge")
+
+
+def record_skip(conn: sqlite3.Connection, path: str,
+                reason: str = "missing") -> None:
+    """Persist a skipped-as-missing playlist item so the GUI can show it.
+
+    The feeder has always dropped an item whose file moved/renamed with a log
+    line only, so an operator heard songs vanish with nothing on screen to
+    explain it. Never raises: bookkeeping must not break the feeder tick, and a
+    missing table (pre-migration DB) is simply a no-op.
+    """
+    try:
+        pid = coredb.get_setting(conn, "active_playlist_id")
+        pid = int(pid) if pid and str(pid).isdigit() else None
+        now = time.time()
+        conn.execute("INSERT INTO skipped_items(ts, path, reason, playlist_id) "
+                     "VALUES (?, ?, ?, ?)", (now, path or "", reason, pid))
+        conn.execute("DELETE FROM skipped_items WHERE ts < ?",
+                     (now - 7 * 86400,))
+        conn.commit()
+    except (sqlite3.Error, ValueError):
+        log.debug("feeder: could not record skip", exc_info=True)
+
+
+def record_attribution(conn: sqlite3.Connection, path: str, kind: str,
+                       playlist_id: int | None = None,
+                       item_id: int | None = None,
+                       spot_rule_id: int | None = None,
+                       label: str | None = None) -> None:
+    """Remember WHICH playlist item / spot rule a precache file was fed for.
+
+    play_history only says "playlist" or "spot"; the journal reports the precache
+    path back to us, so this map is the bridge that lets a report answer "which
+    playlist aired" and "how many times did this underwriter's spot air".
+    Never raises — bookkeeping must not break a feed.
+    """
+    try:
+        now = time.time()
+        conn.execute(
+            "REPLACE INTO queue_attribution"
+            "(path, kind, playlist_id, item_id, spot_rule_id, label, fed_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (path, kind, playlist_id, item_id, spot_rule_id, label, now))
+        conn.execute("DELETE FROM queue_attribution WHERE fed_at < ?",
+                     (now - 7 * 86400,))
+        conn.commit()
+    except sqlite3.Error:
+        log.debug("feeder: could not record attribution", exc_info=True)
+
+
+def open_airing(conn: sqlite3.Connection, playlist_id: int | None,
+                name: str | None, trigger: str) -> None:
+    """Close the stretch that is on air and open a new one (a playlist or show
+    went live). This is what makes "played from 06:00 to 09:00" a fact rather
+    than a guess from consecutive tracks."""
+    try:
+        now = time.time()
+        with conn:
+            conn.execute("UPDATE playlist_airings SET ended_at = ?, "
+                         "ended_reason = ? WHERE ended_at IS NULL",
+                         (now, "switched"))
+            conn.execute("INSERT INTO playlist_airings"
+                         "(playlist_id, name, started_at, trigger) "
+                         "VALUES (?, ?, ?, ?)", (playlist_id, name, now, trigger))
+    except sqlite3.Error:
+        log.debug("feeder: could not open airing", exc_info=True)
+
+
+def close_airing(conn: sqlite3.Connection, reason: str) -> None:
+    """End the current stretch (show over, stack stopped)."""
+    try:
+        with conn:
+            conn.execute("UPDATE playlist_airings SET ended_at = ?, "
+                         "ended_reason = ? WHERE ended_at IS NULL",
+                         (time.time(), reason))
+    except sqlite3.Error:
+        log.debug("feeder: could not close airing", exc_info=True)
 
 
 def _read_meta(path: str) -> dict:
@@ -328,12 +407,16 @@ class Feeder:
                         item["id"])
             log.warning("feeder: item unresolvable (skip+alert, §10.5): %r",
                         item["path"])
+            record_skip(conn, item.get("path") or "")
         return None
 
     def activate(self, conn, playlist_id: int) -> tuple[bool, str]:
         """Make a playlist the live rotation: replace P1's queue now."""
         with self._lock:
             coredb.set_setting(conn, "active_playlist_id", str(playlist_id))
+            _pl = [x for x in pl.list_playlists(conn) if x["id"] == playlist_id]
+            open_airing(conn, playlist_id,
+                        _pl[0]["name"] if _pl else None, "activate")
             st = self._load_state(conn)
             st["fed"], st["cursor"] = [], 0
             if st.get("show"):
@@ -362,7 +445,8 @@ class Feeder:
         if kind == "playlist":
             return pl.get_items(conn, show["playlist_id"])
         # a scheduled show's container path is stored in playlist_schedule
-        # (often Z:\Shows\...) — resolve it so it loads without a drive mapping
+        # (often a mapped-drive path like Z:\...) — resolve it so it loads
+        # without a drive mapping
         p = pl.alias_path(show.get("source_path") or "")
         if kind == "file":
             return [{"id": "f0", "item_type": "file", "path": p,
@@ -444,6 +528,8 @@ class Feeder:
         # snapshot the items so they can be edited on the fly during the airing
         show["items"] = self._resolve_show_items(conn, show)
         st["show"] = show
+        open_airing(conn, entry.get("playlist_id"),
+                    entry.get("name") or entry.get("playlist_name"), "show")
         log.warning("feeder: show '%s' on air (schedule %d) — interrupting "
                     "rotation at next boundary",
                     entry.get("name") or entry.get("playlist_name"), entry["id"])
@@ -457,6 +543,12 @@ class Feeder:
             log.warning("feeder: show %d finished — back to the rotation",
                         show["sched_id"])
         st["show"] = None
+        # back to the base rotation: close the show's stretch and open a new one
+        close_airing(conn, "show_ended")
+        _rawpid = coredb.get_setting(conn, "active_playlist_id")
+        _pid = int(_rawpid) if _rawpid and str(_rawpid).isdigit() else None
+        _pl = [x for x in pl.list_playlists(conn) if x["id"] == _pid] if _pid else []
+        open_airing(conn, _pid, _pl[0]["name"] if _pl else None, "rotation")
 
     def _finalize_show_if_aired(self, conn, st: dict, status: dict) -> None:
         """A show stays 'playing' (banner up) until its tracks are fully fed
@@ -657,9 +749,9 @@ class Feeder:
             title = f"{label or os.path.basename(folder_path.rstrip(chr(92) + '/'))}: " + \
                 os.path.splitext(os.path.basename(src))[0]
         else:
-            # legacy preset station folder (e.g. dir_station_ids = Z:\John\...):
+            # legacy preset station folder (e.g. dir_station_ids = Z:\StationIDs\...):
             # resolve so a dropped Z: mapping doesn't make every legal ID / PSA
-            # miss its window (KDPI 2026-09-29) — file/folder branches above
+            # miss its window (the reference station, 2026-09-29) — file/folder branches above
             # already go through alias_path.
             folder = pl.alias_path(coredb.get_setting(conn, folder_key))
             if not folder or not os.path.isdir(folder):
@@ -691,13 +783,14 @@ class Feeder:
                 return False, f"engine said {code}: {resp}"
             st = self._load_state(conn)
             st["queue_version"] = mutation["queue_version"]
+            record_attribution(conn, cached, "spot", label=title)
             st["fed"].insert(0, {"id": entry["id"], "path": cached,
                                  "duration": self._duration_of(conn, src),
                                  "title": title, "prog": "spot",
                                  # pin until P1 confirms it: tick()'s reconcile
                                  # must not drop a just-accepted spot before it
                                  # is observed, or eviction deletes its cached
-                                 # file and it never airs (KDPI 2026-09-29).
+                                 # file and it never airs (the reference station, 2026-09-29).
                                  # The value is the pin's start time, so a pin
                                  # that is never observed still expires
                                  # (PIN_GRACE_SEC) instead of becoming a ghost.
@@ -711,8 +804,8 @@ class Feeder:
     # How long a just-accepted (202) spot/manual entry may stay PINNED while P1
     # hasn't reported it yet. The pin is what stops tick()'s reconcile from
     # dropping a spot before it is observed (that drop let eviction delete the
-    # cached file and the spot silently never aired — KDPI 2026-09-29,
-    # H2627206). But a pin must never be permanent: if P1 restarts inside that
+    # cached file and the spot silently never aired — the reference station,
+    # 2026-09-29, H2627206). But a pin must never be permanent: if P1 restarts inside that
     # window it will never report the entry, and an unexpiring pin would leave a
     # ghost in 'fed' that counts toward feed_ahead and can stop the feeder
     # topping up — a dead-air pathway. P1 observes within seconds in practice,
@@ -850,7 +943,7 @@ class Feeder:
                 # or on air). A status snapshot that doesn't list it yet must
                 # NOT reconcile it away — that dropped it from 'fed', the
                 # eviction pass then deleted its cached file, and the spot
-                # silently never aired (KDPI 2026-09-29, H2627206). Once
+                # silently never aired (the reference station, 2026-09-29, H2627206). Once
                 # observed, normal reconcile retires it after it airs/ends.
                 kept = []
                 now = time.time()
@@ -986,6 +1079,22 @@ class Feeder:
                     return False, f"queue push failed ({code}): {body}"
                 st["queue_version"] = mutation["queue_version"]
                 self._save_state(conn, st)
+                # remember which playlist item / spot each cached file was fed
+                # for: the journal only reports the precache path back, and a
+                # report cannot say "which playlist aired" without this.
+                _fed = {e["id"]: e for e in st.get("fed", [])}
+                _show = st.get("show") or {}
+                _pid = _show.get("playlist_id")
+                if _pid is None:
+                    _rawpid = coredb.get_setting(conn, "active_playlist_id")
+                    _pid = int(_rawpid) if _rawpid and str(_rawpid).isdigit() else None
+                for _b in batch:
+                    _fe = _fed.get(_b["id"]) or {}
+                    record_attribution(
+                        conn, _b["path"],
+                        "spot" if _b.get("source") == "spot" else "playlist",
+                        playlist_id=_pid, item_id=_fe.get("pl_item_id"),
+                        label=_b.get("title"))
                 evict_keep, evict_snapshot = self._pre_evict_snapshot(
                     st, status)
                 result = (True, f"fed {len(batch)} entries")
@@ -1144,6 +1253,25 @@ def _ingest_lines(conn, path: str, offset: int,
                 extra = {k: v for k, v in ev.items()
                          if k not in ("id", "ts", "event", "path", "title",
                                       "source")}
+                # attribution: what the feeder told us this precache file was
+                # fed for (playlist item / show / spot rule). Without it the
+                # as-aired log says "playlist" and nothing more.
+                if ev.get("event") == "track_start" and ev.get("path"):
+                    try:
+                        _a = conn.execute(
+                            "SELECT kind, playlist_id, item_id, spot_rule_id, "
+                            "label FROM queue_attribution WHERE path = ?",
+                            (ev["path"],)).fetchone()
+                    except sqlite3.Error:
+                        _a = None
+                    if _a is not None:
+                        extra.update({
+                            "attr_kind": _a["kind"],
+                            "playlist_id": _a["playlist_id"],
+                            "item_id": _a["item_id"],
+                            "spot_rule_id": _a["spot_rule_id"],
+                            "attr_label": _a["label"],
+                        })
                 with conn:
                     cur = conn.execute(
                         "INSERT OR IGNORE INTO play_history "
@@ -1173,6 +1301,7 @@ def register(app: FastAPI) -> None:
     cfg = app.state.cfg
     get_conn = app.state.get_conn
     api_user = app.state.api_user
+    api_admin = app.state.api_admin
 
     engine = EngineClient(cfg["engine_url"])
     precache = Precache(cfg["precache_dir"])
@@ -1205,6 +1334,34 @@ def register(app: FastAPI) -> None:
         Air VU meter. ok=False when the engine can't be reached."""
         lv = engine.levels()
         return {"ok": lv is not None, **(lv or {})}
+
+    @app.get("/api/health/verdict")
+    def api_health_verdict(conn=Depends(get_conn), _=Depends(api_user)):
+        """The single honest station-health verdict the header pill reads.
+        One engine status + levels snapshot feeds it; never 500s if the engine
+        is offline (that is itself the fault)."""
+        return statusmod.verdict(conn, cfg, engine.status(), engine.levels(),
+                                 time.time())
+
+    @app.get("/api/skips")
+    def api_skips(hours: int = 24, conn=Depends(get_conn),
+                  _=Depends(api_user)):
+        """Playlist items skipped because their file is gone (release A, A4).
+
+        Read-only view of skipped_items: the On Air screen shows the count so a
+        volunteer can see why songs are missing instead of only hearing it.
+        """
+        cutoff = time.time() - max(1, min(int(hours), 24 * 30)) * 3600
+        try:
+            rows = conn.execute(
+                "SELECT ts, path, reason, playlist_id FROM skipped_items "
+                "WHERE ts >= ? ORDER BY ts DESC LIMIT 200", (cutoff,)
+            ).fetchall()
+        except sqlite3.Error:
+            rows = []
+        items = [{"ts": r["ts"], "path": r["path"], "reason": r["reason"],
+                  "playlist_id": r["playlist_id"]} for r in rows]
+        return {"hours": hours, "count": len(items), "items": items}
 
     @app.post("/api/engine/op")
     def api_engine_op(body: dict, _=Depends(api_user)):
@@ -1657,6 +1814,7 @@ def register(app: FastAPI) -> None:
         now = time.time()
         rules = []
         for r in spotmod.list_all(conn):
+            _kind = spotmod.rule_kind(conn, r)
             rules.append({
                 "id": r["id"], "folder_key": r["folder_key"],
                 "file_path": r["file_path"],
@@ -1666,6 +1824,10 @@ def register(app: FastAPI) -> None:
                 "enabled": bool(r["enabled"]),
                 "end_date": r.get("end_date"),
                 "summary": spotmod.describe(r),
+                # 'ids' / 'ads' when this rule airs legal IDs or paid
+                # underwriting: the UI can mark those, and deleting the last
+                # one needs a typed confirm.
+                "kind": _kind, "protected": _kind is not None,
                 "next_epoch": spotmod.next_fire_epoch(r, now)})
         # soonest first; manual/disabled (next_epoch None) sink to the bottom
         rules.sort(key=lambda x: (x["next_epoch"] is None, x["next_epoch"] or 0))
@@ -1745,10 +1907,104 @@ def register(app: FastAPI) -> None:
                           else None)
         return {"id": rid}
 
+    UNDO_SECONDS = 72 * 3600   # how long a soft-deleted rule can be restored
+
+    def _stops_airing(rule: dict) -> str:
+        """Plain-English 'what will stop airing' if this rule is removed."""
+        k = rule.get("folder_key") or ""
+        if k == "dir_station_ids":
+            return "legal station IDs"
+        if k == "dir_ads":
+            return "paid underwriting / ad spots"
+        if k == "dir_jingles":
+            return "jingles / sweepers"
+        if k == "dir_psas":
+            return "PSAs / liners"
+        return rule.get("label") or "this spot"
+
+    def _deleted_view(rule: dict) -> dict:
+        da = rule.get("deleted_at")
+        return {"id": rule["id"], "label": rule["label"],
+                "folder_key": rule.get("folder_key"),
+                "trigger": rule["trigger"], "summary": spotmod.describe(rule),
+                "deleted_at": da, "deleted_by": rule.get("deleted_by"),
+                "purge_at": (da + UNDO_SECONDS) if da else None}
+
     @app.delete("/api/spots/{rid}")
-    def api_spots_remove(rid: int, conn=Depends(get_conn), _=Depends(api_user)):
-        spotmod.remove(conn, rid)
-        return {"ok": True}
+    def api_spots_remove(rid: int, body: dict = Body(default=None),
+                         conn=Depends(get_conn), sess: dict = Depends(api_admin)):
+        """Guarded soft-delete (admin only). The bare ✕ that took underwriting
+        off air for 23 hours is gone: a confirm is required, and removing the
+        LAST legal-ID/underwriting rule needs the word DELETE typed. The rule is
+        soft-deleted (Undo for 72h), never hard-deleted here."""
+        rule = spotmod.get(conn, rid)
+        if rule is None or rule.get("deleted_at") is not None:
+            raise HTTPException(404, "spot rule not found")
+        body = body or {}
+        confirm = str(body.get("confirm") or "")
+
+        # does removing THIS rule drop enabled legal-ID/underwriting policy to 0?
+        protected_ids = {p["id"] for p in spotmod.protected_rules(conn)}
+        last_protected = rid in protected_ids and not (protected_ids - {rid})
+        stops = _stops_airing(rule)
+
+        if last_protected:
+            if confirm != "DELETE":
+                raise HTTPException(428, detail={
+                    "error": "typed_confirm_required",
+                    "rule": _deleted_view(rule),
+                    "stops_airing": stops,
+                    "warning": (f"This is the LAST enabled rule airing {stops}. "
+                                "Delete it and paid credits / legal IDs go off "
+                                "air with nothing to replace them."),
+                    "confirm_with": "DELETE",
+                    "detail": ("Type the word DELETE to confirm removing the "
+                               f"last rule that airs {stops}.")})
+        elif confirm != "yes":
+            raise HTTPException(428, detail={
+                "error": "confirm_required",
+                "rule": _deleted_view(rule),
+                "stops_airing": stops,
+                "warning": f"Deleting this rule stops airing {stops}.",
+                "confirm_with": "yes",
+                "detail": (f"Deleting \"{rule['label']}\" stops airing {stops}. "
+                           "Re-send with confirm:\"yes\" to proceed "
+                           "(you can Undo for 72 hours).")})
+
+        username = None
+        u = auth.get_user(conn, sess["uid"])
+        if u:
+            username = u["username"]
+        spotmod.remove(conn, rid, by=username)
+        # opportunistic housekeeping: drop rows past the undo window
+        try:
+            spotmod.purge_expired(conn, hours=72)
+        except sqlite3.Error:
+            pass
+        resp = {"ok": True, "undo_seconds": UNDO_SECONDS,
+                "rule": _deleted_view(spotmod.get(conn, rid))}
+        if spotmod.count_enabled(conn) == 0:
+            resp["warning"] = ("No spot rules are enabled now — nothing "
+                               "(IDs, ads, PSAs) will air between songs.")
+        elif not spotmod.protected_rules(conn):
+            resp["warning"] = ("No enabled legal-ID or underwriting rules "
+                               "remain — paid credits may be off air.")
+        return resp
+
+    @app.post("/api/spots/{rid}/restore")
+    def api_spots_restore(rid: int, conn=Depends(get_conn),
+                          _=Depends(api_admin)):
+        """Undo a soft delete (admin). 404 if the rule isn't a deleted one."""
+        rule = spotmod.get(conn, rid)
+        if rule is None or rule.get("deleted_at") is None:
+            raise HTTPException(404, "no deleted spot rule with that id")
+        spotmod.restore(conn, rid)
+        return {"ok": True, "rule": _deleted_view(spotmod.get(conn, rid))}
+
+    @app.get("/api/spots/deleted")
+    def api_spots_deleted(conn=Depends(get_conn), _=Depends(api_admin)):
+        """Recently soft-deleted rules still inside the 72h undo window."""
+        return {"rules": [_deleted_view(r) for r in spotmod.list_deleted(conn)]}
 
     @app.post("/api/spots/{rid}/toggle")
     def api_spots_toggle(rid: int, conn=Depends(get_conn), _=Depends(api_user)):

@@ -404,7 +404,7 @@ class EngineSupervisor:
         # the NAS source behind this cache copy (feeder/insert entries carry
         # it) — so a decode failure names the actual song, not an opaque cache
         # hash like precache\52f18e826ca534a4.mp3 that no operator can action
-        # (KDPI 2026-10: same bad file retried ~every rotation lap, unnamed)
+        # (the reference station, 2026-10: same bad file retried ~every rotation lap, unnamed)
         src = (deck.entry or {}).get("src")
         self._journal.append("track_end", path=path, reason=reason,
                              error=msg.get("file_error"),

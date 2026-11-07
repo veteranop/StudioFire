@@ -2,8 +2,8 @@
 
 WHY THIS EXISTS
 ---------------
-StreamGuys builds the SoundExchange report of use straight off the ICY
-StreamTitle we publish, and their recommended field order is
+The stream host builds the SoundExchange report of use straight off the ICY
+StreamTitle we publish, and its recommended field order is
 
     artist | title | album | marketing label | isrc
 

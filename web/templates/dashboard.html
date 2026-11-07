@@ -18,13 +18,16 @@
           title="Restart all StudioFire services (audio blips to filler)">⟳</button>
   {% endif %}
   <div class="health-wrap">
-    <button id="health-summary" class="health-pill h-green"
+    <button id="health-summary" class="health-pill"
             onclick="toggleHealth()" aria-expanded="false">
       <span class="health-dot"></span>
       <span>Studio health</span>
       <span id="health-word" class="health-word">…</span>
     </button>
-    <div id="tiles" class="tiles health-dropdown" hidden></div>
+    <div id="health-panel" class="health-dropdown" hidden>
+      <div id="health-reasons" class="health-reasons"></div>
+      <div id="tiles" class="tiles"></div>
+    </div>
   </div>
   <form method="post" action="/logout">
     <button type="submit" class="btn">Sign out</button>
@@ -99,9 +102,14 @@
 <div class="grid3">
   <div class="card">
     <h2>Upcoming spots</h2>
+    <div id="spot-empty-banner" class="alert-banner" hidden></div>
     <input type="text" id="spot-search" class="rot-search" autocomplete="off"
            placeholder="🔎 Search spots by name…" oninput="renderSpots()">
     <ol id="spot-list" class="schedlist"><li class="muted">loading…</li></ol>
+    <div id="spot-undo" class="spot-undo" hidden>
+      <div class="spot-undo-head">Recently deleted — Undo</div>
+      <ul id="spot-undo-list" class="schedlist"></ul>
+    </div>
     <details class="advanced">
       <summary>➕ Add a spot rule</summary>
       <label>Play
@@ -186,6 +194,7 @@
     </div>
     <input type="text" id="rot-search" class="rot-search" autocomplete="off"
            placeholder="🔎 Search this playlist…" oninput="renderRotation()">
+    <div id="skip-warning" class="alert-banner" hidden></div>
     <ol id="rot-list" class="queue"><li class="muted">loading…</li></ol>
   </div>
   <div class="card">
@@ -282,7 +291,31 @@
 </aside>
 </div>
 
+{# one in-app confirm dialog + a toast, instead of browser pop-ups:
+   a native prompt cannot name the consequence in the operator's words and
+   looks like a browser error box in a dark studio. #}
+<div id="sf-modal" class="sf-modal" hidden>
+  <div class="sf-modal-card" role="dialog" aria-modal="true" aria-labelledby="sf-modal-title">
+    <h3 id="sf-modal-title">Confirm</h3>
+    <div id="sf-modal-msg" class="sf-modal-msg"></div>
+    <label id="sf-modal-type-wrap" class="sf-modal-type" hidden>
+      Type <b id="sf-modal-word">DELETE</b> to confirm
+      <input type="text" id="sf-modal-type" autocomplete="off" spellcheck="false">
+    </label>
+    <div class="sf-modal-btns">
+      <button type="button" class="btn" id="sf-modal-cancel">Cancel</button>
+      <button type="button" class="btn btn-red" id="sf-modal-ok">Delete</button>
+    </div>
+  </div>
+</div>
+<div id="sf-toast" class="sf-toast" hidden>
+  <span id="sf-toast-msg"></span>
+  <button type="button" class="btn btn-sm" id="sf-toast-undo">Undo</button>
+</div>
+
 <script>
+const IS_ADMIN = {{ 'true' if role == 'admin' else 'false' }};
+
 function fmt(sec) {
   if (sec == null) return "";
   sec = Math.floor(sec);
@@ -331,7 +364,7 @@ function openFolderPicker(title, onPick) {
   fpGo("");
 }
 function fpUseDir() {
-  if (!fpPath) { alert("Open a folder first."); return; }
+  if (!fpPath) { toast("Open a folder first."); return; }
   const cb = fpOnPick, p = fpPath;
   fpClose();
   if (cb) cb(p);
@@ -345,7 +378,7 @@ async function fpGo(path) {
   try {
     d = await (await fetch("/api/fs/list?files=" +
       encodeURIComponent(fpExts) + "&path=" + encodeURIComponent(path))).json();
-  } catch (e) { alert("Can't open that folder"); return; }
+  } catch (e) { toast("Can't open that folder"); return; }
   fpPath = d.path; fpParent = d.parent;
   document.getElementById("fp-path").textContent = d.path || "Choose a drive";
   document.getElementById("fp-up").disabled = d.parent === null;
@@ -481,7 +514,7 @@ async function addSchedule() {
   const rec = document.getElementById("sched-rec").value;
   const body = {source_kind: kind, recurrence: rec};
   if (!schedFilePath) {
-    alert(kind === "folder" ? "Choose a folder first."
+    toast(kind === "folder" ? "Choose a folder first."
       : kind === "file" ? "Choose a file first." : "Choose a playlist first.");
     return;
   }
@@ -490,7 +523,7 @@ async function addSchedule() {
     body.start_at = document.getElementById("sched-time").value;  // '' or ISO
   } else {
     const tod = document.getElementById("sched-tod").value;       // 'HH:MM'
-    if (!tod) { alert("Set a time of day to play."); return; }
+    if (!tod) { toast("Set a time of day to play."); return; }
     body.time_of_day = tod;
     body.start_date = document.getElementById("sched-start-date").value;
     body.end_date = document.getElementById("sched-end-date").value;
@@ -498,14 +531,14 @@ async function addSchedule() {
       let mask = 0;
       document.querySelectorAll("#sched-days .dchk:checked")
         .forEach(c => mask |= Number(c.dataset.bit));
-      if (!mask) { alert("Pick at least one weekday."); return; }
+      if (!mask) { toast("Pick at least one weekday."); return; }
       body.days_mask = mask;
     }
   }
   const r = await fetch("/api/schedule", {method: "POST",
     headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
   if (!r.ok) {
-    alert((await r.json().catch(() => ({}))).detail || "Could not add");
+    toast((await r.json().catch(() => ({}))).detail || "Could not add");
     return;
   }
   document.getElementById("sched-time").value = "";
@@ -518,16 +551,16 @@ async function addSchedule() {
   refreshSchedule();
 }
 async function startShow(id) {
-  if (!confirm("Cut to this playlist NOW?\n\nThe current song stops " +
-               "immediately. It plays once through, then returns to the " +
-               "regular rotation.")) return;
+  if (!(await confirmBox("Cut to this playlist NOW?\n\nThe current song " +
+               "stops immediately. It plays once through, then returns to " +
+               "the regular rotation.", "Cut to it now"))) return;
   const r = await fetch("/api/schedule/" + id + "/start_now", {method: "POST"});
-  if (!r.ok) alert((await r.json().catch(() => ({}))).detail || "Could not start");
+  if (!r.ok) toast((await r.json().catch(() => ({}))).detail || "Could not start");
   refreshSchedule(); refresh();
 }
 async function cueShow(id) {
   const r = await fetch("/api/schedule/" + id + "/cue_next", {method: "POST"});
-  if (!r.ok) alert((await r.json().catch(() => ({}))).detail || "Could not cue");
+  if (!r.ok) toast((await r.json().catch(() => ({}))).detail || "Could not cue");
   refreshSchedule();
 }
 async function removeSchedule(id) {
@@ -535,10 +568,10 @@ async function removeSchedule(id) {
   refreshSchedule();
 }
 async function stopShow() {
-  if (!confirm("Stop the show that's on air and go back to the regular " +
-               "rotation?")) return;
+  if (!(await confirmBox("Stop the show that's on air and go back to the " +
+               "regular rotation?", "Stop the show"))) return;
   const r = await fetch("/api/schedule/stop_show", {method: "POST"});
-  if (!r.ok) alert((await r.json().catch(() => ({}))).detail || "Could not stop");
+  if (!r.ok) toast((await r.json().catch(() => ({}))).detail || "Could not stop");
   refreshSchedule(); refresh();
 }
 
@@ -585,7 +618,7 @@ async function insertLibTrack(t, btn) {
     refresh(); refreshRotation();
   } else {
     btn.disabled = false; btn.textContent = "⏭ Insert Next";
-    alert((await r.json().catch(() => ({}))).detail || "Could not insert");
+    toast((await r.json().catch(() => ({}))).detail || "Could not insert");
   }
 }
 
@@ -680,11 +713,25 @@ async function refreshSpots() {
     spotSkew = d.now_epoch - (Date.now() / 1000);
     spotRules = d.rules;
     renderSpots();
+    refreshSpotUndo();
   } catch (e) { /* next poll */ }
 }
 function renderSpots() {
   const ol = document.getElementById("spot-list");
   ol.innerHTML = "";
+  // The empty-spot-policy alarm: with no rule enabled, nothing (legal IDs, paid
+  // underwriting, PSAs) airs between songs and nothing looks broken. That is
+  // exactly how the 2026-11-02 outage stayed invisible for 23 hours.
+  const enabled = spotRules.filter(r => r.enabled).length;
+  const banner = document.getElementById("spot-empty-banner");
+  if (banner) {
+    banner.hidden = enabled > 0;
+    if (!enabled) {
+      banner.innerHTML = "<strong>No spot rules are running.</strong> " +
+        "Nothing between songs — legal IDs and paid underwriting may be off air. " +
+        "Add a rule below, or Undo a deletion.";
+    }
+  }
   if (!spotRules.length) {
     ol.innerHTML = "<li class='muted'>No spots yet</li>";
     return;
@@ -706,7 +753,12 @@ function renderSpots() {
       : "<span class='spot-when' data-next='" + (r.next_epoch ?? "") + "'>" +
         fmtCountdown(r.next_epoch) + "</span> <span class='muted'>· " +
         esc(r.summary) + "</span>";
-    info.innerHTML = "<strong>" + esc(r.label) + "</strong>" +
+    const badge = r.kind === "ids"
+      ? " <span class='spot-badge badge-ids' title='This rule airs the legal station ID'>LEGAL ID</span>"
+      : r.kind === "ads"
+      ? " <span class='spot-badge badge-ads' title='This rule airs paid underwriting'>UNDERWRITING</span>"
+      : "";
+    info.innerHTML = "<strong>" + esc(r.label) + "</strong>" + badge +
       (r.enabled ? "" : " <span class='muted'>(paused)</span>") +
       "<br><small>" + when + "</small>";
     const btns = document.createElement("div");
@@ -717,10 +769,17 @@ function renderSpots() {
     const en = document.createElement("button");
     en.className = "btn btn-sm"; en.textContent = r.enabled ? "Pause" : "Resume";
     en.onclick = () => toggleSpot(r.id);
-    const del = document.createElement("button");
-    del.className = "btn btn-sm"; del.textContent = "✕";
-    del.onclick = () => removeSpot(r.id);
-    btns.appendChild(play); btns.appendChild(en); btns.appendChild(del);
+    btns.appendChild(play); btns.appendChild(en);
+    // only an admin may delete a rule — a DJ sees no ✕ at all (the API refuses
+    // it too; this is just honest UI)
+    if (IS_ADMIN) {
+      const del = document.createElement("button");
+      del.className = "btn btn-sm btn-danger-ghost";
+      del.textContent = "✕";
+      del.title = "Delete this rule (asks to confirm; Undo for 72 hours)";
+      del.onclick = () => removeSpot(r.id);
+      btns.appendChild(del);
+    }
     li.appendChild(info); li.appendChild(btns);
     ol.appendChild(li);
   }
@@ -737,10 +796,10 @@ async function addSpot() {
   const body = {};
   // what to play
   if (target === "file") {
-    if (!spotFilePath) { alert("Choose a file first."); return; }
+    if (!spotFilePath) { toast("Choose a file first."); return; }
     body.file_path = spotFilePath;
   } else {
-    if (!spotFolderPath) { alert("Choose a folder first."); return; }
+    if (!spotFolderPath) { toast("Choose a folder first."); return; }
     body.folder_path = spotFolderPath;
     body.pick_mode = target === "random" ? "random" : "rotate";
   }
@@ -756,13 +815,13 @@ async function addSpot() {
     body.start_at = document.getElementById("spot-once").value;
   if (trigger === "daily" || trigger === "weekly") {
     const tod = document.getElementById("spot-tod").value;
-    if (!tod) { alert("Set a time of day."); return; }
+    if (!tod) { toast("Set a time of day."); return; }
     body.time_of_day = tod;
     if (trigger === "weekly") {
       let mask = 0;
       document.querySelectorAll("#spot-s-days .sdchk:checked")
         .forEach(c => mask |= Number(c.dataset.bit));
-      if (!mask) { alert("Pick at least one weekday."); return; }
+      if (!mask) { toast("Pick at least one weekday."); return; }
       body.days_mask = mask;
     }
   }
@@ -773,7 +832,7 @@ async function addSpot() {
   const r = await fetch("/api/spots", {method: "POST",
     headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
   if (!r.ok) {
-    alert((await r.json().catch(() => ({}))).detail || "Could not add");
+    toast((await r.json().catch(() => ({}))).detail || "Could not add");
     return;
   }
   spotFilePath = null; spotFolderPath = null;
@@ -786,16 +845,181 @@ async function addSpot() {
 }
 async function playSpot(id) {
   const r = await fetch("/api/spots/" + id + "/play_now", {method: "POST"});
-  if (!r.ok) alert((await r.json().catch(() => ({}))).detail || "Could not play");
+  if (!r.ok) toast((await r.json().catch(() => ({}))).detail || "Could not play");
   refresh();
 }
 async function toggleSpot(id) {
   await fetch("/api/spots/" + id + "/toggle", {method: "POST"});
   refreshSpots();
 }
+function spotDelete(id, confirmVal) {
+  return fetch("/api/spots/" + id, {
+    method: "DELETE", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({confirm: confirmVal})});
+}
+
+// ---- in-app confirm dialog: a browser prompt() cannot name the consequence in
+// the operator's own words, and it looks like an error box in a dark studio.
+let _modalDone = null;
+function askDialog(opts) {
+  return new Promise((resolve) => {
+    const modal = document.getElementById("sf-modal");
+    const okBtn = document.getElementById("sf-modal-ok");
+    const input = document.getElementById("sf-modal-type");
+    const typed = opts.typedWord || "";
+    document.getElementById("sf-modal-title").textContent = opts.title || "Confirm";
+    document.getElementById("sf-modal-msg").innerHTML = opts.message || "";
+    document.getElementById("sf-modal-word").textContent = typed || "DELETE";
+    document.getElementById("sf-modal-type-wrap").hidden = !typed;
+    okBtn.textContent = opts.okLabel || "Delete";
+    input.value = "";
+    modal.hidden = false;
+    (typed ? input : okBtn).focus();
+    const done = (val) => {
+      modal.hidden = true;
+      document.removeEventListener("keydown", onKey);
+      _modalDone = null;
+      resolve(val);
+    };
+    const onKey = (e) => {
+      if (e.key === "Escape") done(null);
+      else if (e.key === "Enter" && document.activeElement === input
+               && typed) okBtn.click();
+    };
+    document.addEventListener("keydown", onKey);
+    _modalDone = done;
+    okBtn.onclick = () => {
+      if (typed && input.value.trim().toUpperCase() !== typed) {
+        input.classList.add("sf-shake");
+        setTimeout(() => input.classList.remove("sf-shake"), 400);
+        input.focus();
+        return;
+      }
+      done(typed ? typed : true);
+    };
+    document.getElementById("sf-modal-cancel").onclick = () => done(null);
+  });
+}
+
+// Same call shape as the browser confirm, but it is OUR dialog: it names the
+// consequence in the operator's words and renders in the dark studio theme.
+// Every call site is inside an async function, so awaiting is safe.
+function confirmBox(message, okLabel) {
+  // build the line breaks without backslashes in the source: this file
+  // is edited by tools that have mangled escape sequences before.
+  var NL = String.fromCharCode(10);
+  var m = String(message || "").split(NL + NL).join("<br><br>");
+  m = m.split(NL).join("<br>");
+  return askDialog({title: "Confirm", message: m,
+                    okLabel: okLabel || "Continue"}).then(v => !!v);
+}
+
+// ---- toast with an Undo action (the 72h Undo also lives in the rule list)
+let _toastTimer = null;
+function toast(message, undoFn) {
+  const el = document.getElementById("sf-toast");
+  document.getElementById("sf-toast-msg").innerHTML = message;
+  const btn = document.getElementById("sf-toast-undo");
+  btn.hidden = !undoFn;
+  btn.onclick = async () => {
+    if (undoFn) await undoFn();
+    el.hidden = true;
+  };
+  el.hidden = false;
+  clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => { el.hidden = true; }, 25000);
+}
+
 async function removeSpot(id) {
-  await fetch("/api/spots/" + id, {method: "DELETE"});
+  // Guarded delete: the server needs admin + a confirm, and the typed word
+  // DELETE for the last legal-ID / underwriting rule. Undo lasts 72 hours.
+  const rule = spotRules.find(r => r.id === id) || {};
+  const what = rule.kind === "ids" ? "the legal station ID"
+             : rule.kind === "ads" ? "paid underwriting"
+             : "this spot";
+  if (!IS_ADMIN) {
+    toast("Only an Admin can delete spot rules — ask an admin to remove it.");
+    return;
+  }
+  const ok = await askDialog({
+    title: rule.protected ? "Delete a protected rule?" : "Delete this spot rule?",
+    message: "<b>" + esc(rule.label || "This rule") + "</b><br>" +
+      "Removing it stops " + what + " airing." +
+      "<br><span class='muted'>You can Undo for 72 hours.</span>",
+    okLabel: "Delete",
+  });
+  if (!ok) return;
+
+  let r = await spotDelete(id, "yes");
+  if (r.status === 403) {
+    toast("Only an Admin can delete spot rules — ask an admin to remove it.");
+    refreshSpots();
+    return;
+  }
+  if (r.status === 428) {
+    const info = (await r.json().catch(() => ({}))).detail || {};
+    if (info.confirm_with === "DELETE") {
+      const typed = await askDialog({
+        title: "This is the last rule airing " + (info.stops_airing || "it"),
+        message: (info.warning || "") +
+          "<br><span class='muted'>Deleting it leaves nothing to replace it. " +
+          "You can Undo for 72 hours.</span>",
+        okLabel: "Delete anyway", typedWord: "DELETE",
+      });
+      if (!typed) { refreshSpots(); return; }
+      r = await spotDelete(id, "DELETE");
+    } else {
+      r = await spotDelete(id, "yes");
+    }
+  }
+  if (!r.ok) {
+    const d = await r.json().catch(() => ({}));
+    toast((d && (d.detail || d.warning)) || "Could not delete that rule.");
+    refreshSpots();
+    return;
+  }
+  const out = await r.json().catch(() => ({}));
   refreshSpots();
+  toast("Deleted <b>" + esc(rule.label || "rule") + "</b> — " +
+        (out.warning ? esc(out.warning) : "it stops airing now."),
+        async () => {
+          await fetch("/api/spots/" + id + "/restore", {method: "POST"});
+          refreshSpots();
+        });
+}
+
+// Recently deleted rules, so Undo survives a page reload (not just the toast).
+async function refreshSpotUndo() {
+  const box = document.getElementById("spot-undo");
+  const ul = document.getElementById("spot-undo-list");
+  if (!box || !ul) return;
+  if (!IS_ADMIN) { box.hidden = true; return; }
+  try {
+    const d = await (await fetch("/api/spots/deleted")).json();
+    const rules = d.rules || [];
+    box.hidden = rules.length === 0;
+    ul.innerHTML = "";
+    for (const r of rules) {
+      const li = document.createElement("li");
+      const info = document.createElement("div");
+      const when = r.deleted_at
+        ? new Date(r.deleted_at * 1000).toLocaleString() : "";
+      info.innerHTML = "<strong>" + esc(r.label) + "</strong><br><small class='muted'>" +
+        esc(r.summary || "") + " · deleted " + esc(when) +
+        (r.deleted_by ? " by " + esc(r.deleted_by) : "") + "</small>";
+      const btn = document.createElement("button");
+      btn.className = "btn btn-sm btn-green"; btn.textContent = "↺ Undo";
+      btn.onclick = async () => {
+        await fetch("/api/spots/" + r.id + "/restore", {method: "POST"});
+        refreshSpots();
+        toast("Restored <b>" + esc(r.label) + "</b>.");
+      };
+      const wrap = document.createElement("div");
+      wrap.className = "item-btns"; wrap.appendChild(btn);
+      li.appendChild(info); li.appendChild(wrap);
+      ul.appendChild(li);
+    }
+  } catch (e) { /* next poll */ }
 }
 
 // ---- the live rotation playlist: whole list, drag to reorder, remove.
@@ -942,12 +1166,13 @@ function renderRotation() {
 }
 async function shuffleRotation() {
   if (rotIsShow || !rotPid) return;   // button is disabled in these cases
-  if (!confirm("Shuffle this playlist into a random order?\n\n" +
-               "The order on air changes after the song that is playing."))
+  if (!(await confirmBox("Shuffle this playlist into a random order?\n\n" +
+               "The order on air changes after the song that is playing.",
+               "Shuffle")))
     return;
   const r = await fetch("/api/rotation/shuffle", {method: "POST"});
   if (!r.ok) {
-    alert((await r.json().catch(() => ({}))).detail || "Could not shuffle");
+    toast((await r.json().catch(() => ({}))).detail || "Could not shuffle");
     return;
   }
   const d = await r.json().catch(() => ({}));
@@ -975,7 +1200,7 @@ async function finishRotDrag(li) {
   const r = await fetch("/api/rotation/reorder", {method: "POST",
     headers: {"Content-Type": "application/json"},
     body: JSON.stringify({item_ids})});
-  if (!r.ok) alert((await r.json().catch(() => ({}))).detail || "Reorder failed");
+  if (!r.ok) toast((await r.json().catch(() => ({}))).detail || "Reorder failed");
   refreshRotation();
 }
 async function cancelCue(id) {   // drop a queued one-off before it airs
@@ -988,12 +1213,12 @@ async function cancelCue(id) {   // drop a queued one-off before it airs
 async function removeRotItem(id, title) {
   const msg = rotIsShow ? "Remove from this show?\n\n"
     : "Remove from the playlist for good?\n\n";
-  if (!confirm(msg + title)) return;
+  if (!(await confirmBox(msg + title, "Remove"))) return;
   rotSig = "";
   const r = await fetch("/api/rotation/remove", {method: "POST",
     headers: {"Content-Type": "application/json"},
     body: JSON.stringify({item_id: id})});
-  if (!r.ok) alert((await r.json().catch(() => ({}))).detail || "Remove failed");
+  if (!r.ok) toast((await r.json().catch(() => ({}))).detail || "Remove failed");
   refreshRotation();
 }
 
@@ -1089,26 +1314,45 @@ function renderNpPlaylist(q) {
 let healthOpen = false;
 function toggleHealth() {
   healthOpen = !healthOpen;
-  document.getElementById("tiles").hidden = !healthOpen;
+  document.getElementById("health-panel").hidden = !healthOpen;
   document.getElementById("health-summary")
     .setAttribute("aria-expanded", healthOpen);
 }
 document.addEventListener("click", (e) => {
   if (healthOpen && !e.target.closest(".health-wrap")) toggleHealth();
 });
+// The pill is driven ONLY by the single verdict (/api/health/verdict), never
+// by the tiles — so it can never read green while a check is failing. Colour
+// comes straight from state; the dropdown lists the reasons above the tiles.
+const VERDICT_PILL = { ok: "h-green", warn: "h-yellow", fault: "h-red" };
+async function refreshVerdict() {
+  try {
+    const v = await (await fetch("/api/health/verdict")).json();
+    const sum = document.getElementById("health-summary");
+    sum.className = "health-pill " + (VERDICT_PILL[v.state] || "h-yellow");
+    document.getElementById("health-word").textContent =
+      v.state === "fault" ? "FAULT" : v.state === "warn" ? "Check" : "OK";
+    sum.title = v.headline || "Studio health";
+    const box = document.getElementById("health-reasons");
+    box.innerHTML = "";
+    if (v.state !== "ok" && (v.reasons || []).length) {
+      for (const r of v.reasons) {
+        const el = document.createElement("div");
+        el.className = "health-reason reason-" + r.state;
+        el.textContent = r.text;
+        box.appendChild(el);
+      }
+    } else {
+      const el = document.createElement("div");
+      el.className = "health-reason reason-ok";
+      el.textContent = v.headline || "All monitored checks passed.";
+      box.appendChild(el);
+    }
+  } catch (e) { /* next poll — leave the last known pill */ }
+}
 async function refreshTiles() {
   try {
     const tiles = await (await fetch("/api/health/tiles")).json();
-    const rank = { green: 1, yellow: 2, red: 3 };
-    let worst = "green";
-    for (const t of tiles)
-      if ((rank[t.state] || 1) > rank[worst]) worst = t.state;
-    const sum = document.getElementById("health-summary");
-    sum.className = "health-pill h-" + worst;
-    document.getElementById("health-word").textContent =
-      worst === "red" ? "Problem"
-      : worst === "yellow" ? "Needs a look"
-      : "All good";
     const div = document.getElementById("tiles");
     div.innerHTML = "";
     for (const t of tiles) {
@@ -1127,9 +1371,10 @@ async function engineOp(op) {
   refresh();
 }
 async function restartSystem() {
-  if (!confirm("Restart ALL StudioFire services now?\n\nAudio drops to " +
-               "emergency filler for a few seconds while it cycles. The page " +
-               "will reload when it's back.")) return;
+  if (!(await confirmBox("Restart ALL StudioFire services now?\n\nAudio " +
+               "drops to emergency filler for a few seconds while it cycles. " +
+               "The page will reload when it's back.", "Restart everything")))
+    return;
   try { await fetch("/api/system/restart", {method: "POST"}); } catch (e) {}
   document.getElementById("offline-banner").hidden = false;
   const oa = document.getElementById("onair");
@@ -1265,9 +1510,39 @@ async function refreshUpdatePill() {
   } catch (e) { /* next poll */ }
 }
 refreshUpdatePill(); setInterval(refreshUpdatePill, 60000);
-refresh(); refreshTiles(); refreshSchedule();
-refreshSpots(); refreshRotation(); refreshHistory();
+// Missing playlist files: the feeder skips them, so they are silent unless we
+// say so. Count only — the list is the tooltip.
+async function refreshSkips() {
+  try {
+    const d = await (await fetch("/api/skips?hours=24")).json();
+    const el = document.getElementById("skip-warning");
+    if (!el) return;
+    const n = d.count || 0;
+    el.hidden = n === 0;
+    if (n) {
+      const names = (d.items || []).slice(0, 8).map(i => {
+        const p = (i.path || "").split(/[\\/]/).pop();
+        return p || i.path;
+      });
+      const more = (d.count || 0) > names.length
+        ? "<li class='muted'>…and " + ((d.count || 0) - names.length) +
+          " more</li>" : "";
+      el.innerHTML = "<strong>" + n + " song" + (n === 1 ? "" : "s") +
+        " in this playlist " + (n === 1 ? "is" : "are") + " missing</strong> " +
+        "and will be skipped. Check the library folder or use " +
+        "“Fix broken file paths” on the Playlists page." +
+        "<details class='skip-names'><summary>Show them</summary><ul>" +
+        names.map(nm => "<li>" + esc(nm) + "</li>").join("") + more +
+        "</ul></details>";
+      el.title = names.join("\n");
+    }
+  } catch (e) { /* next poll */ }
+}
+refresh(); refreshVerdict(); refreshTiles(); refreshSchedule();
+refreshSpots(); refreshRotation(); refreshHistory(); refreshSkips();
 setInterval(refresh, 2000);
+setInterval(refreshVerdict, 5000);
+setInterval(refreshSkips, 30000);
 setInterval(refreshTiles, 10000);
 setInterval(refreshSchedule, 5000);
 setInterval(refreshSpots, 5000);

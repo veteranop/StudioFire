@@ -10,17 +10,20 @@ from __future__ import annotations
 import csv
 import datetime
 import io
+import json
 import logging
 import os
 import sys
 import time
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import (FileResponse, HTMLResponse,
+                               RedirectResponse, Response)
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import auth, changelog, db, spots
+from . import (auth, changelog, db, nowplaying_file, reports,
+                  setup as setup_mod, spots)
 from . import schedule as sched
 from .. import pathmap
 
@@ -173,9 +176,24 @@ def create_app(cfg: dict) -> FastAPI:
 
     @app.get("/setup", response_class=HTMLResponse)
     def setup_page(request: Request, conn=Depends(get_conn)):
-        if auth.any_users(conn):
+        """The first-run wizard. One step per screen, revisitable from Settings.
+
+        Before an admin exists this page is open (a fresh install has no users
+        and nothing to protect). After that it needs a signed-in admin, and once
+        the wizard is finished it gets out of the way.
+        """
+        from .config import load_config
+        st = setup_mod.state(conn, load_config())
+        if st["complete"]:
+            return RedirectResponse("/", status_code=303)
+        if auth.any_users(conn) and session_of(request) is None:
             return RedirectResponse("/login", status_code=303)
-        return render(request, "setup.html")
+        if not auth.any_users(conn) and st["step"] not in ("station", "admin"):
+            setup_mod.set_step(conn, "station")
+            st["step"] = "station"
+            st["index"] = 0
+        return render(request, "setup.html", setup=st, station=st["answers"].get(
+            "station_name") or "StudioFire")
 
     @app.post("/setup")
     def setup_submit(request: Request, conn=Depends(get_conn),
@@ -184,16 +202,141 @@ def create_app(cfg: dict) -> FastAPI:
         if auth.any_users(conn):  # setup runs exactly once
             return RedirectResponse("/login", status_code=303)
         if not username.strip() or len(password) < 8 or password != password2:
+            from .config import load_config as _lc
             return render(request, "setup.html",
+                          setup=setup_mod.state(conn, _lc()),
+                          station=(_lc().get("station_name")
+                                   or "StudioFire"),
                           error="Passwords must match and be at least "
                                 "8 characters.")
         uid = auth.create_user(conn, username.strip(), password, "admin")
-        resp = RedirectResponse("/", status_code=303)
+        try:
+            setup_mod.set_step(conn, "library")
+        except Exception:       # noqa: BLE001 — never fail account creation
+            pass
+        resp = RedirectResponse("/setup", status_code=303)
         resp.set_cookie(auth.SESSION_COOKIE, sessions.issue(uid, "admin"),
                         httponly=True, samesite="lax",
                         max_age=auth.SESSION_MAX_AGE)
         log.info("first-run setup: admin %r created", username.strip())
         return resp
+
+
+    # ---- first-run wizard ---------------------------------------------------
+    @app.get("/api/setup/state")
+    def api_setup_state(request: Request, conn=Depends(get_conn)):
+        from .config import load_config
+        if auth.any_users(conn) and session_of(request) is None:
+            raise HTTPException(401, "not signed in")
+        return setup_mod.state(conn, load_config())
+
+    @app.post("/api/setup/step")
+    def api_setup_step(request: Request, body: dict, conn=Depends(get_conn)):
+        """Save one wizard step, then move to the next one."""
+        from .config import load_config, update_config
+        from . import playlists as pl
+        step = (body.get("step") or "").strip()
+        values = body.get("values") or {}
+        fresh = not auth.any_users(conn)
+        if fresh and step != "station":
+            raise HTTPException(401, "create the administrator account first")
+        if not fresh and session_of(request) is None:
+            raise HTTPException(401, "not signed in")
+
+        if step == "station":
+            name = (values.get("station_name") or "").strip() or "StudioFire"
+            update_config({"station_name": name})
+            fmt = "12" if str(values.get("time_format") or "12") == "12" else "24"
+            db.set_setting(conn, "time_format", fmt)
+            sched.set_hour12(fmt == "12")
+        elif step == "library":
+            root = (values.get("music_root") or "").strip().strip('"')
+            problem = setup_mod.check_folder(root)
+            if problem:
+                raise HTTPException(400, problem)
+            update_config({"paths": {"nas_music_root": root}})
+            found = setup_mod.count_audio_files(root)
+            setup_mod.set_step(conn, "playlists")
+            return {"ok": True, "next": "playlists", "found_songs": found}
+        elif step == "playlists":
+            folder = (values.get("playlists_dir") or "").strip().strip('"')
+            if folder and setup_mod.check_folder(folder) is None:
+                db.set_setting(conn, "playlist_lst_dir", folder)
+            elif folder:
+                raise HTTPException(400, setup_mod.check_folder(folder))
+        elif step == "spots":
+            for key in ("dir_station_ids", "dir_psas", "dir_jingles",
+                        "dir_ads", "dir_shows"):
+                path = (values.get(key) or "").strip().strip('"')
+                if path:
+                    problem = setup_mod.check_folder(path)
+                    if problem:
+                        raise HTTPException(400, "%s: %s" % (key, problem))
+                    db.set_setting(conn, key, path)
+        elif step == "audio":
+            guid = (values.get("audio_device_guid") or "").strip()
+            update_config({"engine": {"audio_device_guid": guid}})
+        elif step == "emergency":
+            db.set_setting(conn, "emergency_fill_from_library",
+                           "1" if values.get("fill_from_library") else "0")
+        elif step == "streaming":
+            if values.get("np_file") is not None:
+                db.set_setting(conn, nowplaying_file.K_PATH,
+                               (values.get("np_file") or "").strip())
+        elif step == "done":
+            setup_mod.complete(conn)
+            return {"ok": True, "next": "done", "complete": True}
+        else:
+            raise HTTPException(400, "unknown step")
+
+        ids = [s for s, _ in setup_mod.STEPS]
+        try:
+            nxt = ids[ids.index(step) + 1]
+        except (ValueError, IndexError):
+            nxt = "done"
+        setup_mod.set_step(conn, nxt)
+        return {"ok": True, "next": nxt}
+
+    @app.get("/api/setup/settings-copy")
+    def api_setup_settings_copy(_=Depends(api_user)):
+        """A JSON copy of the station's setup, for the operator to keep.
+
+        Secrets are never included: the stream password lives in an
+        environment-sourced secret file, and the session key is not settings.
+        """
+        from .config import load_config
+        cfg = load_config()
+        safe = {
+            "station_name": cfg.get("station_name"),
+            "paths": {k: v for k, v in (cfg.get("paths") or {}).items()
+                      if "secret" not in k and "password" not in k},
+            "engine": {"audio_device_guid":
+                       (cfg.get("engine") or {}).get("audio_device_guid", "")},
+            "royalty_reporting": {k: v for k, v in
+                                  (cfg.get("royalty_reporting") or {}).items()
+                                  if k != "contact"},
+        }
+        return Response(content=json.dumps(safe, indent=2),
+                        media_type="application/json",
+                        headers={"Content-Disposition":
+                                 "attachment; filename=studiofire-settings.json"})
+
+    @app.get("/api/setup/audio-devices")
+    def api_setup_audio(_=Depends(api_user)):
+        return {"devices": setup_mod.audio_devices()}
+
+    @app.post("/api/setup/test-tone")
+    def api_setup_tone(body: dict, _=Depends(api_user)):
+        ok, note = setup_mod.test_tone((body or {}).get("guid") or "")
+        return {"ok": ok, "note": note}
+
+    @app.post("/api/setup/library-count")
+    def api_setup_library_count(body: dict, _=Depends(api_user)):
+        root = (body or {}).get("path") or ""
+        problem = setup_mod.check_folder(root)
+        if problem:
+            raise HTTPException(400, problem)
+        return {"found": setup_mod.count_audio_files(root)}
 
     @app.get("/login", response_class=HTMLResponse)
     def login_page(request: Request, conn=Depends(get_conn)):
@@ -288,12 +431,26 @@ def create_app(cfg: dict) -> FastAPI:
     DIR_SETTINGS = spots.FOLDER_CATEGORIES
 
     @app.get("/settings", response_class=HTMLResponse)
-    def settings_page(request: Request, sess: dict = Depends(page_user)):
+    def settings_page(request: Request, sess: dict = Depends(page_user),
+                      conn=Depends(get_conn)):
         # Basic (operator) can do everything except manage users; the Users
         # section is only rendered/enabled for admins (role passed to template).
         # The change log is read from CHANGELOG.md on disk (tolerant: a missing
         # file just renders "not available", never a 500).
+        try:
+            uname = (auth.get_user(conn, sess["uid"]) or {}).get("username") or ""
+        except Exception:      # noqa: BLE001 — never break the page over a label
+            uname = ""
         return render(request, "settings.html", role=sess["role"],
+                      user=uname,
+                      changelog=changelog.load(),
+                      running_version=running_version)
+
+    @app.get("/changelog", response_class=HTMLResponse)
+    def changelog_page(request: Request, sess: dict = Depends(page_user)):
+        """The full release history, moved off Settings so that page can stay
+        one group per screen. Read-only."""
+        return render(request, "changelog.html", role=sess["role"],
                       changelog=changelog.load(),
                       running_version=running_version)
 
@@ -328,6 +485,20 @@ def create_app(cfg: dict) -> FastAPI:
         if path and not os.path.isdir(pl.alias_path(path)):
             raise HTTPException(400, "that folder does not exist")
         db.set_setting(conn, key, path)
+        return {"ok": True}
+
+
+    @app.get("/api/settings/support_contact")
+    def get_support_contact(conn=Depends(get_conn), _=Depends(api_user)):
+        """Who a volunteer calls when something looks wrong. Blank means the
+        Help page falls back to "ask whoever set StudioFire up"."""
+        return {"contact": db.get_setting(conn, "support_contact") or ""}
+
+    @app.post("/api/settings/support_contact")
+    def set_support_contact(body: dict, conn=Depends(get_conn),
+                            _=Depends(api_user)):
+        db.set_setting(conn, "support_contact",
+                       (body.get("contact") or "").strip()[:200])
         return {"ok": True}
 
     @app.get("/api/settings/time_format")
@@ -443,6 +614,21 @@ def create_app(cfg: dict) -> FastAPI:
         if not name or not host:
             raise HTTPException(400, "give the device a name and an IP/host")
         return {"id": devmod.add(conn, name, host)}
+
+    @app.post("/api/devices/{did}")
+    def api_devices_update(did: int, body: dict, conn=Depends(get_conn),
+                           _=Depends(api_user)):
+        """Rename a device or correct its address (the row's Edit action).
+
+        Additive: the add/delete/ping routes are unchanged.
+        """
+        name = (body.get("name") or "").strip()
+        host = (body.get("host") or "").strip()
+        if not name or not host:
+            raise HTTPException(400, "give the device a name and an IP/host")
+        if not devmod.update(conn, did, name, host):
+            raise HTTPException(404, "device not found")
+        return {"ok": True}
 
     @app.delete("/api/devices/{did}")
     def api_devices_del(did: int, conn=Depends(get_conn), _=Depends(api_user)):
@@ -618,14 +804,200 @@ def create_app(cfg: dict) -> FastAPI:
                         "source": r["source"] or ""})
         return out
 
+
+    # ---- SoundExchange royalty report (Report of Use, 37 CFR 370.4) --------
+    # The build runs in a worker thread against a read-only connection: it can
+    # never write to the DB and never touches the playout path.
+    sx_state = {"state": "idle", "started": None, "finished": None,
+                "ready": None, "reasons": [], "zip": None, "files": {},
+                "rows": 0, "performances": 0, "error": None, "mode": None,
+                "period": None, "due": None, "out_dir": None}
+
+    def _sx_cfg():
+        from .config import load_config
+        return load_config().get("royalty_reporting") or {}
+
+    @app.get("/api/sx/config")
+    def api_sx_config(_=Depends(api_user)):
+        rr = _sx_cfg()
+        return {"service_name": rr.get("service_name", ""),
+                "filer_name": rr.get("filer_name", ""),
+                "contact": rr.get("contact") or {},
+                "category": rr.get("category", "B"),
+                "mode": rr.get("mode", "census_atp"),
+                "channel_name": rr.get("channel_name", ""),
+                "output_format": rr.get("output_format", "headerless"),
+                "share_aliases": rr.get("share_aliases") or [],
+                "music_drive_letter": rr.get("music_drive_letter", ""),
+                "configured": bool((rr.get("service_name") or "").strip()),
+                "state": sx_state}
+
+    @app.post("/api/sx/settings")
+    def api_sx_settings(body: dict, _=Depends(api_admin)):
+        from .config import save_royalty_reporting
+        allowed = {"service_name", "filer_name", "contact", "category",
+                   "mode", "channel_name", "output_format", "share_aliases",
+                   "music_drive_letter"}
+        block = {k: v for k, v in (body or {}).items() if k in allowed}
+        if block.get("category") not in (None, "", "A", "B", "C"):
+            raise HTTPException(400, "category must be A, B or C")
+        if block.get("mode") not in (None, "", "census_atp", "sample_atp",
+                                     "sample_ath"):
+            raise HTTPException(400, "unknown reporting mode")
+        if block.get("output_format") not in (None, "", "headerless",
+                                             "headered"):
+            raise HTTPException(400, "format must be headerless or headered")
+        if isinstance(block.get("share_aliases"), str):
+            block["share_aliases"] = [x.strip() for x in
+                                      block["share_aliases"].split(",") if x.strip()]
+        saved = save_royalty_reporting(block)
+        return {"ok": True, "royalty_reporting": saved}
+
+    def _sx_run(job: dict) -> None:
+        """The background build. Never raises into the request thread."""
+        import threading
+        from . import sx_report as sx
+        from .config import load_config
+        try:
+            conf = load_config()
+            cfg = conf.get("royalty_reporting") or {}
+            db_path = conf.get("paths", {}).get("db_path") or os.path.join(
+                conf.get("paths", {}).get("data_dir", "data"), "studiofire.db")
+            conn = db.connect(db_path)
+            roots = list(cfg.get("share_aliases") or [])
+            if not roots:
+                nas = conf.get("paths", {}).get("nas_music_root")
+                if nas:
+                    try:
+                        roots = [pathmap.share_root(nas)]
+                    except Exception:      # noqa: BLE001
+                        roots = [nas]
+            index = sx.build_precache_index(conn, roots,
+                                            cfg.get("music_drive_letter") or "")
+            mode = job["mode"]
+            plays = []
+            for w_start, w_end in job["windows"]:
+                plays.extend(sx.collect_period(conn, w_start, w_end,
+                                               index=index))
+            plays.sort(key=lambda r: r["start"])
+            note = "no listener series supplied"
+            if job.get("listeners"):
+                series = sx.load_listener_series(job["listeners"])
+                missing = sx.apply_listeners(plays, series)
+                note = ("%d listener samples; %d performances outside their "
+                        "coverage" % (len(series), missing))
+            out_dir = job["out_dir"]
+            result = sx.build_report(conn=conn, out_dir=out_dir, cfg=cfg,
+                                     mode=mode, start=job["start"],
+                                     end_excl=job["end_excl"], plays=plays,
+                                     ath=job.get("ath"), extra_note=note)
+            sx_state.update({
+                "state": "done", "finished": time.time(),
+                "ready": result["ready"], "reasons": result["reasons"],
+                "zip": result["zip"], "files": result["files"],
+                "rows": result["rows"], "performances": result["performances"],
+                "mode": mode, "due": result["due"], "error": None,
+                "period": "%s .. %s" % (job["start"].date(),
+                                        (job["end_excl"] -
+                                         datetime.timedelta(days=1)).date()),
+                "out_dir": out_dir})
+        except Exception as exc:          # noqa: BLE001 — surface, never crash
+            log.exception("royalty report build failed")
+            sx_state.update({"state": "error", "finished": time.time(),
+                             "error": str(exc), "ready": None, "reasons": []})
+
+    @app.post("/api/sx/build")
+    def api_sx_build(body: dict, _=Depends(api_admin)):
+        import threading
+        from . import sx_report as sx
+        if sx_state.get("state") == "running":
+            raise HTTPException(409, "a report is already being built")
+        mode = (body.get("mode") or _sx_cfg().get("mode") or "census_atp")
+        if mode not in sx.MODES:
+            raise HTTPException(400, "unknown reporting mode")
+        try:
+            if mode == "census_atp":
+                month = (body.get("month") or "").strip()
+                if not month:
+                    raise HTTPException(400, "pick a month")
+                start, end = sx._month_bounds(month)
+                windows = [(start, end)]
+            else:
+                quarter = (body.get("quarter") or "").strip()
+                w1, w2 = (body.get("week1") or "").strip(), \
+                         (body.get("week2") or "").strip()
+                (w1s, w1e), (w2s, w2e) = sx.validate_weeks(w1, w2, quarter)
+                start, end = sx.quarter_bounds(quarter)
+                windows = [(w1s, w1e), (w2s, w2e)]
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+        except HTTPException:
+            raise
+        except Exception as exc:          # noqa: BLE001
+            raise HTTPException(400, "could not work out the period: %s" % exc)
+        ath = body.get("ath")
+        if mode == "sample_ath":
+            try:
+                ath = float(ath)
+            except (TypeError, ValueError):
+                raise HTTPException(400, "aggregate tuning hours is required "
+                                         "for the listening-hours format")
+        from .config import load_config
+        data_dir = load_config().get("paths", {}).get("data_dir", "data")
+        out_dir = os.path.join(data_dir, "sx_reports",
+                               datetime.datetime.now().strftime("%Y%m%d-%H%M%S"))
+        listeners = body.get("listeners_path") or ""
+        if listeners and not os.path.isfile(listeners):
+            listeners = ""
+        job = {"mode": mode, "start": start, "end_excl": end,
+               "windows": windows, "ath": ath, "listeners": listeners,
+               "out_dir": out_dir}
+        sx_state.update({"state": "running", "started": time.time(),
+                         "finished": None, "ready": None, "reasons": [],
+                         "error": None, "zip": None, "files": {}, "mode": mode,
+                         "out_dir": out_dir, "due": None, "period": None})
+        threading.Thread(target=_sx_run, args=(job,), daemon=True).start()
+        return {"ok": True, "state": sx_state}
+
+    @app.get("/api/sx/status")
+    def api_sx_status(_=Depends(api_admin)):
+        return sx_state
+
+    @app.post("/api/sx/listeners")
+    def api_sx_listeners(file: UploadFile, _=Depends(api_admin)):
+        """Store an uploaded listener series CSV and hand back its path."""
+        from .config import load_config
+        data_dir = load_config().get("paths", {}).get("data_dir", "data")
+        folder = os.path.join(data_dir, "sx_listeners")
+        os.makedirs(folder, exist_ok=True)
+        name = os.path.basename(file.filename or "listeners.csv")
+        safe = "".join(c for c in name if c.isalnum() or c in "._-") or "listeners.csv"
+        path = os.path.join(folder, datetime.datetime.now().strftime("%Y%m%d-%H%M%S-") + safe)
+        with open(path, "wb") as fh:
+            fh.write(file.file.read())
+        return {"ok": True, "path": path}
+
+    @app.get("/api/sx/download")
+    def api_sx_download(_=Depends(api_admin)):
+        zip_path = sx_state.get("zip")
+        if not zip_path or not os.path.isfile(zip_path):
+            raise HTTPException(404, "no report has been built yet")
+        return FileResponse(zip_path, media_type="application/zip",
+                            filename=os.path.basename(zip_path))
+
     @app.get("/reports", response_class=HTMLResponse)
     def reports_page(request: Request, sess: dict = Depends(page_user)):
-        return render(request, "reports.html", role=sess["role"])
+        cat = reports.catalog()
+        return render(request, "reports.html", role=sess["role"],
+                      reports=cat, reports_json=json.dumps(cat))
 
     @app.get("/help", response_class=HTMLResponse)
-    def help_page(request: Request, sess: dict = Depends(page_user)):
+    def help_page(request: Request, sess: dict = Depends(page_user),
+                  conn=Depends(get_conn)):
         return render(request, "help.html", role=sess["role"],
                       running_version=running_version,
+                      support_contact=db.get_setting(conn, "support_contact")
+                      or "",
                       changelog=changelog.load())
 
     @app.get("/api/reports")
@@ -652,6 +1024,66 @@ def create_app(cfg: dict) -> FastAPI:
         return Response(content=buf.getvalue(), media_type="text/csv",
                         headers={"Content-Disposition":
                                  f'attachment; filename="{fname}"'})
+
+    def _report_range(start: str, end: str) -> tuple[str, str]:
+        """Validate + clamp a report window (never trust the query string)."""
+        today = datetime.date.today()
+        try:
+            s = datetime.date.fromisoformat(start) if start else today
+        except ValueError:
+            s = today
+        try:
+            e = datetime.date.fromisoformat(end) if end else s
+        except ValueError:
+            e = s
+        if e < s:
+            s, e = e, s
+        if (e - s).days > 400:          # a report is evidence, not a data dump
+            s = e - datetime.timedelta(days=400)
+        return s.isoformat(), e.isoformat()
+
+    @app.get("/api/reports/{report_id}")
+    def api_report_run(report_id: str, start: str = "", end: str = "",
+                       conn=Depends(get_conn), _=Depends(api_user)):
+        """Run one report and return it as data (screen tables read this)."""
+        s, e = _report_range(start, end)
+        try:
+            return reports.run(report_id, conn, s, e)
+        except ValueError:
+            raise HTTPException(404, "unknown report")
+
+    @app.get("/api/reports/{report_id}.csv")
+    def api_report_csv(report_id: str, start: str = "", end: str = "",
+                       conn=Depends(get_conn), _=Depends(api_user)):
+        s, e = _report_range(start, end)
+        try:
+            rep = reports.run(report_id, conn, s, e)
+        except ValueError:
+            raise HTTPException(404, "unknown report")
+        body = reports.to_csv(rep)
+        station = str(cfg.get("station_name") or "StudioFire")
+        slug = "".join(c if c.isalnum() else "-" for c in station).strip("-")
+        fname = f"{slug or 'StudioFire'}-{report_id}-{s}_to_{e}.csv"
+        return Response(content=body, media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition":
+                                 f'attachment; filename="{fname}"'})
+
+    @app.get("/reports/print", response_class=HTMLResponse)
+    def report_print(request: Request, report: str = "as-aired",
+                     start: str = "", end: str = "",
+                     sess: dict = Depends(page_user),
+                     conn=Depends(get_conn)):
+        """A print-ready page: the browser's own Print → Save as PDF is the
+        station's PDF path (no Chrome dependency on the playout box)."""
+        s, e = _report_range(start, end)
+        try:
+            rep = reports.run(report, conn, s, e)
+        except ValueError:
+            raise HTTPException(404, "unknown report")
+        return render(request, "report_print.html", role=sess["role"],
+                      rep=rep, running_version=running_version,
+                      generated=datetime.datetime.now().strftime(
+                          "%d %B %Y, %H:%M"))
 
     @app.get("/api/health/tiles")
     def health_tiles(conn=Depends(get_conn), _=Depends(api_user)):

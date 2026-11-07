@@ -111,7 +111,7 @@ deep task.
 
 ### 3.2 Front matter that must exist (the guide earns its first 3 pages)
 
-- **Cover** — product name, version, date, "for KDPI / Drop-in Radio" style label.
+- **Cover** — product name, version, date, "for <station name>" style label.
 - **"What StudioFire does in one paragraph"** — plain English, includes the promise
   (*audio never stops*).
 - **"The five things you need to know"** — the mental model. For StudioFire:

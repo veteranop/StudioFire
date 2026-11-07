@@ -153,8 +153,20 @@ def main():
         spots.set_enabled(conn, iid, False)
         check("disabled rule not in enabled list",
               iid not in {r["id"] for r in spots.list_enabled(conn)})
-        spots.remove(conn, mid)
-        check("remove deletes the rule", spots.get(conn, mid) is None)
+        # remove() is now a SOFT delete (undo + audit): the row survives but is
+        # hidden from listing/airing and shows up in list_deleted; restore()
+        # brings it back with the same id. (Full guardrail coverage lives in
+        # tests/test_spot_guardrails.py.)
+        spots.remove(conn, mid, by="tester")
+        check("soft-removed rule gone from list_all",
+              mid not in {r["id"] for r in spots.list_all(conn)})
+        check("soft-removed rule is in list_deleted",
+              mid in {r["id"] for r in spots.list_deleted(conn)})
+        check("soft-removed rule never fires",
+              not spots.due(spots.get(conn, mid), time.time() + 10 ** 6))
+        spots.restore(conn, mid)
+        check("restore brings it back with the same id",
+              mid in {r["id"] for r in spots.list_all(conn)})
 
         # ---- calendar: occurrences_on per date ----
         wed = dt.date(2026, 8, 5)  # Wednesday, inside the window

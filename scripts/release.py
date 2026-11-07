@@ -71,6 +71,45 @@ def run_tests() -> None:
         print("ok")
 
 
+
+
+def build_installer(version: str) -> str:
+    """Build the payload + the setup .exe. Returns the exe path.
+
+    A release without an installer is not a release any more: operators download
+    the .exe, not the source. Fail loudly if the build tools are missing.
+    """
+    py = sys.executable
+    print("\nBuilding the installer payload (embedded Python + deps + NSSM):")
+    r = subprocess.run([py, os.path.join("installer", "build_payload.py")], cwd=ROOT)
+    if r.returncode != 0:
+        fail("payload build failed — fix that before releasing")
+    iscc = os.environ.get("ISCC") or _find_iscc()
+    if not iscc:
+        fail("Inno Setup (ISCC.exe) not found. Install Inno Setup 6 or set ISCC.")
+    print("\nCompiling the setup .exe with Inno Setup:")
+    r = subprocess.run([iscc, os.path.join("installer", "StudioFire.iss")], cwd=ROOT)
+    if r.returncode != 0:
+        fail("Inno Setup compile failed — see the output above")
+    exe = os.path.join(ROOT, "installer", "Output", f"StudioFire-Setup-{version}.exe")
+    if not os.path.isfile(exe):
+        fail(f"the installer did not appear at {exe}")
+    size = os.path.getsize(exe)
+    print(f"[ok] {os.path.basename(exe)} — {size:,} bytes")
+    if not (os.environ.get("SIGN_CERT") or os.environ.get("STUDIOFIRE_SIGN_TOOL")):
+        print("[warn] building UNSIGNED (no SIGN_CERT / STUDIOFIRE_SIGN_TOOL) — "
+              "SmartScreen will warn users")
+    return exe
+
+
+def _find_iscc() -> str:
+    for cand in (r"C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
+                 r"C:\Program Files\Inno Setup 6\ISCC.exe",
+                 os.path.expandvars(r"%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe")):
+        if os.path.isfile(cand):
+            return cand
+    return ""
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("version", help="new version, e.g. 1.1.0")
@@ -139,6 +178,9 @@ def main() -> int:
         print("\nRunning tests:")
         run_tests()
 
+    # 4b. the installer — a release without one is not shippable any more
+    exe = build_installer(new)
+
     # 5. commit, tag, push, publish
     with open(CHANGELOG, "w", encoding="utf-8", newline="") as f:
         f.write(new_text)
@@ -154,7 +196,7 @@ def main() -> int:
         nf.write(notes + "\n")
     r = subprocess.run(["gh", "release", "create", tag, "--title",
                         f"StudioFire {tag}", "--notes-file", nf.name,
-                        "--verify-tag"], cwd=ROOT)
+                        "--verify-tag", exe], cwd=ROOT)
     os.remove(nf.name)
     if r.returncode != 0:
         fail(f"tag {tag} is pushed but `gh release create` failed — run it "
