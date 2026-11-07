@@ -56,7 +56,7 @@ SignToolMinimumTimeBetween=2000
 
 [Tasks]
 Name: "services"; Description: "Install as auto-restarting Windows services (production on-air PC — starts at boot, self-heals on crash)"; Flags: unchecked
-Name: "firewall"; Description: "Open Windows Firewall port 8080 so DJs on the LAN can reach the web GUI"
+Name: "firewall"; Description: "Open the Windows Firewall port (private and domain networks only) so DJs on your LAN can reach the web GUI"
 Name: "desktopicons"; Description: "Put Start StudioFire and Quit StudioFire shortcuts on the desktop"
 
 [Files]
@@ -99,15 +99,15 @@ Name: "{autoprograms}\{#AppName}\Start {#AppName}"; Filename: "{app}\start-all.b
 Name: "{autoprograms}\{#AppName}\Stop {#AppName}"; Filename: "{app}\stop-all.bat"; WorkingDir: "{app}"; IconFilename: "{app}\web\static\sf_icon_dark.ico"
 Name: "{autoprograms}\{#AppName}\Health check"; Filename: "{app}\healthcheck.bat"; WorkingDir: "{app}"; IconFilename: "{app}\web\static\sf_icon_dark.ico"
 Name: "{autoprograms}\{#AppName}\Update {#AppName} from GitHub"; Filename: "{app}\update.bat"; WorkingDir: "{app}"; IconFilename: "{app}\web\static\sf_icon_dark.ico"
-Name: "{autoprograms}\{#AppName}\{#AppName} web GUI"; Filename: "http://localhost:8080"; IconFilename: "{app}\web\static\sf_icon_dark.ico"
+Name: "{autoprograms}\{#AppName}\{#AppName} web GUI"; Filename: "http://localhost:{code:GetPort}"; IconFilename: "{app}\web\static\sf_icon_dark.ico"
 Name: "{commondesktop}\Start StudioFire"; Filename: "{app}\start-all.bat"; WorkingDir: "{app}"; IconFilename: "{app}\web\static\sf_icon_dark.ico"; Tasks: desktopicons
 Name: "{commondesktop}\Quit StudioFire"; Filename: "{app}\stop-all.bat"; WorkingDir: "{app}"; IconFilename: "{app}\web\static\sf_icon_dark.ico"; Tasks: desktopicons
 
 [Run]
-Filename: "netsh"; Parameters: "advfirewall firewall add rule name=""StudioFire Web"" dir=in action=allow protocol=TCP localport=8080"; Tasks: firewall; Flags: runhidden
+Filename: "netsh"; Parameters: "advfirewall firewall add rule name=""StudioFire Web"" dir=in action=allow protocol=TCP localport={code:GetPort} profile=private,domain"; Tasks: firewall; Flags: runhidden
 Filename: "{app}\scripts\install-services.bat"; Tasks: services; Flags: runhidden waituntilterminated; StatusMsg: "Registering Windows services..."
 Filename: "{app}\start-all.bat"; Description: "Start StudioFire now"; Flags: postinstall nowait skipifsilent unchecked; Check: not WizardIsTaskSelected('services')
-Filename: "http://localhost:8080"; Description: "Open the web GUI (first visit creates the admin login)"; Flags: postinstall shellexec nowait skipifsilent
+Filename: "http://localhost:{code:GetPort}"; Description: "Open the web GUI (first visit creates the admin login)"; Flags: postinstall shellexec nowait skipifsilent
 
 [UninstallRun]
 Filename: "{app}\scripts\remove-services.bat"; RunOnceId: "RemoveServices"; Flags: runhidden waituntilterminated
@@ -117,6 +117,7 @@ Filename: "netsh"; Parameters: "advfirewall firewall delete rule name=""StudioFi
 [Code]
 var
   StationPage: TInputQueryWizardPage;
+  PortNum: Integer;
 
 procedure InitializeWizard;
 begin
@@ -127,8 +128,10 @@ begin
     'Everything else (cache, database, logs) lives inside the install folder.');
   StationPage.Add('Station name:', False);
   StationPage.Add('Music library folder (UNC share or mapped drive), e.g. \\NAS\music or D:\Music:', False);
+  StationPage.Add('Web GUI port for DJs on your network (1024-65535):', False);
   StationPage.Values[0] := 'My Station';
   StationPage.Values[1] := '';
+  StationPage.Values[2] := '8080';
 end;
 
 function ConfigPath: String;
@@ -139,6 +142,18 @@ end;
 function ShouldSkipPage(PageID: Integer): Boolean;
 begin
   { upgrades keep their existing config — don't re-ask }
+  if (StationPage <> nil) and (PageID = StationPage.ID) then
+  begin
+    PortNum := StrToIntDef(StationPage.Values[2], 0);
+    if (PortNum < 1024) or (PortNum > 65535) then
+    begin
+      MsgBox('Please enter a port between 1024 and 65535.' + #13#10 + #13#10 +
+        'DJs will reach the web GUI at http://this-pc:' + StationPage.Values[2],
+        mbError, MB_OK);
+      Result := False;
+      Exit;
+    end;
+  end;
   Result := (StationPage <> nil) and (PageID = StationPage.ID)
             and FileExists(ConfigPath);
 end;
@@ -151,6 +166,53 @@ begin
   T := S;
   StringChangeEx(T, '\', '/', True);
   Result := T;
+end;
+
+{ The web port, in precedence order: what the station's config already says
+  (an upgrade keeps the port it was installed with), then the wizard answer,
+  then 8080 for a silent install. The firewall rule, the shortcut and the
+  config file all use this one function, so they cannot drift apart. }
+function GetPort(Param: String): String;
+var
+  Lines: TStringList;
+  Text: String;
+  At: Integer;
+  Port: String;
+begin
+  Port := '';
+  if FileExists(ConfigPath) then
+  begin
+    { TStringList rather than LoadStringFromFile: the latter wants an
+      AnsiString and this script is Unicode. }
+    Lines := TStringList.Create;
+    try
+      try
+        Lines.LoadFromFile(ConfigPath);
+        Text := Lines.Text;
+      except
+        Text := '';
+      end;
+    finally
+      Lines.Free;
+    end;
+    At := Pos('"bind_port"', Text);
+    if At > 0 then
+    begin
+      Text := Copy(Text, At, 40);
+      At := Pos(':', Text);
+      if At > 0 then
+      begin
+        Port := Trim(Copy(Text, At + 1, 40));
+        Port := Trim(Copy(Port, 1, Pos(',', Port + ',') - 1));
+      end;
+    end;
+  end;
+  if StrToIntDef(Port, 0) > 0 then
+    Result := Port
+  else if (StationPage <> nil) and (StrToIntDef(StationPage.Values[2], 0) > 0) then
+    Result := StationPage.Values[2]
+  else
+    Result := '8080';
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
@@ -171,7 +233,7 @@ begin
       '  },' + #13#10 +
       '  "core": {' + #13#10 +
       '    "bind_host": "0.0.0.0",' + #13#10 +
-      '    "bind_port": 8080' + #13#10 +
+      '    "bind_port": ' + GetPort('') + #13#10 +
       '  }' + #13#10 +
       '}' + #13#10;
     SaveStringToFile(ConfigPath, Cfg, False);

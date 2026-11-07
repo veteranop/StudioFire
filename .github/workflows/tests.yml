@@ -45,14 +45,23 @@ jobs:
           $scripts = @(
             "test_changelog",
             "test_core_foundation",
+            "test_db_backup",
             "test_duplicates",
             "test_indexer",
             "test_journal",
+            "test_migrations_13_15",
+            "test_path_parity",
             "test_pathmap",
             "test_playlists",
             "test_queue_store",
+            "test_reporting",
             "test_schedule",
+            "test_setup_wizard",
+            "test_spot_guardrails",
             "test_spots",
+            "test_status_verdict",
+            "test_streaming_settings",
+            "test_sx_report",
             "test_time_format",
             "test_updater"
           )

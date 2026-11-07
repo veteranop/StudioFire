@@ -133,7 +133,12 @@ def save_royalty_reporting(block: dict, path: str | None = None) -> dict:
     return _load_royalty_reporting(cfg)
 
 
+# the engine's resolver, shared so both services agree on paths
+from .. import paths as shared_paths
+
+
 def _default_data_root() -> str:
+
     r"""Machine-wide data folder on Windows, beside the app everywhere else.
 
     %ProgramData%\StudioFire keeps the DB, logs, precache and backups outside
@@ -204,14 +209,13 @@ def load_config(path: str | None = None) -> dict:
     paths = cfg.get("paths", {})
     core = cfg.get("core", {})
     engine = cfg.get("engine", {})
-    # Where a station's own data lives. On Windows that is
-    # %ProgramData%\StudioFire (machine-wide, survives upgrades, outside the
-    # install folder); elsewhere it stays beside the app. Both are overridable
-    # per-install via paths.data_root / data_dir / logs_dir, which is what the
-    # reference station does so its existing data is not moved.
-    base = paths.get("data_root") or _default_data_root()
-    data_dir = paths.get("data_dir", os.path.join(base, "data"))
-    logs_dir = paths.get("logs_dir", os.path.join(base, "logs"))
+    # Where a station's own data lives — resolved by the SAME module the engine
+    # uses (services/paths.py), because a disagreement here means the engine
+    # writes the journal and heartbeat where the core never looks.
+    resolved = shared_paths.resolve(paths, ROOT)
+    base = resolved["data_root"]
+    data_dir = resolved["data_dir"]
+    logs_dir = resolved["logs_dir"]
     os.makedirs(data_dir, exist_ok=True)
     os.makedirs(logs_dir, exist_ok=True)
     return {
@@ -224,11 +228,12 @@ def load_config(path: str | None = None) -> dict:
         # fills in when a folder is picked through a mapped drive. Distinct from
         # path_aliases (which rewrites imported .lst paths).
         "share_aliases": paths.get("share_aliases", []),
-        "precache_dir": paths.get("precache_dir",
-                                  os.path.join(base, "precache")),
-        "emergency_dir": paths.get("emergency_dir",
-                                   os.path.join(base, "emergency")),
-        "data_dir": data_dir,
+        "precache_dir": resolved["precache_dir"],
+        "emergency_dir": resolved["emergency_dir"],
+        "state_path": resolved["state_path"],
+        "heartbeat_path": resolved["heartbeat_path"],
+        "data_dir": data_dir,
+        "data_root": base,
         "logs_dir": logs_dir,
         "db_path": os.path.join(data_dir, "studiofire.db"),
         "secret_path": os.path.join(data_dir, "web_secret.key"),

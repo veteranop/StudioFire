@@ -18,9 +18,9 @@ Design notes
   policy." A studio-LAN ping says nothing about whether audio is actually
   airing, and the capture artefacts proved it false-reds off the LAN. Equipment
   still shows in /api/health/tiles, just not here.
-* Heartbeat staleness only faults when the heartbeat file EXISTS and is old.
-  A missing file (common in dev where P2's data_dir != the live engine's) is
-  not treated as a fault — engine reachability is the primary liveness signal.
+* A missing heartbeat while the engine answers is a FAULT: it means the
+  engine is not writing where we read (the P1/P2 path mismatch that used
+  to hide a hung engine), not merely an absent file.
 * Sustained-silence duration is tracked across calls via a single settings
   key, so the alarm latches instead of needing someone to watch a meter.
 """
@@ -131,7 +131,14 @@ def verdict(conn: sqlite3.Connection, cfg: dict,
     # ---- faults (precedence order) ----
     if not engine_online:
         faults.append("Audio engine is not responding — check the on-air PC.")
-    elif hb_age is not None and hb_age > HEARTBEAT_STALE_SEC:
+    elif hb_age is None:
+        # The engine is answering but has written no heartbeat where we look.
+        # That used to be treated as healthy, which is how a hung engine (or an
+        # engine and core disagreeing about data_dir) went unnoticed.
+        faults.append("Audio engine is answering but its heartbeat file is "
+                      "missing — the engine and the web service may be looking "
+                      "at different folders. Check the on-air PC.")
+    elif hb_age > HEARTBEAT_STALE_SEC:
         faults.append(f"Audio engine heartbeat is stale ({int(hb_age)}s) — "
                       "it may be wedged; check the on-air PC.")
     if emergency:

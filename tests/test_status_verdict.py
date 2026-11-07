@@ -83,6 +83,23 @@ def main():
         check("stale heartbeat => fault", v["state"] == "fault", v["headline"])
         heartbeat()
 
+        # ---- no heartbeat at all while the engine answers ----------------
+        # This used to be treated as healthy, which is exactly how a P1/P2 path
+        # mismatch (engine writing somewhere the core never reads) hid a wedged
+        # engine. It must fault.
+        hb_path = os.path.join(td, "engine_heartbeat.txt")
+        saved = None
+        if os.path.exists(hb_path):
+            saved = open(hb_path, "rb").read()
+            os.remove(hb_path)
+        v = status.verdict(conn, cfg, LIVE(), LOUD(), now)
+        check("missing heartbeat while the engine answers => fault",
+              v["state"] == "fault", v["headline"])
+        check("fault explains the path mismatch",
+              "heartbeat" in v["headline"].lower(), v["headline"])
+        if saved is not None:
+            open(hb_path, "wb").write(saved)
+
         # ---- spot policy empty (the 2026-11-02 failure) ----
         for rid in [r["id"] for r in spots.list_all(conn)]:
             spots.remove(conn, rid)
