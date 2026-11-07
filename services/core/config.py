@@ -147,6 +147,39 @@ def _default_data_root() -> str:
     return ROOT
 
 
+def update_config(block: dict, path: str | None = None) -> dict:
+    """Merge nested sections into config.json atomically.
+
+    The setup wizard writes here (station name, music root, audio device); the
+    file is also read by the on-air services, so a half-written config is not an
+    option. Unknown sections are preserved untouched.
+    """
+    import json as _json
+    p = path or os.path.join(ROOT, "config", "config.json")
+    try:
+        with open(p, encoding="utf-8") as fh:
+            cfg = _json.load(fh)
+    except (OSError, ValueError):
+        cfg = {}
+    for section, values in (block or {}).items():
+        if isinstance(values, dict):
+            cur = cfg.get(section)
+            if not isinstance(cur, dict):
+                cur = {}
+            cur.update(values)
+            cfg[section] = cur
+        else:
+            cfg[section] = values
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    tmp = p + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        _json.dump(cfg, fh, indent=2)
+        fh.flush()
+        os.fsync(fh.fileno())
+    os.replace(tmp, p)
+    return cfg
+
+
 def load_config(path: str | None = None) -> dict:
     cfg = {}
     p = path or os.path.join(ROOT, "config", "config.json")

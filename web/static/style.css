@@ -1052,3 +1052,49 @@ dialog.sf-picker::backdrop { background: rgba(6, 9, 13, .68); }
 .st-tile { padding: .5rem .65rem; }
 .st-tile b { margin-bottom: .2rem; }
 .st-head { margin-bottom: .05rem; }
+
+/* ---- first-run wizard ---- */
+.wiz { display: flex; flex-wrap: wrap; gap: 1.6rem; align-items: flex-start;
+       max-width: 1080px; margin: 1rem auto 3rem; }
+.wiz-rail { flex: 1 1 220px; max-width: 260px; }
+.wiz-brand { font-size: .72rem; font-weight: 800; letter-spacing: .12em;
+             text-transform: uppercase; color: var(--muted); margin-bottom: .9rem; }
+.wiz-steps { list-style: none; margin: 0 0 1rem; padding: 0;
+             display: flex; flex-direction: column; gap: .15rem; }
+.wiz-step { display: flex; align-items: center; gap: .55rem; font-size: .88rem;
+            color: #a3afbe; padding: .3rem .1rem; }
+.wiz-num { width: 20px; height: 20px; flex: 0 0 20px; border-radius: 50%;
+           border: 1px solid var(--border); display: grid; place-items: center;
+           font-size: .68rem; font-weight: 700; color: var(--muted); }
+.wiz-step.is-now { color: var(--text); font-weight: 650; }
+.wiz-step.is-now .wiz-num { border-color: #3ccf7e; color: #3ccf7e; }
+.wiz-step.is-done { color: var(--muted); }
+.wiz-step.is-done .wiz-num { background: rgba(60,207,126,.16); border-color: #2f7a52;
+                             color: #3ccf7e; }
+.wiz-main { flex: 999 1 520px; min-width: 0; }
+.wiz-main h1 { font-size: 1.25rem; margin: .2rem 0 .3rem; }
+.wiz-sub { color: var(--muted); font-size: .9rem; line-height: 1.5;
+           margin: 0 0 1rem; max-width: 62ch; }
+.wiz-progress { height: 5px; border-radius: 999px; background: #22303e;
+                overflow: hidden; }
+.wiz-progress-bar { height: 100%; background: #3ccf7e; transition: width .2s ease; }
+.wiz-count { font-size: .74rem; color: var(--muted); margin: .35rem 0 .9rem;
+             letter-spacing: .04em; text-transform: uppercase; }
+.wiz-actions { display: flex; align-items: center; gap: .6rem; margin-top: 1rem; }
+.wiz-actions .btn-green, .wiz-actions > :last-child { margin-left: auto; }
+.wiz-row { display: flex; gap: .5rem; align-items: center; }
+.wiz-row input, .wiz-row select { flex: 1 1 auto; }
+.wiz-opt { font-size: .64rem; font-weight: 700; letter-spacing: .08em;
+           text-transform: uppercase; color: var(--muted); border: 1px solid
+           var(--border); border-radius: 999px; padding: .12rem .5rem;
+           vertical-align: middle; margin-left: .4rem; }
+.wiz-check { display: flex; gap: .6rem; align-items: flex-start; font-size: .9rem;
+             font-weight: 600; }
+.wiz-check input { width: auto; margin: .15rem 0 0; }
+.wiz-heard { margin-top: .9rem; padding-top: .8rem; border-top: 1px solid var(--border); }
+@media (max-width: 720px) {
+  .wiz { flex-direction: column; gap: 1rem; }
+  .wiz-rail { max-width: none; }
+  .wiz-steps { flex-direction: row; flex-wrap: wrap; gap: .4rem; }
+  .wiz-step span:last-child { display: none; }
+}

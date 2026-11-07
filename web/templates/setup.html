@@ -1,21 +1,378 @@
 {% extends "base.html" %}
-{% block title %}First-time setup — {{ station }}{% endblock %}
+{% block title %}Set up StudioFire{% endblock %}
+{% block nav %}{% endblock %}
 {% block content %}
-<div class="card narrow">
-  <h1>Welcome to StudioFire</h1>
-  <p>Create the administrator account. You only do this once.</p>
-  {% if error %}<p class="error">{{ error }}</p>{% endif %}
-  <form method="post" action="/setup">
-    <label>Admin username
-      <input name="username" autofocus required>
-    </label>
-    <label>Password <small>(at least 8 characters)</small>
-      <input name="password" type="password" minlength="8" required>
-    </label>
-    <label>Password again
-      <input name="password2" type="password" minlength="8" required>
-    </label>
-    <button type="submit" class="btn btn-big btn-green">Create account</button>
-  </form>
+{% set step = setup.step %}
+{% set a = setup.answers %}
+<div class="wiz">
+  <aside class="wiz-rail">
+    <div class="wiz-brand">StudioFire setup</div>
+    <ol class="wiz-steps">
+      {% for s in setup.steps %}
+      <li class="wiz-step {% if loop.index0 == setup.index %}is-now{% elif loop.index0 < setup.index %}is-done{% endif %}">
+        <span class="wiz-num">{{ loop.index }}</span><span>{{ s.label }}</span></li>
+      {% endfor %}
+    </ol>
+    <p class="st-help">Every answer can be changed later in Settings.</p>
+  </aside>
+
+  <main class="wiz-main">
+    <div class="wiz-progress" role="progressbar" aria-valuemin="1"
+         aria-valuemax="{{ setup.steps|length }}" aria-valuenow="{{ setup.index + 1 }}">
+      <div class="wiz-progress-bar"
+           style="width: {{ ((setup.index + 1) / (setup.steps|length) * 100)|round(0) }}%"></div>
+    </div>
+    <p class="wiz-count">Step {{ setup.index + 1 }} of {{ setup.steps|length }}</p>
+    {% if error %}<div class="st-banner st-banner-error">{{ error }}</div>{% endif %}
+
+    {% if step == 'station' %}
+    <h1>Your station</h1>
+    <p class="wiz-sub">The name listeners know, and how you like to see the time.</p>
+    <div class="st-card">
+      <div class="st-field">
+        <label for="wz-name">Station name</label>
+        <input id="wz-name" autocomplete="off" value="{{ a.station_name }}" placeholder="Example FM">
+        <p class="st-help">Shown in the top bar, on reports and in the page title.</p>
+      </div>
+      <div class="st-tfrow" style="margin-top:1rem">
+        <div><strong>Time format</strong>
+          <p class="st-help">Top-bar clock, On Air log, reports and schedule</p></div>
+        <div class="st-seg" role="group" aria-label="Time format" id="wz-tf">
+          <button type="button" data-tf="12" aria-pressed="{{ 'true' if a.time_format == '12' else 'false' }}">12-hour</button>
+          <button type="button" data-tf="24" aria-pressed="{{ 'false' if a.time_format == '12' else 'true' }}">24-hour</button>
+        </div>
+      </div>
+    </div>
+    <div class="wiz-actions"><span></span>
+      <button class="btn btn-green" onclick="wizSave('station')">Next</button></div>
+
+    {% elif step == 'admin' %}
+    <h1>Administrator account</h1>
+    <p class="wiz-sub">The account you sign in with. A fresh install has no default
+      password — this is the only one that exists.</p>
+    <div class="st-card">
+      <form method="post" action="/setup" id="wz-admin-form">
+        <div class="st-fields">
+          <div class="st-field"><label for="wz-user">Username</label>
+            <input id="wz-user" name="username" autocomplete="off" autofocus required></div>
+          <div class="st-field"><label for="wz-pass">Password</label>
+            <input id="wz-pass" name="password" type="password" minlength="8" required>
+            <p class="st-help">At least 8 characters.</p></div>
+          <div class="st-field"><label for="wz-pass2">Password again</label>
+            <input id="wz-pass2" name="password2" type="password" minlength="8" required></div>
+        </div>
+      </form>
+    </div>
+    <div class="wiz-actions"><span></span>
+      <button class="btn btn-green" form="wz-admin-form" type="submit">Create account</button></div>
+
+    {% elif step == 'library' %}
+    <h1>Music library</h1>
+    <p class="wiz-sub">Where your music lives — a folder on this PC or a share on another computer.</p>
+    <div class="st-card">
+      <div class="st-field">
+        <label for="wz-music">Music folder</label>
+        <div class="wiz-row">
+          <input id="wz-music" autocomplete="off" value="{{ a.music_root }}"
+                 placeholder="\\NAS\Music  (or D:\Music)">
+          <button class="btn btn-ghost" type="button" onclick="wizPick('wz-music')">Browse…</button>
+        </div>
+        <p class="st-help">A network path works exactly like a local folder — you do not
+          need to map a drive.</p>
+      </div>
+      <div id="wz-library-note" class="st-flash" aria-live="polite"></div>
+    </div>
+    <div class="wiz-actions">
+      <button class="btn btn-ghost" onclick="wizBack()">Back</button>
+      <button class="btn btn-green" onclick="wizSave('library')">Next</button></div>
+
+    {% elif step == 'playlists' %}
+    <h1>Playlists</h1>
+    <p class="wiz-sub">Where playlist files live. StudioFire writes ZaraRadio-compatible
+      <code>.lst</code> files.</p>
+    <div class="st-card">
+      <div class="st-field">
+        <label for="wz-pl">Playlists folder</label>
+        <div class="wiz-row">
+          <input id="wz-pl" autocomplete="off"
+                 value="{{ a.playlists_dir or setup.default_playlists_dir }}">
+          <button class="btn btn-ghost" type="button" onclick="wizPick('wz-pl')">Browse…</button>
+        </div>
+        <p class="st-help">Keep the default, or point it at the folder where your existing
+          <code>.lst</code> files already are — that counts as importing them.</p>
+      </div>
+    </div>
+    <div class="wiz-actions">
+      <button class="btn btn-ghost" onclick="wizBack()">Back</button>
+      <button class="btn btn-green" onclick="wizSave('playlists')">Next</button></div>
+
+    {% elif step == 'spots' %}
+    <h1>Station IDs and ads</h1>
+    <p class="wiz-sub">Optional. Tell StudioFire where the non-music audio lives and it
+      will schedule it. Skip this and do it later in Settings if you like.</p>
+    <div class="st-card">
+      {% for key, label, hint in [
+          ('dir_station_ids', 'Station IDs', 'Legal IDs for the top of the hour'),
+          ('dir_psas', 'PSAs and liners', 'Public service announcements, DJ liners'),
+          ('dir_jingles', 'Jingles and sweepers', 'Short branding between songs'),
+          ('dir_ads', 'Ads and underwriting', 'Paid spots, rotating evenly'),
+          ('dir_shows', 'Shows', 'Syndicated shows — the newest file plays')] %}
+      <div class="st-field" style="margin-bottom:.8rem">
+        <label for="wz-{{ key }}">{{ label }}</label>
+        <div class="wiz-row">
+          <input id="wz-{{ key }}" autocomplete="off" value="{{ a[key] }}"
+                 placeholder="\\NAS\Music\{{ label|replace(' ', '') }}">
+          <button class="btn btn-ghost" type="button" onclick="wizPick('wz-{{ key }}')">Browse…</button>
+        </div>
+        <p class="st-help">{{ hint }}</p>
+      </div>
+      {% endfor %}
+    </div>
+    <div class="wiz-actions">
+      <button class="btn btn-ghost" onclick="wizBack()">Back</button>
+      <button class="btn btn-ghost" onclick="wizSkip('spots')">Skip for now</button>
+      <button class="btn btn-green" onclick="wizSave('spots')">Next</button></div>
+
+    {% elif step == 'audio' %}
+    <h1>Audio output</h1>
+    <p class="wiz-sub">Which device StudioFire should play through. The Windows default
+      is usually right — pick a specific one if the PC has several.</p>
+    <div class="st-card">
+      <div class="st-field">
+        <label for="wz-device">Output device</label>
+        <div class="wiz-row">
+          <select id="wz-device" style="flex:1"><option value="">Windows default</option></select>
+          <button class="btn btn-ghost" type="button" onclick="wizTone()">Play a test tone</button>
+        </div>
+        <p class="st-help" id="wz-tone-note">A short 440 Hz tone at low volume.</p>
+      </div>
+      <div id="wz-heard" class="wiz-heard" hidden>
+        <p><strong>Did you hear it?</strong></p>
+        <div class="wiz-row">
+          <button class="btn btn-green" type="button" onclick="wizHeard(true)">Yes</button>
+          <button class="btn btn-ghost" type="button" onclick="wizHeard(false)">No</button>
+        </div>
+      </div>
+      <div id="wz-tips" class="st-banner st-banner-warn" hidden>
+        No sound? Check the volume and the cable, try “Windows default”, and remember that
+        when StudioFire runs as a Windows service the tone comes from the service
+        session — the real proof is the On Air page and the receiver.
+      </div>
+    </div>
+    <div class="wiz-actions">
+      <button class="btn btn-ghost" onclick="wizBack()">Back</button>
+      <button class="btn btn-green" onclick="wizSave('audio')">Next</button></div>
+
+    {% elif step == 'emergency' %}
+    <h1>If the music stops</h1>
+    <p class="wiz-sub">If the library or the network disappears mid-song, StudioFire keeps
+      playing from a local copy it keeps ready — the station stays on air instead of
+      going silent.</p>
+    <div class="st-card">
+      <label class="wiz-check">
+        <input type="checkbox" id="wz-fill" checked>
+        <span>Keep a local emergency copy filled from my library (recommended)</span></label>
+      <p class="st-help" style="margin-top:.5rem">StudioFire re-fills that copy on its own.</p>
+      <div class="st-banner st-banner-warn" style="margin-top:.8rem">Without a local copy, a
+        dropped network share means silence until it comes back.</div>
+    </div>
+    <div class="wiz-actions">
+      <button class="btn btn-ghost" onclick="wizBack()">Back</button>
+      <button class="btn btn-green" onclick="wizSave('emergency')">Next</button></div>
+
+    {% elif step == 'streaming' %}
+    <h1>Streaming <span class="wiz-opt">optional</span></h1>
+    <p class="wiz-sub">If you stream on the internet, StudioFire can write the current song
+      to a file your encoder reads. Skip it and set it up later if you prefer.</p>
+    <div class="st-card">
+      <div class="st-field">
+        <label for="wz-np">Now-playing file</label>
+        <div class="wiz-row">
+          <input id="wz-np" autocomplete="off" value="{{ a.np_file }}"
+                 placeholder="\\NAS\share\CurrentSong.txt">
+          <button class="btn btn-ghost" type="button" onclick="wizPick('wz-np')">Browse…</button>
+        </div>
+        <p class="st-help">Point this at the file your encoder (e.g. BUTT) polls. A full
+          network path is fine.</p>
+      </div>
+      <p class="st-help">Stream host address and login live in
+        <strong>Settings → Streaming</strong> once you are done here.</p>
+    </div>
+    <div class="wiz-actions">
+      <button class="btn btn-ghost" onclick="wizBack()">Back</button>
+      <button class="btn btn-ghost" onclick="wizSkip('streaming')">Skip for now</button>
+      <button class="btn btn-green" onclick="wizSave('streaming')">Next</button></div>
+
+    {% else %}
+    <h1>Ready to go</h1>
+    <p class="wiz-sub">Here is what you chose. Everything can be changed later in Settings.</p>
+    <div class="st-card">
+      <table class="st-table"><tbody>
+        <tr><td class="st-name"><strong>Station</strong></td>
+          <td class="st-path"><code>{{ a.station_name or 'StudioFire' }}</code></td></tr>
+        <tr><td class="st-name"><strong>Music library</strong></td>
+          <td class="st-path"><code>{{ a.music_root or 'not set' }}</code></td></tr>
+        <tr><td class="st-name"><strong>Playlists</strong></td>
+          <td class="st-path"><code>{{ a.playlists_dir or setup.default_playlists_dir }}</code></td></tr>
+        <tr><td class="st-name"><strong>Station IDs / ads</strong></td>
+          <td class="st-path"><code>{{ a.dir_station_ids or 'not set' }}</code></td></tr>
+        <tr><td class="st-name"><strong>Audio device</strong></td>
+          <td class="st-path"><code>{{ a.audio_device_guid or 'Windows default' }}</code></td></tr>
+      </tbody></table>
+    </div>
+    <div class="wiz-actions">
+      <button class="btn btn-ghost" onclick="wizBack()">Back</button>
+      <a class="btn btn-ghost" href="/api/setup/settings-copy">Download a copy of your settings</a>
+      <button class="btn btn-green" onclick="wizFinish()">Go to On Air</button></div>
+    {% endif %}
+  </main>
 </div>
+
+<dialog class="sf-picker" id="wiz-picker">
+  <h3 style="margin:0 0 .6rem;font-size:1rem">Choose a folder</h3>
+  <div class="row" style="margin:.2rem 0 .5rem">
+    <button class="btn btn-ghost btn-sm" type="button" onclick="wizGo('')">Drives</button>
+    <button class="btn btn-ghost btn-sm" type="button" onclick="wizGo(wizParent)">Up</button>
+    <span id="wiz-path" class="muted" style="font-size:.82rem"></span>
+  </div>
+  <div id="wiz-list" class="picker"></div>
+  <div class="st-foot"><span style="flex:1"></span>
+    <button class="btn btn-ghost" type="button" onclick="document.getElementById('wiz-picker').close()">Cancel</button>
+    <button class="btn btn-green" type="button" onclick="wizUse()">Use this folder</button>
+  </div>
+</dialog>
+
+<script>
+let wizTarget = null, wizPath = "", wizParent = null;
+
+function wizFlash(id, text, bad) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = text || "";
+  el.dataset.error = bad ? "1" : "0";
+}
+
+async function wizSave(step) {
+  const v = {};
+  if (step === "station") {
+    v.station_name = document.getElementById("wz-name").value.trim();
+    v.time_format = document.querySelector("#wz-tf button[aria-pressed=true]").dataset.tf;
+  } else if (step === "library") {
+    v.music_root = document.getElementById("wz-music").value.trim();
+  } else if (step === "playlists") {
+    v.playlists_dir = document.getElementById("wz-pl").value.trim();
+  } else if (step === "spots") {
+    for (const k of ["dir_station_ids", "dir_psas", "dir_jingles", "dir_ads", "dir_shows"]) {
+      const el = document.getElementById("wz-" + k);
+      if (el && el.value.trim()) v[k] = el.value.trim();
+    }
+  } else if (step === "audio") {
+    v.audio_device_guid = document.getElementById("wz-device").value;
+  } else if (step === "emergency") {
+    v.fill_from_library = document.getElementById("wz-fill").checked;
+  } else if (step === "streaming") {
+    v.np_file = document.getElementById("wz-np").value.trim();
+  }
+  const r = await fetch("/api/setup/step", {method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({step: step, values: v})});
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    if (step === "library") wizFlash("wz-library-note", d.detail || "Could not save that.", true);
+    else alert(d.detail || "Could not save that.");
+    return;
+  }
+  if (d.found_songs !== undefined) {
+    wizFlash("wz-library-note", "Found " + d.found_songs.toLocaleString() +
+             " songs — indexing in the background.", false);
+    setTimeout(() => location.href = "/setup", 1400);
+    return;
+  }
+  location.href = "/setup";
+}
+
+async function wizSkip(step) {
+  const r = await fetch("/api/setup/step", {method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({step: step, values: {}})});
+  if (r.ok) location.href = "/setup";
+}
+
+function wizBack() { history.back(); }
+
+async function wizFinish() {
+  await fetch("/api/setup/step", {method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({step: "done", values: {}})});
+  location.href = "/";
+}
+
+document.querySelectorAll("#wz-tf button[data-tf]").forEach(b => {
+  b.addEventListener("click", () => {
+    for (const x of document.querySelectorAll("#wz-tf button[data-tf]"))
+      x.setAttribute("aria-pressed", x === b ? "true" : "false");
+  });
+});
+
+function wizPick(target) {
+  wizTarget = target;
+  const cur = document.getElementById(target).value.trim();
+  document.getElementById("wiz-picker").showModal();
+  wizGo(cur || "");
+}
+
+async function wizGo(path) {
+  const r = await fetch("/api/fs/list?path=" + encodeURIComponent(path));
+  if (!r.ok) { document.getElementById("wiz-path").textContent = "Cannot open that folder"; return; }
+  const d = await r.json();
+  wizPath = d.path; wizParent = d.parent;
+  document.getElementById("wiz-path").textContent = d.path || "Choose a drive";
+  const list = document.getElementById("wiz-list");
+  list.innerHTML = "";
+  for (const name of d.dirs) {
+    const b = document.createElement("button");
+    b.className = "pickdir"; b.type = "button";
+    b.textContent = "\uD83D\uDCC1 " + name;
+    b.onclick = () => wizGo(d.path ? d.path.replace(/[\\\/]$/, "") + "\\" + name : name);
+    list.appendChild(b);
+  }
+  if (!d.dirs.length) list.innerHTML = "<div class='muted'>No folders inside</div>";
+}
+
+function wizUse() {
+  if (!wizPath) return;
+  document.getElementById(wizTarget).value = wizPath;
+  document.getElementById("wiz-picker").close();
+}
+
+async function wizLoadDevices() {
+  const sel = document.getElementById("wz-device");
+  if (!sel) return;
+  const d = await (await fetch("/api/setup/audio-devices")).json();
+  for (const dev of (d.devices || [])) {
+    const o = document.createElement("option");
+    o.value = dev.guid; o.textContent = dev.label || dev.guid;
+    sel.appendChild(o);
+  }
+  const saved = "{{ a.audio_device_guid }}";
+  if (saved) sel.value = saved;
+}
+
+async function wizTone() {
+  const guid = document.getElementById("wz-device").value;
+  const r = await fetch("/api/setup/test-tone", {method: "POST",
+    headers: {"Content-Type": "application/json"}, body: JSON.stringify({guid: guid})});
+  const d = await r.json().catch(() => ({}));
+  wizFlash("wz-tone-note", d.note || (d.ok ? "Playing." : "Could not play."), !d.ok);
+  document.getElementById("wz-heard").hidden = false;
+}
+
+function wizHeard(yes) {
+  document.getElementById("wz-heard").hidden = true;
+  document.getElementById("wz-tips").hidden = !!yes;
+  if (yes) wizSave("audio");
+}
+
+wizLoadDevices();
+</script>
 {% endblock %}
