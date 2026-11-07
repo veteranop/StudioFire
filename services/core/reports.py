@@ -629,12 +629,24 @@ def _music_join(conn, lo: str, hi: str, group_col: str, limit: int | None = None
           FROM play_history ph
           JOIN playlist_items pi
             ON pi.id = json_extract(ph.extra, '$.item_id')
-          -- the library index and the playlist rows do not always agree on
-          -- the separator (forward slashes vs backslashes), so compare a
-          -- normalised path instead of raw equality
-          JOIN tracks t
-            ON lower(replace(t.path, '/', char(92)))
-             = lower(replace(pi.path, '/', char(92)))
+          -- Two things make a naive equality join lie here:
+          --  * the index and the playlist rows disagree on the separator
+          --    (forward vs back slashes), so paths are normalised; and
+          --  * the same file can appear in `tracks` more than once (one row per
+          --    scan vintage), and the older twin is often the one with no
+          --    artist/genre, which is how an artist report of almost all
+          --    "Unknown" happened on a library where most rows HAD an artist.
+          -- So pick ONE row per file, preferring tagged, present, enriched.
+          JOIN tracks t ON t.id = (
+               SELECT t2.id FROM tracks t2
+                WHERE lower(replace(t2.path, '/', char(92)))
+                    = lower(replace(pi.path, '/', char(92)))
+                ORDER BY (t2.missing = 0) DESC,
+                         (t2.artist IS NOT NULL
+                          AND TRIM(t2.artist) <> '') DESC,
+                         (t2.genre IS NOT NULL) DESC,
+                         t2.meta_read DESC, t2.id
+                LIMIT 1)
          WHERE ph.event = 'track_start'
            AND ph.source IN ('playlist', 'show', 'manual')
            AND julianday(ph.ts) BETWEEN julianday(?) AND julianday(?)
