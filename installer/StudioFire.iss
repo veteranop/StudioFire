@@ -89,7 +89,10 @@ Name: "{app}"; Permissions: users-modify
 Name: "{app}\assets\emergency"
 Name: "{app}\data"
 Name: "{app}\logs"
-Name: "{app}\precache"
+Name: "{app}\precache"
+; station data lives OUTSIDE the install folder so an upgrade, a 
+; reinstall or an uninstall-with-keep-data never touches it
+Name: "{commonappdata}\StudioFire"
 
 [Icons]
 Name: "{autoprograms}\{#AppName}\Start {#AppName}"; Filename: "{app}\start-all.bat"; WorkingDir: "{app}"; IconFilename: "{app}\web\static\sf_icon_dark.ico"
@@ -173,4 +176,27 @@ begin
       '}' + #13#10;
     SaveStringToFile(ConfigPath, Cfg, False);
   end;
+end;
+
+
+{ Ask before throwing away the station's data. Default is KEEP: a station
+  manager uninstalling to reinstall must not lose playlists, users or history. }
+function InitializeUninstall(): Boolean;
+var
+  Answer: Integer;
+begin
+  Answer := MsgBox('Keep your settings, playlists and logs?' + #13#10 + #13#10 +
+    'Yes  - keep them (recommended). Reinstalling StudioFire brings everything ' +
+    'back.' + #13#10 +
+    'No   - delete them too. Your music files and .lst files are never touched.',
+    mbConfirmation, MB_YESNO);
+  if Answer = IDNO then
+    DelTree(ExpandConstant('{commonappdata}\StudioFire'), True, True, True);
+  Result := True;
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  { nothing else to clean: the [UninstallRun] entries stop the services, remove
+    them and drop the firewall rule before this runs }
 end;

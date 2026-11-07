@@ -104,7 +104,11 @@ def save_royalty_reporting(block: dict, path: str | None = None) -> dict:
     file is read by the on-air services.
     """
     import json as _json
-    p = path or os.path.join(ROOT, "config", "config.json")
+    # STUDIOFIRE_CONFIG lets a test harness (and the CI install smoke test)
+    # point a throwaway instance at its own file without touching the
+    # station's config.
+    p = (path or os.environ.get("STUDIOFIRE_CONFIG")
+         or os.path.join(ROOT, "config", "config.json"))
     try:
         with open(p, encoding="utf-8") as fh:
             cfg = _json.load(fh)
@@ -155,7 +159,11 @@ def update_config(block: dict, path: str | None = None) -> dict:
     option. Unknown sections are preserved untouched.
     """
     import json as _json
-    p = path or os.path.join(ROOT, "config", "config.json")
+    # STUDIOFIRE_CONFIG lets a test harness (and the CI install smoke test)
+    # point a throwaway instance at its own file without touching the
+    # station's config.
+    p = (path or os.environ.get("STUDIOFIRE_CONFIG")
+         or os.path.join(ROOT, "config", "config.json"))
     try:
         with open(p, encoding="utf-8") as fh:
             cfg = _json.load(fh)
@@ -182,7 +190,11 @@ def update_config(block: dict, path: str | None = None) -> dict:
 
 def load_config(path: str | None = None) -> dict:
     cfg = {}
-    p = path or os.path.join(ROOT, "config", "config.json")
+    # STUDIOFIRE_CONFIG lets a test harness (and the CI install smoke test)
+    # point a throwaway instance at its own file without touching the
+    # station's config.
+    p = (path or os.environ.get("STUDIOFIRE_CONFIG")
+         or os.path.join(ROOT, "config", "config.json"))
     try:
         with open(p, "rb") as f:
             cfg = json.load(f)
