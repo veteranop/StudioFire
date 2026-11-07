@@ -123,6 +123,20 @@
         </div>
         <div class="st-flash" id="tf-msg" aria-live="polite"></div>
       </div>
+
+      <div class="st-card">
+        <div class="st-card-head">
+          <h3>Support contact</h3>
+        </div>
+        <div class="st-field" style="max-width:520px">
+          <label for="sup-contact">Who volunteers call</label>
+          <input id="sup-contact" autocomplete="off"
+                 placeholder="e.g. Pat at Example IT — 555-0100">
+          <p class="st-help">Shown on the Help page, so nobody has to hunt for a
+            number when something looks wrong.</p>
+        </div>
+        <div class="st-flash" id="sup-msg" aria-live="polite"></div>
+      </div>
     </section>
 
     <!-- ===== 2. STREAMING ============================================= -->
@@ -1447,9 +1461,26 @@ async function saveSxSettings() {
   flash("sx-msg", "Saved \u2713");
 }
 
+
+async function loadSupportContact() {
+  const el = document.getElementById("sup-contact");
+  if (!el) return;
+  const d = await (await fetch("/api/settings/support_contact")).json();
+  el.value = d.contact || "";
+}
+
+document.getElementById("sup-contact") &&
+  document.getElementById("sup-contact").addEventListener("change", async e => {
+    const r = await fetch("/api/settings/support_contact", {method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({contact: e.target.value})});
+    flash("sup-msg", r.ok ? "Saved ✓" : "Could not save that.", !r.ok);
+  });
+
 /* ============================================================ boot */
 stShow(stGroupFromHash(), false);
 loadDirs();
+loadSupportContact();
 loadStreaming();
 loadUsers();
 loadDevices();

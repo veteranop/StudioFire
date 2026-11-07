@@ -487,6 +487,20 @@ def create_app(cfg: dict) -> FastAPI:
         db.set_setting(conn, key, path)
         return {"ok": True}
 
+
+    @app.get("/api/settings/support_contact")
+    def get_support_contact(conn=Depends(get_conn), _=Depends(api_user)):
+        """Who a volunteer calls when something looks wrong. Blank means the
+        Help page falls back to "ask whoever set StudioFire up"."""
+        return {"contact": db.get_setting(conn, "support_contact") or ""}
+
+    @app.post("/api/settings/support_contact")
+    def set_support_contact(body: dict, conn=Depends(get_conn),
+                            _=Depends(api_user)):
+        db.set_setting(conn, "support_contact",
+                       (body.get("contact") or "").strip()[:200])
+        return {"ok": True}
+
     @app.get("/api/settings/time_format")
     def get_time_format(conn=Depends(get_conn), _=Depends(api_user)):
         """The station's clock display format: '12' (AM/PM) or '24' (military)."""
@@ -978,9 +992,12 @@ def create_app(cfg: dict) -> FastAPI:
                       reports=cat, reports_json=json.dumps(cat))
 
     @app.get("/help", response_class=HTMLResponse)
-    def help_page(request: Request, sess: dict = Depends(page_user)):
+    def help_page(request: Request, sess: dict = Depends(page_user),
+                  conn=Depends(get_conn)):
         return render(request, "help.html", role=sess["role"],
                       running_version=running_version,
+                      support_contact=db.get_setting(conn, "support_contact")
+                      or "",
                       changelog=changelog.load())
 
     @app.get("/api/reports")

@@ -56,17 +56,22 @@ just runs the services.
 
 ## Install
 
-**[Download the latest `StudioFire-Setup-<version>.exe` from Releases](https://github.com/veteranop/StudioFire/releases/latest).**
+**1.** [Download `StudioFire-Setup-<version>.exe` from Releases](https://github.com/veteranop/StudioFire/releases/latest)
 
-The installer bundles everything (embedded Python, mpv, NSSM) — nothing to
-pre-install. The wizard asks for your station name and music folder, can
-register the auto-restarting Windows services, and opens the firewall for the
-web GUI. Upgrades keep your config, playlists, and data.
+**2.** Run it and accept the UAC prompt — that is the only one. The installer
+bundles everything (embedded Python, mpv, NSSM); there is nothing else to
+install and nothing to configure by hand.
+
+**3.** Follow the setup screens in your browser: station name → admin account →
+music folder (a local folder or a share like `\\NAS\Music`) → playlists → the
+audio device, with a test tone → done.
+
+That is the whole install. No terminal, no Python, no JSON, no mapped drive.
+A full walkthrough of the nine screens, and what each one is really asking, is in
+[the setup guide](docs/INSTALL-ACCEPTANCE.md).
 
 Requirements: a Windows 10/11 PC wired to your audio chain, and your music on
-a local disk or NAS share. If the music lives on a NAS and you run StudioFire
-as Windows services, see [DEPLOY.md](DEPLOY.md) for the service Log On +
-drive-mapping step.
+a local disk or NAS share.
 
 > **A note on the Windows SmartScreen warning:** the installer is not yet
 > code-signed, so Windows will show "Windows protected your PC" on first run.
@@ -74,23 +79,17 @@ drive-mapping step.
 > installer is built from this repository (`installer/`), and checksums are
 > published with each release.
 
-### Running from source (dev)
-
-```
-pip install -r requirements.txt   # Python 3.12
-start-all.bat                     # engine + core/web + indexer
-healthcheck.bat                   # is it on air?
-```
-
-Web GUI: `http://<machine>:8080` — first run creates the admin account.
+Installing from source, running the tests, or building a release yourself:
+see [docs/DEVELOPING.md](docs/DEVELOPING.md).
 
 ## Updates
 
-There is no auto-updater yet. Updates ship as new installers on the
-[Releases page](https://github.com/veteranop/StudioFire/releases) — watch the
-repo to get notified. Running a newer installer over an existing install
-upgrades in place and keeps your config and data. A built-in update check is
-on the roadmap.
+StudioFire checks for a newer release every few hours and offers it in
+**Settings → About & updates**. It never installs anything by itself: an admin
+presses Install, the app backs itself up first, and if the new version does not
+start cleanly it puts the old one back automatically. Running a newer installer
+over an existing install also upgrades in place and keeps your config, playlists,
+users and history.
 
 ## Telemetry & privacy
 
@@ -128,10 +127,20 @@ restarts it in seconds and it resumes its persisted queue, mid-show.
 ## Support
 
 StudioFire is developed by [VeteranOp, LLC](https://veteranop.com), a
-veteran-owned IT and managed-services company. Open an
-[issue](https://github.com/veteranop/StudioFire/issues) for bugs and feature
-requests — or contact us if you'd like StudioFire installed, configured, and
-managed for your station.
+veteran-owned IT and managed-services company.
+
+- **Your own station's support contact** — set it in **Settings → Station →
+  Support contact**; it appears on the Help page and in error banners, so
+  volunteers know who to call without hunting.
+- **Community** — [GitHub Issues](https://github.com/veteranop/StudioFire/issues)
+  for bugs, [Discussions](https://github.com/veteranop/StudioFire/discussions)
+  for questions and ideas.
+- **Paid support** — installation, configuration and managed operation for your
+  station: [contact VeteranOp](https://veteranop.com).
+
+The full support policy is in [SUPPORT.md](SUPPORT.md). StudioFire is provided
+as-is under the licence below — there is no warranty and no guaranteed response
+time unless you have a support agreement.
 
 ## License
 

@@ -361,7 +361,14 @@
     </table>
 
     <h2 id="contact">Who to call</h2>
-    <p>{{ station }} is supported by <strong>VeteranOp</strong>. If anything looks
+    {% if support_contact %}
+    <p><strong>Your support contact:</strong> {{ support_contact }}</p>
+    {% else %}
+    <p><strong>Your support contact:</strong> ask whoever set up StudioFire for
+      your station. (An admin can put a name and number here in
+      <a href="/settings#station">Settings → Station</a>.)</p>
+    {% endif %}
+    <p>If anything looks
       wrong, call or message your support contact — include the time it started
       and a photo of the screen if you can. Never improvise on the on-air machine.</p>
 
