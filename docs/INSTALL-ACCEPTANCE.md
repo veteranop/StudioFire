@@ -8,6 +8,17 @@ drives and no earlier StudioFire.
 Record the date, the build (`StudioFire-Setup-<ver>.exe` size + sha256) and the
 result of each step.
 
+## Run log
+
+| Run | Date | Build | Machine | Result |
+|---|---|---|---|---|
+| 1 | 2026-11-07 | `StudioFire-Setup-1.6.3.exe`, 56,292,698 B, sha256 `729D5931…C201` | production PC, clean (previous install deleted by hand), Windows 11 | **Install completed** — Mark: "installer worked like a champ". Steps 5–7 (UNC, upgrade in place, uninstall/reinstall) not yet exercised. |
+
+Run 1 also caught the reason the earlier build never finished: setup ran the
+service-registration batch with no console, and that batch prompts for the
+service account, so it waited on invisible input. Fixed before this run — the
+installer now asks on its own page.
+
 ## The seven steps
 
 1. **Run the installer with defaults.**
