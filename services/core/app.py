@@ -10,6 +10,7 @@ from __future__ import annotations
 import csv
 import datetime
 import io
+import json
 import logging
 import os
 import sys
@@ -20,7 +21,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import auth, changelog, db, spots
+from . import auth, changelog, db, reports, spots
 from . import schedule as sched
 from .. import pathmap
 
@@ -620,7 +621,9 @@ def create_app(cfg: dict) -> FastAPI:
 
     @app.get("/reports", response_class=HTMLResponse)
     def reports_page(request: Request, sess: dict = Depends(page_user)):
-        return render(request, "reports.html", role=sess["role"])
+        cat = reports.catalog()
+        return render(request, "reports.html", role=sess["role"],
+                      reports=cat, reports_json=json.dumps(cat))
 
     @app.get("/help", response_class=HTMLResponse)
     def help_page(request: Request, sess: dict = Depends(page_user)):
@@ -652,6 +655,64 @@ def create_app(cfg: dict) -> FastAPI:
         return Response(content=buf.getvalue(), media_type="text/csv",
                         headers={"Content-Disposition":
                                  f'attachment; filename="{fname}"'})
+
+    def _report_range(start: str, end: str) -> tuple[str, str]:
+        """Validate + clamp a report window (never trust the query string)."""
+        today = datetime.date.today()
+        try:
+            s = datetime.date.fromisoformat(start) if start else today
+        except ValueError:
+            s = today
+        try:
+            e = datetime.date.fromisoformat(end) if end else s
+        except ValueError:
+            e = s
+        if e < s:
+            s, e = e, s
+        if (e - s).days > 400:          # a report is evidence, not a data dump
+            s = e - datetime.timedelta(days=400)
+        return s.isoformat(), e.isoformat()
+
+    @app.get("/api/reports/{report_id}")
+    def api_report_run(report_id: str, start: str = "", end: str = "",
+                       conn=Depends(get_conn), _=Depends(api_user)):
+        """Run one report and return it as data (screen tables read this)."""
+        s, e = _report_range(start, end)
+        try:
+            return reports.run(report_id, conn, s, e)
+        except ValueError:
+            raise HTTPException(404, "unknown report")
+
+    @app.get("/api/reports/{report_id}.csv")
+    def api_report_csv(report_id: str, start: str = "", end: str = "",
+                       conn=Depends(get_conn), _=Depends(api_user)):
+        s, e = _report_range(start, end)
+        try:
+            rep = reports.run(report_id, conn, s, e)
+        except ValueError:
+            raise HTTPException(404, "unknown report")
+        body = reports.to_csv(rep)
+        fname = f"KDPI-{report_id}-{s}_to_{e}.csv"
+        return Response(content=body, media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition":
+                                 f'attachment; filename="{fname}"'})
+
+    @app.get("/reports/print", response_class=HTMLResponse)
+    def report_print(request: Request, report: str = "as-aired",
+                     start: str = "", end: str = "",
+                     sess: dict = Depends(page_user),
+                     conn=Depends(get_conn)):
+        """A print-ready page: the browser's own Print → Save as PDF is the
+        station's PDF path (no Chrome dependency on the playout box)."""
+        s, e = _report_range(start, end)
+        try:
+            rep = reports.run(report, conn, s, e)
+        except ValueError:
+            raise HTTPException(404, "unknown report")
+        return render(request, "report_print.html", role=sess["role"],
+                      rep=rep, running_version=running_version,
+                      generated=datetime.datetime.now().strftime(
+                          "%d %B %Y, %H:%M"))
 
     @app.get("/api/health/tiles")
     def health_tiles(conn=Depends(get_conn), _=Depends(api_user)):

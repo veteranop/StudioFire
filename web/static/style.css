@@ -660,3 +660,27 @@ select {
   display: block; color: #dbe6ee;
   white-space: normal; overflow-wrap: anywhere; line-height: 1.25;
 }
+
+/* ---- Reports: controls, dense tables, verdict colours ------------------- */
+.rep-controls { display: flex; flex-wrap: wrap; gap: .7rem; align-items: flex-end; }
+.rep-controls label { margin: 0; font-size: .82rem; color: var(--muted); }
+.rep-controls select, .rep-controls input { margin-top: .2rem; display: block;
+  min-width: 9.5rem; }
+.rep-controls label#rep-kind-wrap[hidden] { display: none; }
+
+.rep-head { margin: .9rem 0 .2rem; }
+.rep-head h2 { margin: 0; font-size: 1.15rem; }
+.rep-sub { font-size: .85rem; color: var(--muted); }
+
+.rep-table-wrap { overflow-x: auto; margin-top: .4rem; }
+.rep-table { font-size: .9rem; }
+.rep-table th { white-space: nowrap; }
+.rep-table td { padding: .45rem .5rem; }
+.rep-table tbody tr:nth-child(even) td { background: #1c2530; }
+
+.rep-status { font-weight: 700; }
+.rep-ok        { color: var(--green); }
+.rep-under     { color: var(--yellow); }
+.rep-not-aired { color: var(--red); }
+.rep-missed    { color: var(--red); font-weight: 700; }
+.rep-note { font-size: .82rem; margin-top: .7rem; }

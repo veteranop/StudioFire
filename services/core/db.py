@@ -310,6 +310,42 @@ CREATE TABLE IF NOT EXISTS skipped_items (
 );
 CREATE INDEX IF NOT EXISTS idx_skipped_items_ts ON skipped_items(ts);
 """),
+    (15, """
+-- Reporting attribution. play_history records what aired but not WHICH playlist
+-- or WHICH spot rule it came from (the source column only says
+-- playlist/show/spot), so "what playlist aired on Tuesday" and "how many times
+-- did this underwriter's spot air" were both unanswerable. Two small tables:
+--
+-- queue_attribution: written by the feeder as it pushes each item, keyed by the
+--   PRECACHE path — which is exactly what the engine's journal reports back on
+--   track_start. The journal ingest joins on it and copies the ids into
+--   play_history.extra. Replaced on re-feed, pruned after a week.
+--
+-- playlist_airings: one row per continuous stretch a playlist (or show) was on
+--   air, opened/closed by the feeder, so a report can say "from 06:00 to 09:00,
+--   MUSIC LIST 10" without guessing from individual tracks.
+CREATE TABLE IF NOT EXISTS queue_attribution (
+  path TEXT PRIMARY KEY,
+  kind TEXT,
+  playlist_id INTEGER,
+  item_id INTEGER,
+  spot_rule_id INTEGER,
+  label TEXT,
+  fed_at REAL
+);
+CREATE INDEX IF NOT EXISTS idx_queue_attr_fed ON queue_attribution(fed_at);
+
+CREATE TABLE IF NOT EXISTS playlist_airings (
+  id INTEGER PRIMARY KEY,
+  playlist_id INTEGER,
+  name TEXT,
+  started_at REAL NOT NULL,
+  ended_at REAL,
+  trigger TEXT,
+  ended_reason TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_airings_started ON playlist_airings(started_at);
+"""),
 ]
 
 SCHEMA_VERSION = MIGRATIONS[-1][0]

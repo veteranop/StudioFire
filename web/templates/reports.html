@@ -16,65 +16,144 @@
 {% block content %}
 <div class="card">
   <h1>Reports</h1>
-  <p class="muted">What actually aired — the as-aired log and spot playout
-    (proof of performance). Pick a date range and run it.</p>
-  <div class="row">
-    <label style="margin:0">From
-      <input type="date" id="rep-start" style="margin-top:.2rem"></label>
-    <label style="margin:0">To
-      <input type="date" id="rep-end" style="margin-top:.2rem"></label>
-    <label style="margin:0">Show
-      <select id="rep-kind" style="margin-top:.2rem; display:block">
+  <p class="muted">Pick a report, a date range and how you want it — on screen,
+    a spreadsheet file, or printed for the file.</p>
+
+  <div class="rep-controls">
+    <label>Report
+      <select id="rep-type">
+        {% for r in reports %}
+        <option value="{{ r.id }}">{{ r.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>From
+      <input type="date" id="rep-start">
+    </label>
+    <label>To
+      <input type="date" id="rep-end">
+    </label>
+    <label id="rep-kind-wrap" hidden>Show
+      <select id="rep-kind">
         <option value="all">Everything</option>
         <option value="music">Music only</option>
         <option value="spots">Spots only (IDs / ads / PSAs)</option>
-      </select></label>
-    <button class="btn btn-green" onclick="runReport()">Run</button>
-    <button class="btn" onclick="exportReport()">⬇ Export CSV</button>
+      </select>
+    </label>
+    <label>Format
+      <select id="rep-format">
+        <option value="screen">On screen</option>
+        <option value="csv">Spreadsheet (CSV)</option>
+        <option value="print">Print / PDF</option>
+      </select>
+    </label>
+    <button class="btn btn-green" id="rep-run" onclick="runReport()">Run report</button>
   </div>
-  <div id="rep-summary" class="muted" style="margin:.6rem 0"></div>
-  <table class="table">
-    <thead><tr><th style="width:12rem">Time</th><th>What aired</th>
-      <th style="width:8rem">Type</th></tr></thead>
-    <tbody id="rep-body">
-      <tr><td colspan="3" class="muted">Choose a date range and press Run.</td></tr>
-    </tbody>
-  </table>
+
+  <p class="muted" id="rep-blurb" style="margin:.2rem 0 .8rem"></p>
+
+  <div id="rep-head" class="rep-head" hidden>
+    <h2 id="rep-title"></h2>
+    <div class="rep-sub" id="rep-sub"></div>
+  </div>
+
+  <div id="rep-summary" class="muted" style="margin:.4rem 0"></div>
+  <div class="rep-table-wrap">
+    <table class="table rep-table">
+      <thead id="rep-head-row"></thead>
+      <tbody id="rep-body">
+        <tr><td class="muted">Choose a report and press Run.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="rep-note muted" id="rep-note" hidden></p>
 </div>
+
 <script>
+const REPORTS = {{ reports_json | safe }};
 function today() { return new Date().toLocaleDateString("en-CA"); }
 document.getElementById("rep-start").value = today();
 document.getElementById("rep-end").value = today();
-function repParams() {
-  const s = document.getElementById("rep-start").value;
-  const e = document.getElementById("rep-end").value;
-  const k = document.getElementById("rep-kind").value;
-  return "start=" + s + "&end=" + e + "&kind=" + k;
+
+function selected() { return document.getElementById("rep-type").value; }
+function range() {
+  return { start: document.getElementById("rep-start").value,
+           end: document.getElementById("rep-end").value };
 }
+function blurb() {
+  const r = REPORTS.find(x => x.id === selected());
+  document.getElementById("rep-blurb").textContent = r ? r.blurb : "";
+  document.getElementById("rep-kind-wrap").hidden = selected() !== "as-aired";
+}
+document.getElementById("rep-type").addEventListener("change", function () {
+  blurb();
+  runReport();
+});
+
+function url(kind) {
+  const p = range();
+  const q = "start=" + p.start + "&end=" + p.end;
+  if (kind === "csv") return "/api/reports/" + selected() + ".csv?" + q;
+  if (kind === "print") return "/reports/print?report=" + selected() + "&" + q;
+  return null;
+}
+
 async function runReport() {
-  const d = await (await fetch("/api/reports?" + repParams())).json();
+  const fmt = document.getElementById("rep-format").value;
+  if (fmt === "csv") { window.location = url("csv"); return; }
+  if (fmt === "print") { window.open(url("print"), "_blank"); return; }
+
+  const p = range();
+  const body = document.getElementById("rep-body");
+  const head = document.getElementById("rep-head-row");
+  body.innerHTML = "<tr><td class='muted'>Running…</td></tr>";
+  let d;
+  try {
+    d = await (await fetch("/api/reports/" + selected() + "?start=" +
+                           p.start + "&end=" + p.end)).json();
+  } catch (e) {
+    body.innerHTML = "<tr><td class='muted'>Could not run that report.</td></tr>";
+    return;
+  }
+  document.getElementById("rep-head").hidden = false;
+  document.getElementById("rep-title").textContent = d.title || "";
+  document.getElementById("rep-sub").textContent = d.subtitle || "";
   document.getElementById("rep-summary").textContent =
-    d.count + " item(s) aired · " + d.start +
-    (d.end !== d.start ? " to " + d.end : "");
-  const b = document.getElementById("rep-body");
-  b.innerHTML = "";
-  if (!d.rows.length) {
-    b.innerHTML = "<tr><td colspan='3' class='muted'>Nothing aired in that " +
-      "range.</td></tr>";
+    (d.rows || []).length + " row(s)" + (d.subtitle ? " · " + d.subtitle : "");
+
+  head.innerHTML = "";
+  const htr = document.createElement("tr");
+  for (const h of (d.headers || [])) {
+    const th = document.createElement("th");
+    th.textContent = h;
+    htr.appendChild(th);
+  }
+  head.appendChild(htr);
+
+  body.innerHTML = "";
+  if (!(d.rows || []).length) {
+    body.innerHTML = "<tr><td colspan='" + ((d.headers || []).length || 1) +
+      "' class='muted'>Nothing to report for that range.</td></tr>";
     return;
   }
   for (const r of d.rows) {
     const tr = document.createElement("tr");
-    const t = new Date(r.ts);
-    tr.innerHTML = "<td></td><td></td><td></td>";
-    tr.children[0].textContent = isNaN(t) ? r.ts
-      : t.toLocaleString([], {hour12: window.SF_HOUR12});
-    tr.children[1].textContent = r.title;
-    tr.children[2].textContent = r.source;
-    b.appendChild(tr);
+    for (const c of (d.columns || [])) {
+      const td = document.createElement("td");
+      td.textContent = (r[c] === null || r[c] === undefined) ? "" : r[c];
+      const v = String(r[c] === null || r[c] === undefined ? "" : r[c]);
+      if (c === "status") td.className = "rep-status rep-" +
+        v.toLowerCase().replace(/[^a-z]+/g, "-");
+      if (c === "missed" && Number(r[c]) > 0) td.className = "rep-missed";
+      tr.appendChild(td);
+    }
+    body.appendChild(tr);
   }
+  const note = document.getElementById("rep-note");
+  note.hidden = !d.note;
+  note.textContent = d.note || "";
 }
-function exportReport() { window.location = "/api/reports.csv?" + repParams(); }
+blurb();
 runReport();
 </script>
 {% endblock %}

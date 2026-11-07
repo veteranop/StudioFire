@@ -67,6 +67,61 @@ def record_skip(conn: sqlite3.Connection, path: str,
         log.debug("feeder: could not record skip", exc_info=True)
 
 
+def record_attribution(conn: sqlite3.Connection, path: str, kind: str,
+                       playlist_id: int | None = None,
+                       item_id: int | None = None,
+                       spot_rule_id: int | None = None,
+                       label: str | None = None) -> None:
+    """Remember WHICH playlist item / spot rule a precache file was fed for.
+
+    play_history only says "playlist" or "spot"; the journal reports the precache
+    path back to us, so this map is the bridge that lets a report answer "which
+    playlist aired" and "how many times did this underwriter's spot air".
+    Never raises — bookkeeping must not break a feed.
+    """
+    try:
+        now = time.time()
+        conn.execute(
+            "REPLACE INTO queue_attribution"
+            "(path, kind, playlist_id, item_id, spot_rule_id, label, fed_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (path, kind, playlist_id, item_id, spot_rule_id, label, now))
+        conn.execute("DELETE FROM queue_attribution WHERE fed_at < ?",
+                     (now - 7 * 86400,))
+        conn.commit()
+    except sqlite3.Error:
+        log.debug("feeder: could not record attribution", exc_info=True)
+
+
+def open_airing(conn: sqlite3.Connection, playlist_id: int | None,
+                name: str | None, trigger: str) -> None:
+    """Close the stretch that is on air and open a new one (a playlist or show
+    went live). This is what makes "played from 06:00 to 09:00" a fact rather
+    than a guess from consecutive tracks."""
+    try:
+        now = time.time()
+        with conn:
+            conn.execute("UPDATE playlist_airings SET ended_at = ?, "
+                         "ended_reason = ? WHERE ended_at IS NULL",
+                         (now, "switched"))
+            conn.execute("INSERT INTO playlist_airings"
+                         "(playlist_id, name, started_at, trigger) "
+                         "VALUES (?, ?, ?, ?)", (playlist_id, name, now, trigger))
+    except sqlite3.Error:
+        log.debug("feeder: could not open airing", exc_info=True)
+
+
+def close_airing(conn: sqlite3.Connection, reason: str) -> None:
+    """End the current stretch (show over, stack stopped)."""
+    try:
+        with conn:
+            conn.execute("UPDATE playlist_airings SET ended_at = ?, "
+                         "ended_reason = ? WHERE ended_at IS NULL",
+                         (time.time(), reason))
+    except sqlite3.Error:
+        log.debug("feeder: could not close airing", exc_info=True)
+
+
 def _read_meta(path: str) -> dict:
     """Best-effort artist/album/title/duration from a LOCAL audio file — the
     pre-cached copy, so it's fast and works even off the NAS. Never raises."""
@@ -359,6 +414,9 @@ class Feeder:
         """Make a playlist the live rotation: replace P1's queue now."""
         with self._lock:
             coredb.set_setting(conn, "active_playlist_id", str(playlist_id))
+            _pl = [x for x in pl.list_playlists(conn) if x["id"] == playlist_id]
+            open_airing(conn, playlist_id,
+                        _pl[0]["name"] if _pl else None, "activate")
             st = self._load_state(conn)
             st["fed"], st["cursor"] = [], 0
             if st.get("show"):
@@ -469,6 +527,8 @@ class Feeder:
         # snapshot the items so they can be edited on the fly during the airing
         show["items"] = self._resolve_show_items(conn, show)
         st["show"] = show
+        open_airing(conn, entry.get("playlist_id"),
+                    entry.get("name") or entry.get("playlist_name"), "show")
         log.warning("feeder: show '%s' on air (schedule %d) — interrupting "
                     "rotation at next boundary",
                     entry.get("name") or entry.get("playlist_name"), entry["id"])
@@ -482,6 +542,12 @@ class Feeder:
             log.warning("feeder: show %d finished — back to the rotation",
                         show["sched_id"])
         st["show"] = None
+        # back to the base rotation: close the show's stretch and open a new one
+        close_airing(conn, "show_ended")
+        _rawpid = coredb.get_setting(conn, "active_playlist_id")
+        _pid = int(_rawpid) if _rawpid and str(_rawpid).isdigit() else None
+        _pl = [x for x in pl.list_playlists(conn) if x["id"] == _pid] if _pid else []
+        open_airing(conn, _pid, _pl[0]["name"] if _pl else None, "rotation")
 
     def _finalize_show_if_aired(self, conn, st: dict, status: dict) -> None:
         """A show stays 'playing' (banner up) until its tracks are fully fed
@@ -716,6 +782,7 @@ class Feeder:
                 return False, f"engine said {code}: {resp}"
             st = self._load_state(conn)
             st["queue_version"] = mutation["queue_version"]
+            record_attribution(conn, cached, "spot", label=title)
             st["fed"].insert(0, {"id": entry["id"], "path": cached,
                                  "duration": self._duration_of(conn, src),
                                  "title": title, "prog": "spot",
@@ -1011,6 +1078,22 @@ class Feeder:
                     return False, f"queue push failed ({code}): {body}"
                 st["queue_version"] = mutation["queue_version"]
                 self._save_state(conn, st)
+                # remember which playlist item / spot each cached file was fed
+                # for: the journal only reports the precache path back, and a
+                # report cannot say "which playlist aired" without this.
+                _fed = {e["id"]: e for e in st.get("fed", [])}
+                _show = st.get("show") or {}
+                _pid = _show.get("playlist_id")
+                if _pid is None:
+                    _rawpid = coredb.get_setting(conn, "active_playlist_id")
+                    _pid = int(_rawpid) if _rawpid and str(_rawpid).isdigit() else None
+                for _b in batch:
+                    _fe = _fed.get(_b["id"]) or {}
+                    record_attribution(
+                        conn, _b["path"],
+                        "spot" if _b.get("source") == "spot" else "playlist",
+                        playlist_id=_pid, item_id=_fe.get("pl_item_id"),
+                        label=_b.get("title"))
                 evict_keep, evict_snapshot = self._pre_evict_snapshot(
                     st, status)
                 result = (True, f"fed {len(batch)} entries")
@@ -1169,6 +1252,25 @@ def _ingest_lines(conn, path: str, offset: int,
                 extra = {k: v for k, v in ev.items()
                          if k not in ("id", "ts", "event", "path", "title",
                                       "source")}
+                # attribution: what the feeder told us this precache file was
+                # fed for (playlist item / show / spot rule). Without it the
+                # as-aired log says "playlist" and nothing more.
+                if ev.get("event") == "track_start" and ev.get("path"):
+                    try:
+                        _a = conn.execute(
+                            "SELECT kind, playlist_id, item_id, spot_rule_id, "
+                            "label FROM queue_attribution WHERE path = ?",
+                            (ev["path"],)).fetchone()
+                    except sqlite3.Error:
+                        _a = None
+                    if _a is not None:
+                        extra.update({
+                            "attr_kind": _a["kind"],
+                            "playlist_id": _a["playlist_id"],
+                            "item_id": _a["item_id"],
+                            "spot_rule_id": _a["spot_rule_id"],
+                            "attr_label": _a["label"],
+                        })
                 with conn:
                     cur = conn.execute(
                         "INSERT OR IGNORE INTO play_history "
