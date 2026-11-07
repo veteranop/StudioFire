@@ -41,6 +41,18 @@ def resolve(paths: dict | None, app_root: str) -> dict:
     """
     paths = paths or {}
     base = (paths.get("data_root") or "").strip() or default_data_root(app_root)
+    # Legacy layout insurance: an install that already keeps its database in
+    # <app>/data and whose config pins nothing (a reset or hand-edited config)
+    # must NOT silently start using an empty database in the machine-wide
+    # folder — that looks exactly like total data loss. Detected, not written:
+    # resolve() never mutates a station's config.
+    if not (paths.get("data_root") or "").strip() \
+            and not (paths.get("data_dir") or "").strip():
+        try:
+            if os.path.isfile(os.path.join(app_root, "data", "studiofire.db")):
+                base = app_root
+        except OSError:
+            pass
     data_dir = (paths.get("data_dir") or "").strip() or os.path.join(base, "data")
     logs_dir = (paths.get("logs_dir") or "").strip() or os.path.join(base, "logs")
     precache_dir = ((paths.get("precache_dir") or "").strip()

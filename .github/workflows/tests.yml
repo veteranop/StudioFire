@@ -63,7 +63,8 @@ jobs:
             "test_streaming_settings",
             "test_sx_report",
             "test_time_format",
-            "test_updater"
+            "test_updater",
+            "test_updater_paths"
           )
           $failed = @()
           foreach ($s in $scripts) {

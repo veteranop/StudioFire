@@ -44,10 +44,21 @@ def write_cfg(tmp, paths):
     return path
 
 
-def both(tmp, cfg_path):
-    """Resolve the same config through both services."""
-    core = core_config.load_config(cfg_path)
-    engine = engine_main.load_config(cfg_path)
+def both(tmp, cfg_path, app_root=None):
+    """Resolve the same config through both services.
+
+`app_root` is pinned for the duration because both modules default to the repo
+folder — in this checkout that contains a real data/studiofire.db, which would
+otherwise trip the legacy-layout rule on every case.
+"""
+    saved = (core_config.ROOT, engine_main.ROOT)
+    core_config.ROOT = app_root or saved[0]
+    engine_main.ROOT = app_root or saved[1]
+    try:
+        core = core_config.load_config(cfg_path)
+        engine = engine_main.load_config(cfg_path)
+    finally:
+        core_config.ROOT, engine_main.ROOT = saved
     return core, engine
 
 
@@ -57,10 +68,12 @@ def compare(label, core, engine):
     check(label, not diffs, f"-> {diffs}")
 
 
-def run_case(label, paths, expect_root=None):
+def run_case(label, paths, expect_root=None, app_root=None):
     tmp = tempfile.mkdtemp(prefix="sf-parity-")
     cfg_path = write_cfg(tmp, paths)
-    core, engine = both(tmp, cfg_path)
+    if app_root is None:
+        app_root = tempfile.mkdtemp(prefix="sf-app-")   # a fresh install
+    core, engine = both(tmp, cfg_path, app_root)
     compare(label, core, engine)
     if expect_root is not None:
         check(f"{label}: data root is {os.path.basename(expect_root) or expect_root}",
@@ -137,11 +150,24 @@ def main():
         # --- 6. no ProgramData and not Windows: beside the app --------------
         os.environ.pop("ProgramData", None)
         os.name = "posix"
-        core, engine = run_case("no ProgramData (POSIX): beside the app", {})
+        posix_app = tempfile.mkdtemp(prefix="sf-posix-")
+        core, engine = run_case("no ProgramData (POSIX): beside the app", {},
+                                app_root=posix_app)
         check("POSIX: data root is the app folder",
               os.path.normpath(core["data_root"]) ==
-              os.path.normpath(core_config.ROOT),
+              os.path.normpath(posix_app),
               f"-> {core['data_root']}")
+
+        # --- 6b. legacy layout: a DB beside the app, config pins nothing ----
+        legacy_app = tempfile.mkdtemp(prefix="sf-legacy-")
+        os.makedirs(os.path.join(legacy_app, "data"))
+        open(os.path.join(legacy_app, "data", "studiofire.db"), "wb").close()
+        core, engine = run_case("legacy data/ beside the app, nothing pinned",
+                                {}, expect_root=legacy_app, app_root=legacy_app)
+        check("legacy: the existing database is the one used",
+              os.path.normpath(core["data_dir"]) ==
+              os.path.normpath(os.path.join(legacy_app, "data")),
+              f"-> {core['data_dir']}")
     finally:
         os.name = real_name
         os.environ["ProgramData"] = programdata

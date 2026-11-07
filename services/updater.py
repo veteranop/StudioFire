@@ -53,7 +53,9 @@ import urllib.error
 import urllib.request
 import zipfile
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+from . import paths as shared_paths
 REPO = "veteranop/StudioFire"
 DEFAULT_API = f"https://api.github.com/repos/{REPO}"
 # where releases come from: env STUDIOFIRE_UPDATE_API, else config.json's
@@ -99,8 +101,37 @@ class UpdateError(Exception):
 
 # ----------------------------------------------------------------- basics
 
+def _config_paths() -> dict:
+    """The `paths` block of the station's config, best effort.
+
+    Read on every call rather than cached: an update replaces code, and a
+    cached answer from before the update is exactly the sort of stale path that
+    would send a restore to the wrong database.
+    """
+    try:
+        with open(os.path.join(ROOT, "config", "config.json"), "rb") as f:
+            cfg = json.load(f) or {}
+        return cfg.get("paths") or {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _resolved() -> dict:
+    return shared_paths.resolve(_config_paths(), ROOT)
+
+
 def data_dir() -> str:
-    return os.path.join(ROOT, "data")
+    """The folder the SERVICES use — not necessarily ROOT/data.
+
+    The pre-update DB backup, the restore target, update_state.json,
+    update.lock and the updates/ backup folder all live here, so it has to be
+    the same answer the core and the engine get (services/paths.py).
+    """
+    return _resolved()["data_dir"]
+
+
+def logs_dir() -> str:
+    return _resolved()["logs_dir"]
 
 
 def state_path() -> str:
@@ -133,10 +164,10 @@ def is_dev_checkout(root: str | None = None) -> bool:
 
 
 def _log(msg: str) -> None:
-    os.makedirs(os.path.join(ROOT, "logs"), exist_ok=True)
+    os.makedirs(logs_dir(), exist_ok=True)
     line = f"{time.strftime('%Y-%m-%d %H:%M:%S')} {msg}"
     try:
-        with open(os.path.join(ROOT, "logs", "update.log"), "a",
+        with open(os.path.join(logs_dir(), "update.log"), "a",
                   encoding="utf-8") as f:
             f.write(line + "\n")
     except OSError:
@@ -163,6 +194,7 @@ def _write_state(**kv) -> dict:
     st.update(kv)
     st["updated_at"] = time.time()
     os.makedirs(data_dir(), exist_ok=True)
+    os.makedirs(logs_dir(), exist_ok=True)
     tmp = state_path() + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(st, f, indent=1)
@@ -539,7 +571,7 @@ def restart(names: list[str]) -> None:
     cfg = os.path.join("config", "config.json")
     for name in reversed(order):              # engine first back up
         try:
-            logf = open(os.path.join(ROOT, "logs", name + "_console.log"), "ab")
+            logf = open(os.path.join(logs_dir(), name + "_console.log"), "ab")
         except OSError:
             logf = subprocess.DEVNULL
         p = subprocess.Popen([sys.executable, "-m", f"services.{name}.main",
