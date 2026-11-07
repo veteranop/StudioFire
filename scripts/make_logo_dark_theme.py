@@ -15,9 +15,9 @@ import os
 import numpy as np
 from PIL import Image
 
-ROOT = r"C:\Users\markd\Desktop\Projects"
-SRC = os.path.join(ROOT, "StudioFire", "web", "static", "sf_logo.png")
-OUT = os.path.join(ROOT, "StudioFire Icon Refresh")
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SRC = os.path.join(REPO, "web", "static", "sf_logo.png")
+OUT = os.path.join(REPO, "brand", "icon-refresh")
 os.makedirs(OUT, exist_ok=True)
 
 LIGHT = np.array([242, 238, 233], dtype=np.float32)   # warm white

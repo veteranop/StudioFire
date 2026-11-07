@@ -30,7 +30,7 @@ REM  Decision record: docs\AUTOSTART-CONSENSUS.md (Rosie + Elon, 8.7/8.7)
 REM
 REM  Usage:
 REM    scripts\install-autostart.bat                 (prompts)
-REM    scripts\install-autostart.bat .\kdpi MyPass    (unattended)
+REM    scripts\install-autostart.bat .\station MyPass    (unattended)
 REM    scripts\install-autostart.bat -check          (no changes)
 REM    scripts\install-autostart.bat -no-autologon    (tasks only)
 REM

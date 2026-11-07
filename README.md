@@ -7,7 +7,7 @@ replacement built for small FM, LPFM, and community stations. One installer,
 your hardware, your music library. No cloud, no subscription, no internet
 required to stay on air.
 
-It has been running 24/7 on air at KDPI since July 2026.
+It has been running 24/7 on air at the reference station since July 2026.
 
 ## Why StudioFire
 

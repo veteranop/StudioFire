@@ -445,7 +445,8 @@ class Feeder:
         if kind == "playlist":
             return pl.get_items(conn, show["playlist_id"])
         # a scheduled show's container path is stored in playlist_schedule
-        # (often Z:\Shows\...) — resolve it so it loads without a drive mapping
+        # (often a mapped-drive path like Z:\...) — resolve it so it loads
+        # without a drive mapping
         p = pl.alias_path(show.get("source_path") or "")
         if kind == "file":
             return [{"id": "f0", "item_type": "file", "path": p,
@@ -748,9 +749,9 @@ class Feeder:
             title = f"{label or os.path.basename(folder_path.rstrip(chr(92) + '/'))}: " + \
                 os.path.splitext(os.path.basename(src))[0]
         else:
-            # legacy preset station folder (e.g. dir_station_ids = Z:\John\...):
+            # legacy preset station folder (e.g. dir_station_ids = Z:\StationIDs\...):
             # resolve so a dropped Z: mapping doesn't make every legal ID / PSA
-            # miss its window (KDPI 2026-09-29) — file/folder branches above
+            # miss its window (the reference station, 2026-09-29) — file/folder branches above
             # already go through alias_path.
             folder = pl.alias_path(coredb.get_setting(conn, folder_key))
             if not folder or not os.path.isdir(folder):
@@ -789,7 +790,7 @@ class Feeder:
                                  # pin until P1 confirms it: tick()'s reconcile
                                  # must not drop a just-accepted spot before it
                                  # is observed, or eviction deletes its cached
-                                 # file and it never airs (KDPI 2026-09-29).
+                                 # file and it never airs (the reference station, 2026-09-29).
                                  # The value is the pin's start time, so a pin
                                  # that is never observed still expires
                                  # (PIN_GRACE_SEC) instead of becoming a ghost.
@@ -803,8 +804,8 @@ class Feeder:
     # How long a just-accepted (202) spot/manual entry may stay PINNED while P1
     # hasn't reported it yet. The pin is what stops tick()'s reconcile from
     # dropping a spot before it is observed (that drop let eviction delete the
-    # cached file and the spot silently never aired — KDPI 2026-09-29,
-    # H2627206). But a pin must never be permanent: if P1 restarts inside that
+    # cached file and the spot silently never aired — the reference station,
+    # 2026-09-29, H2627206). But a pin must never be permanent: if P1 restarts inside that
     # window it will never report the entry, and an unexpiring pin would leave a
     # ghost in 'fed' that counts toward feed_ahead and can stop the feeder
     # topping up — a dead-air pathway. P1 observes within seconds in practice,
@@ -942,7 +943,7 @@ class Feeder:
                 # or on air). A status snapshot that doesn't list it yet must
                 # NOT reconcile it away — that dropped it from 'fed', the
                 # eviction pass then deleted its cached file, and the spot
-                # silently never aired (KDPI 2026-09-29, H2627206). Once
+                # silently never aired (the reference station, 2026-09-29, H2627206). Once
                 # observed, normal reconcile retires it after it airs/ends.
                 kept = []
                 now = time.time()

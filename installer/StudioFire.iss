@@ -123,7 +123,7 @@ begin
     'These land in config\config.json — you can edit that file later. ' +
     'Everything else (cache, database, logs) lives inside the install folder.');
   StationPage.Add('Station name:', False);
-  StationPage.Add('Music library folder (mapped drive or UNC share), e.g. Z:\Music or \\SYNOLOGY\music:', False);
+  StationPage.Add('Music library folder (UNC share or mapped drive), e.g. \\NAS\music or D:\Music:', False);
   StationPage.Values[0] := 'My Station';
   StationPage.Values[1] := '';
 end;

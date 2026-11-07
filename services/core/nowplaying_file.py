@@ -2,11 +2,11 @@
 
 WHY THIS EXISTS
 ---------------
-KDPI's stream encoder is **BUTT** running on a separate stream box. BUTT is
-configured with `song_path = <file>` + `song_update = 1`: it polls a plain text
-file and republishes whatever is in it as the ICY song title. That is the
-station's original design (inherited from ZaraRadio) and it is the ONLY route
-that works on their mount — StreamGuys' Icecast refuses `/admin/metadata`
+A common stream encoder (e.g. BUTT) runs on a separate stream box, configured
+with `song_path = <file>` + `song_update = 1`: it polls a plain text file and
+republishes whatever is in it as the ICY song title. For the reference station
+this is the design it already ran (inherited from ZaraRadio) and the ONLY route
+that works on its mount — the stream host's Icecast refuses `/admin/metadata`
 URL updates with *"Mountpoint will not accept this URL update"* (measured
 2026-10-24), so pushing over HTTP is not an option there.
 
@@ -27,10 +27,10 @@ DESIGN LAWS
   manifest writer).
 * **ASCII-folded.** The consumer chain is a legacy encoder into Icecast, which
   was measured mangling UTF-8 (`Björk` → `BjÃ¶rk`). Folding keeps what renders
-  correct; a missing umlaut beats mojibake on a live station. (StreamGuys showed
-  UTF-8 surviving on their own /sg-test mount on 2026-10-30, but that is display
-  only — it is NOT proven inside the SGreports export CSV, so folding stays until
-  that answer lands. Relaxing it is a one-line change to `fold`.)
+  correct; a missing umlaut beats mojibake on a live station. (The stream host
+  showed UTF-8 surviving on a test mount on 2026-10-30, but that is display
+  only — it is NOT proven inside the report-of-use export CSV, so folding stays
+  until that answer lands. Relaxing it is a one-line change to `fold`.)
 * **Independent of the HTTP push.** This works with `nowplaying_push.enabled`
   false — which is the configuration the station actually wants.
 * **The line is a FORMAT CONTRACT, not a display string (2026-10-30).** The
@@ -174,8 +174,8 @@ def _clean(value) -> str:
     """One field, safe to sit between pipes: no delimiter, no newline.
 
     A `|` inside a value shifts every column after it and the vendor will not
-    parse around it, so it is replaced (StreamGuys: "we'd rather you remove
-    pipes inside values"). Whitespace is collapsed because the line is read by
+    parse around it, so it is replaced (the stream host asked that pipes inside
+    values be removed). Whitespace is collapsed because the line is read by
     a parser, not a person.
     """
     text = " ".join(str(value or "").split())   # collapses CR, LF, tabs

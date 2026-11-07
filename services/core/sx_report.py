@@ -2,9 +2,9 @@
 
 WHY THIS EXISTS
 ---------------
-KDPI (Drop-in Radio) simulcasts its FM programme on the public web stream, which
-is hosted by StreamGuys. That makes the station a *nonsubscription transmission
-service* under 17 U.S.C. 114(d)(2), and 37 CFR 370.4(d)(2) requires a monthly
+A station that simulcasts its FM programme on a public web stream (hosted by a
+stream provider) is a *nonsubscription transmission service* under
+17 U.S.C. 114(d)(2), and 37 CFR 370.4(d)(2) requires a monthly
 **Report of Use** listing, for every sound recording transmitted:
 
     (i)   the name of the service
@@ -23,7 +23,7 @@ THE PROBLEM THIS MODULE SOLVES
 `play_history` does NOT store the library path. The engine journal records the
 **precache** copy it actually fed to mpv, i.e.
 
-    C:\\StudioFire\\StudioFire-OnAir-v1.0.0\\precache\\21f14d911e6855d3.m4a
+    %ProgramData%\\StudioFire\\precache\\21f14d911e6855d3.m4a
 
 and the precache filename is a deterministic function of the source path
 (`engine_bridge.Precache.cache_path_for`):
@@ -42,8 +42,8 @@ marketing label.
 WHAT IT DELIBERATELY DOES NOT DO
 --------------------------------
 * **It does not invent "actual total performances".** 370.4(d)(2)(vi) is
-  performances *to listeners*, which requires the listener side — StreamGuys'
-  connection logs, or a listener-series file. If no listener series is given
+  performances *to listeners*, which requires the listener side — the stream
+  host's connection logs, or a listener-series file. If no listener series is given
   the ATP column is left empty and the run reports the exact number of rows
   awaiting that join. It never substitutes play count for performances.
 * **It never touches P1.** Read-only against the core DB; stdlib + optional
@@ -158,15 +158,15 @@ def build_precache_index(conn, share_roots=None,
     ⚠️ **A single digest per library path is not enough.** The digest is taken
     over the path *as the feeder handed it to the engine*, and the same file
     reaches the feeder in more than one shape: the index stores the NAS form
-    (`//KDPI-Media/music/G\\...`) while playback frequently hands the engine the
-    drive-letter form (`Z:/G\\...`, Z: being the mapping of the same share).
+    (`//NAS/music/Library\\...`) while playback frequently hands the engine the
+    drive-letter form (`Z:/Library\\...`, Z: being the mapping of the same share).
     Measured on live October 2026 data: hashing only the stored form resolved
     87.6% of performances; adding the drive-letter variant resolves 100% of
     the ones we spot-checked. So hash every equivalent form of the path.
     """
     idx: dict = {}
     # Accept either a share root ("\\NAS\music") or the music root inside it
-    # ("\\NAS\music\G"): pathmap.share_root() strips the library folder so the
+    # ("\\NAS\music\Library"): pathmap.share_root() strips the library folder so the
     # drive-letter form keeps it, which is how the feeder wrote the path.
     roots = []
     for r in list(share_roots or []):
@@ -412,7 +412,7 @@ def enrich_tags(plays: list, cache_path: str | None = None,
 
 def load_listener_series(path: str) -> list:
     """Read a listener series: CSV with `ts,listeners` (ISO-8601 timestamp and
-    the concurrent listener count at that moment). This is the StreamGuys side
+    the concurrent listener count at that moment). This is the stream host's side
     of the join — their connection logs, or our own sampling of
     /status-json.xsl. Returns [(aware datetime, int)] sorted by time."""
     series = []
@@ -569,7 +569,7 @@ def write_warnings(plays: list, rows: list, path: str, extra: dict) -> None:
         "",
         "370.4(d)(2)(vi) — actual total performances:",
         f"  performances without a listener figure : {len(no_listener)} / {len(plays)}",
-        "  -> play COUNT is not performances. Join StreamGuys' connection logs",
+        "  -> play COUNT is not performances. Join the stream host's connection logs",
         "     (or a listener series via --listeners) before filing.",
         "",
         "identity resolution:",

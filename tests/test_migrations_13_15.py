@@ -82,7 +82,7 @@ def main():
                      (time.time() - 500,))
         # the station's folder settings — the policy check matches these paths
         for k, v in (("dir_station_ids", "Z:\Legal ID's"),
-                     ("dir_ads", "Z:\1 - ALL DJ BREAKS"),
+                     ("dir_ads", "Z:\\Ads"),
                      ("dir_psas", "Z:\PSAs")):
             conn.execute("INSERT OR REPLACE INTO settings(key, value) "
                          "VALUES (?, ?)", (k, v))

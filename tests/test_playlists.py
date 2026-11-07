@@ -240,13 +240,13 @@ def main():
           client.post("/api/playlists/import_lst",
                       files={"file": ("junk.lst", b"1014\r\nrubbish\r\n")},
                       data={"name": "Junk"}).status_code == 400)
-    alias_lst = b"1\r\n1000\t\\\\STUDIO\\music\\G\\artist\\track.mp3\r\n"
+    alias_lst = b"1\r\n1000\t\\\\STUDIO\\music\\Library\\artist\\track.mp3\r\n"
     r = client.post("/api/playlists/import_lst",
                     files={"file": ("a.lst", alias_lst)},
                     data={"name": "Alias Import"})
     got = client.get(f"/api/playlists/{r.json()['id']}").json()
     check("lst API: path alias rewrites to local drive",
-          got["items"][0]["path"] == "Z:\\G\\artist\\track.mp3")
+          got["items"][0]["path"] == "Z:\\Library\\artist\\track.mp3")
 
     # ---- backup / restore
     import json
@@ -280,25 +280,25 @@ def main():
     rpath = os.path.join(td, "relink.db")
     db.migrate(rpath)
     rc = db.connect(rpath)
-    for p in [r"Z:/G\Artist\song1.mp3", r"Z:/G\Other\song2.mp3",
-              r"Z:/G\A\dup.mp3", r"Z:/G\B\dup.mp3"]:
+    for p in [r"Z:/Library\Artist\song1.mp3", r"Z:/Library\Other\song2.mp3",
+              r"Z:/Library\A\dup.mp3", r"Z:/Library\B\dup.mp3"]:
         rc.execute("INSERT INTO tracks (path, indexed_at, missing) "
                    "VALUES (?, ?, 0)", (p, time.time()))
     rc.commit()
     rpid = pl.create_playlist(rc, "Legacy")
-    pl.add_item(rc, rpid, "file", r"Z:\Local Disk\KDPI\song1.mp3", "one")  # stale
-    pl.add_item(rc, rpid, "file", r"Z:\G\Other\song2.mp3", "two")   # in place
+    pl.add_item(rc, rpid, "file", r"Z:\Local Disk\Archive\song1.mp3", "one")  # stale
+    pl.add_item(rc, rpid, "file", r"Z:\Library\Other\song2.mp3", "two")   # in place
     pl.add_item(rc, rpid, "file", r"Z:\Old\dup.mp3", "dup")         # ambiguous
     pl.add_item(rc, rpid, "file", r"Z:\Old\missing.mp3", "gone")    # unmatched
-    stats = pl.relink_broken(rc, "Z:/G", rpid)
+    stats = pl.relink_broken(rc, "Z:/Library", rpid)
     check("relink: correct counts",
           stats["relinked"] == 1 and stats["in_place"] == 1
           and stats["ambiguous"] == 1 and stats["unmatched"] == 1)
     paths = {i["title"]: i["path"] for i in pl.get_items(rc, rpid)}
     check("relink: stale item repointed into the music root",
           os.path.normcase(os.path.normpath(paths["one"]))
-          == os.path.normcase(os.path.normpath(r"Z:/G\Artist\song1.mp3")))
-    check("relink: in-place item untouched", paths["two"] == r"Z:\G\Other\song2.mp3")
+          == os.path.normcase(os.path.normpath(r"Z:/Library\Artist\song1.mp3")))
+    check("relink: in-place item untouched", paths["two"] == r"Z:\Library\Other\song2.mp3")
     check("relink: ambiguous name left as-is", paths["dup"] == r"Z:\Old\dup.mp3")
     check("relink: unmatched reported",
           "missing.mp3" in stats["unmatched_examples"])
@@ -307,8 +307,8 @@ def main():
     # ---- ZaraRadio .lst mirror (export format + round-trip + rename/delete)
     lc = db.connect(db_path)
     lpid = pl.create_playlist(lc, "Drive Time")
-    p1 = r"Z:/G\Artist\Album\01 Song One.mp3"
-    p2 = r"Z:/G\Artist\Album\02 Song Two.mp3"
+    p1 = r"Z:/Library\Artist\Album\01 Song One.mp3"
+    p2 = r"Z:/Library\Artist\Album\02 Song Two.mp3"
     pl.add_item(lc, lpid, "file", p1, "Song One")
     pl.add_item(lc, lpid, "file", p2, "Song Two")
     # give one track a known duration in the index (the other stays unknown -> 0)
@@ -323,14 +323,14 @@ def main():
           lines[1].split("\t")[0] == "213400")
     check("lst unknown duration is 0", lines[2].split("\t")[0] == "0")
     check("lst paths use backslashes (Zara style)",
-          lines[1].split("\t")[1] == r"Z:\G\Artist\Album\01 Song One.mp3")
+          lines[1].split("\t")[1] == r"Z:\Library\Artist\Album\01 Song One.mp3")
     check("lst is CRLF terminated", text.endswith("\r\n") and "\r\n" in text)
     # our own parser reads it back to the same paths
     reparsed = pl.parse_lst(text.encode("cp1252"))
     check("lst round-trips through parse_lst",
           [e["path"] for e in reparsed]
-          == [r"Z:\G\Artist\Album\01 Song One.mp3",
-              r"Z:\G\Artist\Album\02 Song Two.mp3"])
+          == [r"Z:\Library\Artist\Album\01 Song One.mp3",
+              r"Z:\Library\Artist\Album\02 Song Two.mp3"])
 
     check("write_lst is a no-op with no folder and no linked file",
           pl.write_lst(lc, "", lpid) is None
@@ -376,7 +376,7 @@ def main():
     os.makedirs(zara)
     src = os.path.join(zara, "Road Trip.lst")
     with open(src, "w", encoding="cp1252", newline="") as f:
-        f.write("2\r\n1000\tZ:\\G\\one.mp3\r\n2000\tZ:\\G\\two.mp3\r\n")
+        f.write("2\r\n1000\tZ:\\Library\\one.mp3\r\n2000\tZ:\\Library\\two.mp3\r\n")
     opened = pl.open_lst(lc, src, {})
     opid = opened["id"]
     check("open_lst creates a playlist named after the file",
@@ -385,18 +385,18 @@ def main():
                          (opid,)).fetchone()[0] == "Road Trip")
     check("open_lst imports the tracks",
           [i["path"] for i in pl.get_items(lc, opid)]
-          == ["Z:\\G\\one.mp3", "Z:\\G\\two.mp3"])
+          == ["Z:\\Library\\one.mp3", "Z:\\Library\\two.mp3"])
     check("open_lst links the exact file",
           lc.execute("SELECT source_path FROM playlists WHERE id = ?",
                      (opid,)).fetchone()[0] == os.path.abspath(src))
     # an edit saves straight back to the SAME file
-    pl.add_item(lc, opid, "file", r"Z:\G\three.mp3", "Three")
+    pl.add_item(lc, opid, "file", r"Z:\Library\three.mp3", "Three")
     pl.write_lst(lc, "", opid)  # no folder needed — it has a home
     with open(src, "rb") as f:
         reread = pl.parse_lst(f.read())
     check("edits save back to the same .lst",
           [e["path"] for e in reread]
-          == ["Z:\\G\\one.mp3", "Z:\\G\\two.mp3", "Z:\\G\\three.mp3"])
+          == ["Z:\\Library\\one.mp3", "Z:\\Library\\two.mp3", "Z:\\Library\\three.mp3"])
     # reopening our own save changes nothing
     again = pl.open_lst(lc, src, {})
     check("reopen returns the same playlist untouched",
@@ -404,18 +404,18 @@ def main():
           and len(pl.get_items(lc, opid)) == 3)
     # a file edited OUTSIDE StudioFire (e.g. by Zara) wins on the next open
     with open(src, "w", encoding="cp1252", newline="") as f:
-        f.write("1\r\n500\tZ:\\G\\only.mp3\r\n")
+        f.write("1\r\n500\tZ:\\Library\\only.mp3\r\n")
     late = time.time() + 100
     os.utime(src, (late, late))
     pl.open_lst(lc, src, {})
     check("externally edited file wins on reopen",
-          [i["path"] for i in pl.get_items(lc, opid)] == ["Z:\\G\\only.mp3"])
+          [i["path"] for i in pl.get_items(lc, opid)] == ["Z:\\Library\\only.mp3"])
     # the same filename in a different folder is a different playlist
     zara2 = os.path.join(td, "zara2")
     os.makedirs(zara2)
     src2 = os.path.join(zara2, "Road Trip.lst")
     with open(src2, "w", encoding="cp1252", newline="") as f:
-        f.write("1\r\n0\tZ:\\G\\other.mp3\r\n")
+        f.write("1\r\n0\tZ:\\Library\\other.mp3\r\n")
     o2 = pl.open_lst(lc, src2, {})
     check("same name in another folder gets a suffixed playlist",
           o2["created"] and o2["id"] != opid
@@ -492,7 +492,7 @@ def main():
                            "unknown": 1})
 
     # ---- path aliases apply at FEED time, not just import (a rotation made
-    # at the studio with \\KDPI-Media\music\... paths must play on a box that
+    # at the studio with \\STUDIO-NAS\music\... paths must play on a box that
     # reaches the NAS as Z:)
     real = os.path.join(td, "aliased-song.mp3")
     touch(real)
@@ -513,7 +513,7 @@ def main():
 
     # ---- a path cp1252 can't hold must survive a save (not become '?')
     upid = pl.create_playlist(lc, "Unicode Save")
-    odd = "Z:\\G\\Dylan\\5-01 Subterranean Homesick Blues \u221a.mp3"
+    odd = "Z:\\Library\\Dylan\\5-01 Subterranean Homesick Blues \u221a.mp3"
     pl.add_item(lc, upid, "file", odd, "SHB", duration_sec=139.9)
     upath = pl.write_lst(lc, lst_dir, upid)
     with open(upath, "rb") as f:

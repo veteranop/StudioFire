@@ -71,7 +71,7 @@ def main():
           streaming.configured(cfg, conn) is False)
 
     # -- validation ---------------------------------------------------------
-    for bad in ("ftp://x", "peridot.streamguys.com:5110", "http://"):
+    for bad in ("ftp://x", "stream.example.com:5110", "http://"):
         raised = False
         try:
             streaming._validate(bad, "/live")
@@ -88,7 +88,7 @@ def main():
     check("accepts a well-formed target", True)
 
     # -- precedence: DB overrides config.json, secret supplies auth ---------
-    db.set_setting(conn, streaming.K_ENDPOINT, "http://peridot.streamguys.com:5110")
+    db.set_setting(conn, streaming.K_ENDPOINT, "http://stream.example.com:5110")
     db.set_setting(conn, streaming.K_MOUNT, "/live")
     db.set_setting(conn, streaming.K_ENABLED, "1")
     merged = streaming.merged_np_config(cfg, conn)
@@ -151,9 +151,9 @@ def main():
     from services.core import changelog as changelog_mod
     env = Environment(loader=FileSystemLoader(os.path.join(ROOT, "web", "templates")))
     env.filters["sf_bold"] = changelog_mod.bold_segments
-    env.globals.update(ga_id="", ga_station="KDPI", asset_version="t")
+    env.globals.update(ga_id="", ga_station="Example FM", asset_version="t")
     html = env.get_template("settings.html").render(
-        role="admin", station="KDPI", changelog={"ok": True, "releases": []},
+        role="admin", station="Example FM", changelog={"ok": True, "releases": []},
         running_version="1.5.1", hour12=True)
     check("Settings renders the Streaming section", "Streaming &amp; song metadata" in html)
     check("Settings has the target URL field", 'id="st-endpoint"' in html)
@@ -164,7 +164,7 @@ def main():
     check("the password input is a password field",
           'type="password"' in html)
     html_op = env.get_template("settings.html").render(
-        role="operator", station="KDPI", changelog={"ok": True, "releases": []},
+        role="operator", station="Example FM", changelog={"ok": True, "releases": []},
         running_version="1.5.1", hour12=True)
     check("operators see the monitor but not the credential form",
           'id="st-monitor"' in html_op and 'id="st-pass"' not in html_op)

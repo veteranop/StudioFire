@@ -26,8 +26,8 @@ GA_MEASUREMENT_ID_DEFAULT = "G-3BK3GZDSJN"  # StudioFire GA4 property (VeteranOp
 # Now-playing push (#747): off-box, feature-flagged, fire-and-forget pusher
 # that mirrors StudioFire's current title to the stream CDN's metadata ingest
 # (e.g. Icecast `updinfo`) so the public player shows song info. OFF by
-# default; the real transport is gated on StreamGuys' written answer — until
-# then the only transport is "dryrun" (logs, no I/O). See
+# default; the real transport is gated on the stream host's written answer —
+# until then the only transport is "dryrun" (logs, no I/O). See
 # docs/NOWPLAYING-CONSENSUS.md. HARD RULE: the auth secret is NEVER read from
 # config.json — only from the env var named by `auth_env`. Keep
 # config.example.json free of any real credential.
@@ -129,6 +129,24 @@ def save_royalty_reporting(block: dict, path: str | None = None) -> dict:
     return _load_royalty_reporting(cfg)
 
 
+def _default_data_root() -> str:
+    r"""Machine-wide data folder on Windows, beside the app everywhere else.
+
+    %ProgramData%\StudioFire keeps the DB, logs, precache and backups outside
+    the install directory, so an upgrade or uninstall-with-keep-data cannot lose
+    them. A developer checkout without ProgramData just uses its own folder.
+    """
+    pd = os.environ.get("ProgramData")
+    if os.name == "nt" and pd:
+        try:
+            root = os.path.join(pd, "StudioFire")
+            os.makedirs(root, exist_ok=True)
+            return root
+        except OSError:
+            pass
+    return ROOT
+
+
 def load_config(path: str | None = None) -> dict:
     cfg = {}
     p = path or os.path.join(ROOT, "config", "config.json")
@@ -141,8 +159,14 @@ def load_config(path: str | None = None) -> dict:
     paths = cfg.get("paths", {})
     core = cfg.get("core", {})
     engine = cfg.get("engine", {})
-    data_dir = paths.get("data_dir", os.path.join(ROOT, "data"))
-    logs_dir = paths.get("logs_dir", os.path.join(ROOT, "logs"))
+    # Where a station's own data lives. On Windows that is
+    # %ProgramData%\StudioFire (machine-wide, survives upgrades, outside the
+    # install folder); elsewhere it stays beside the app. Both are overridable
+    # per-install via paths.data_root / data_dir / logs_dir, which is what the
+    # reference station does so its existing data is not moved.
+    base = paths.get("data_root") or _default_data_root()
+    data_dir = paths.get("data_dir", os.path.join(base, "data"))
+    logs_dir = paths.get("logs_dir", os.path.join(base, "logs"))
     os.makedirs(data_dir, exist_ok=True)
     os.makedirs(logs_dir, exist_ok=True)
     return {
@@ -151,10 +175,14 @@ def load_config(path: str | None = None) -> dict:
         # {"\\\\SERVER\\share": "Z:"} — rewrites imported playlist paths so
         # a .lst written on another machine resolves locally
         "path_aliases": paths.get("path_aliases", {}),
+        # [{"share": "\\\\NAS\\Music", "drive": "Z:"}] — what the setup wizard
+        # fills in when a folder is picked through a mapped drive. Distinct from
+        # path_aliases (which rewrites imported .lst paths).
+        "share_aliases": paths.get("share_aliases", []),
         "precache_dir": paths.get("precache_dir",
-                                  os.path.join(ROOT, "precache")),
+                                  os.path.join(base, "precache")),
         "emergency_dir": paths.get("emergency_dir",
-                                   os.path.join(ROOT, "assets", "emergency")),
+                                   os.path.join(base, "emergency")),
         "data_dir": data_dir,
         "logs_dir": logs_dir,
         "db_path": os.path.join(data_dir, "studiofire.db"),

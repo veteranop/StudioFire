@@ -19,7 +19,7 @@ should be **local to the NAS** for fast playback.
 
 ## What travels where
 
-| Piece | GitHub | `\\KDPI-Media\music\StudioFire` (deploy kit) | Created on the box |
+| Piece | GitHub | `\\NAS\music\StudioFire` (deploy kit) | Created on the box |
 |-------|:------:|:--------------------------------------------:|:------------------:|
 | Code (`services/`, `web/`, tests) | ✅ | ✅ (mirror) | |
 | `config/config.example.json`, `requirements.txt` | ✅ | ✅ | |
@@ -37,16 +37,16 @@ local disk.
 
 1. **Anaconda** (Python 3.11+). Same as dev for consistency. Have `python` on PATH.
 2. **Use a UNC NAS root if possible:** set `paths.nas_music_root` in
-   `config.json` to `//KDPI-Media/music/G`. Only use a mapped drive like `Z:`
+   `config.json` to `//NAS/music`. Only use a mapped drive like `Z:`
    if you need compatibility with legacy playlists that still contain
-   `Z:\G\...` paths.
+   mapped-drive (`Z:\...`) paths.
 3. **Get the code** — either:
    - `git clone https://github.com/veteranop/StudioFire` , **or**
-   - copy `\\KDPI-Media\music\StudioFire` to a local folder.
+   - copy `\\NAS\music\StudioFire` to a local folder.
 4. **Install deps:** `pip install -r requirements.txt`
 5. **mpv:** copy `bin\mpv.exe` from the deploy kit into `bin\`.
 6. **Config:** `copy config\config.example.json config\config.json` and edit —
-   `station_name`, `paths.nas_music_root` (`//KDPI-Media/music/G`), leave
+   `station_name`, `paths.nas_music_root` (e.g. `//NAS/music`), leave
    `paths.path_aliases` empty if you are using UNC paths, and set ports.
 7. **(Optional)** drop a couple of `.mp3` filler files (station IDs / sweepers)
    in `assets\emergency\`. If you skip this, the engine uses cached rotation
@@ -68,16 +68,19 @@ git add -A && git commit -m "..."
 git push origin main
 ```
 
-**2. `\\KDPI-Media\music\StudioFire` (deploy mirror):** keep it a *complete,
+**2. `\\NAS\music\StudioFire` (deploy mirror):** keep it a *complete,
 runnable* copy — code **plus** the gitignored runtime bits (`bin\mpv.exe`,
 `config` template, `assets\emergency`), but **not** `data\ precache\ logs\`.
 Use robocopy (adjust the source path):
 ```
-robocopy "C:\Users\<you>\Desktop\Projects\StudioFire" "\\KDPI-Media\music\StudioFire" /MIR /XD .git data precache logs installer .playwright-mcp __pycache__ /XF *.db *.db-wal *.db-shm queue_state.json heartbeat.txt
+robocopy "C:\Users\<you>\Desktop\Projects\StudioFire" "\\NAS\music\StudioFire" /MIR /XD .git data precache logs installer .playwright-mcp __pycache__ /XF *.db *.db-wal *.db-shm queue_state.json heartbeat.txt
 ```
 
 **On the dry-run / on-air box, to update:** see "Updating a station" below.
 A developer `git clone` is the exception: use `git pull`, then restart.
+
+> Station-specific deploy values (the exact mirror share, copy commands and the
+> release-docs sweep) are kept privately in `site-notes/deploy.md`.
 
 ---
 
@@ -96,8 +99,8 @@ published-releases channel by accident.
 
 1. **Update the Operator's Guide** if the release changes anything an operator can see (a button, a
    screen, a behaviour) — content **and** the version/date on the cover. Regenerate with
-   `scripts/build_studiofire_operator_guide.py` →
-   `VeteranOp/Clients/dropin/Documents/StudioFire-Operators-Guide.{html,pdf}`.
+   `scripts/build_studiofire_operator_guide.py` → your operator-docs folder
+   (the concrete output path is in `site-notes/deploy.md`).
    **Hard rule (Mark 2026-10-05): a release is not done until the Operator's Guide reflects it.**
    Prefer real screenshots over mock screens.
 2. Write the operator-facing notes under `## [Unreleased]` in
@@ -120,14 +123,11 @@ published-releases channel by accident.
    - Operator's Guide: bump `GUIDE_VERSION` **and re-read** the operator-visible
      sections — a guide at the right version with stale content is the failure mode
      that actually happened (v1.6.0 shipped streaming docs but no SoundExchange
-     section, and mislabelled `.200` as the on-air PC). Rebuild, then open the PDF
+     section, and mislabelled the on-air PC). Rebuild, then open the PDF
      and look at the changed pages.
-   - studiofire.io (`VeteranOp/Active-Revenue/StudioFire-Website/`): rewrite the
-     "What's new" cards; the version labels fill themselves from the GitHub API.
-     Deploy with `deploy_studiofire_io.py`, then prove it with
-     `diff -q` between the fetched public page and `site/index.html` — a `curl`
-     without a full Chrome UA + `Accept: text/html` gets a ModSecurity 406 and
-     looks like the site is down.
+   - The product marketing site: rewrite the "What's new" cards; the version
+     labels fill themselves from the GitHub API. (The site's repo path and
+     deploy command are in `site-notes/deploy.md`.)
 
 The `VERSION` file inside a tagged release **must** match its tag. The
 updater refuses a release where they differ, so always release with the
@@ -196,8 +196,8 @@ releases API base URL.
 `docs/AUTOSTART-CONSENSUS.md` (Rosie + Elon, locked 2026-09-29).** A service runs in
 session 0, which has **no audio endpoint**: the engine starts, mpv starts, every track
 fails with `audio output initialization failed`, and the web UI / `services.msc` /
-service logs all still look healthy. That silenced `.200` on 2026-09-29 (3,529 failed
-tracks, green health). It is a Windows platform limit, not a StudioFire bug.
+service logs all still look healthy. That silenced a live on-air box on 2026-09-29
+(thousands of failed tracks, green health). It is a Windows platform limit, not a StudioFire bug.
 
 The supported auto-start for a station is **autologon + a logon task that starts
 `start-all.bat` in the interactive session** — audio behaves exactly as it does in
@@ -234,9 +234,10 @@ NSSM, and a station-setup wizard into one setup.exe.
 
 ## After deploying: fix the legacy playlists
 
-The pre-Synology playlists point at old paths. Once the library has finished
-indexing (**Studio health → Library index**), go to **Playlists → 🔧 Fix broken
-file paths** to repoint every moved track to its real file in `Z:\G`.
+Playlists imported before a library move may point at old paths. Once the library
+has finished indexing (**Studio health → Library index**), go to **Playlists →
+🔧 Fix broken file paths** to repoint every moved track to its real file under the
+music root.
 
 ## Related
 - [[PROJECTS-INDEX]]

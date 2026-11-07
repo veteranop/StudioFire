@@ -903,7 +903,9 @@ def create_app(cfg: dict) -> FastAPI:
         except ValueError:
             raise HTTPException(404, "unknown report")
         body = reports.to_csv(rep)
-        fname = f"KDPI-{report_id}-{s}_to_{e}.csv"
+        station = str(cfg.get("station_name") or "StudioFire")
+        slug = "".join(c if c.isalnum() else "-" for c in station).strip("-")
+        fname = f"{slug or 'StudioFire'}-{report_id}-{s}_to_{e}.csv"
         return Response(content=body, media_type="text/csv; charset=utf-8",
                         headers={"Content-Disposition":
                                  f'attachment; filename="{fname}"'})

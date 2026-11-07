@@ -1,6 +1,6 @@
-"""Stereo channel-integrity regression test (TimeTrax #895, KDPI).
+"""Stereo channel-integrity regression test (TimeTrax #895, the reference station).
 
-John reported "some tracks are not playing certain parts of the song — IE
+An operator reported "some tracks are not playing certain parts of the song — IE
 lead guitar parts", cured by switching the receiver from stereo to mono. That
 is the classic signature of ONE stereo channel being lost between playout and
 the listener: summing to mono puts the hard-panned part back on the surviving

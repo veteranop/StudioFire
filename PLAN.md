@@ -15,7 +15,7 @@ up: "[[PROJECTS-INDEX]]"
 
 ## 1. Executive Summary
 StudioFire is a lightweight, self-hosted radio automation platform replacing ZaraRadio at a small radio studio. It provides:
-1. **Playout** — plays music from a Synology NAS (~4TB library) through a defined local audio path (sound card → Barix Instreamer → WireGuard P2P VPN → transmitter site).
+1. **Playout** — plays music from a NAS share (~4TB library) through a defined local audio path (sound card → Barix Instreamer → WireGuard P2P VPN → transmitter site).
 2. **Playlist management** — build, save, edit, and schedule playlists via a dead-simple web GUI, usable by non-technical staff, reachable only from the LAN with authentication.
 3. **Studio Monitor** — a live status dashboard polling Ubiquiti (UniFi) network gear, Barix encoder/decoder devices, and the transmitter, showing green/yellow/red health at a glance.
 4. **Self-update** — checks GitHub for the latest release and prompts the operator to update (deferred to a later phase).
@@ -23,7 +23,7 @@ StudioFire is a lightweight, self-hosted radio automation platform replacing Zar
 ## 2. Environment (as-built)
 - Network: Ubiquiti/UniFi throughout, rebuilt by Veteranop.
 - Studio → transmitter audio path: local audio out → Barix → WireGuard point-to-point VPN → Barix decode at TX site → transmitter.
-- Media: Synology NAS, ~4TB of music, accessed via SMB (or NFS) share.
+- Media: a NAS share, ~4TB of music, accessed over SMB (or NFS).
 - Current software: ZaraRadio (Windows). Assumption: playout PC is Windows; StudioFire should run on that same machine (audio output must be physical, on the machine wired to the Barix).
 
 ## 3. Feasibility Assessment
@@ -73,7 +73,7 @@ engine is ever in the audio path.
 │  ┌────────────┴─────────────────────────────┐                                                          │
 │  │ web GUI + auth, playlist CRUD, scheduler │   SQLite (WAL): library, playlists,                      │
 │  │ time events; feeds engine queue; fills   │   users, config, play history                            │
-│  │ pre-cache dir from NAS ahead of airtime  │────── SMB ──────► Synology NAS (4TB music)               │
+│  │ pre-cache dir from NAS ahead of airtime  │────── SMB ──────► NAS (4TB music)               │
 │  └────────────┬─────────────────────────────┘                                                          │
 │               │ spawns / job queue                                                                     │
 │  P3 — INDEXER WORKER (separate process, throttled, low OS priority)                                    │
@@ -164,7 +164,7 @@ The engine wrapper is the product. Nothing else gets built until this survives t
 5. ~~Live shows?~~ **ANSWERED: Yes, but out of band** — live mic goes raw mixer → Barix, never through StudioFire. Software stays automation-only. Note for GUI: operators need an obvious **PAUSE/STOP automation** control (big button) for when they go live on the mixer, and a clean resume.
 6. ~~Crossfade required at launch?~~ **ANSWERED: Butt-cut is fine for MVP.** Crossfade stays a Phase 3 nice-to-have.
 7. **Multiple simultaneous users editing playlists?** (Simple locking probably fine.)
-8. **NAS access:** **PARTIAL — library is mixed MP3 + MP4 (M4A/AAC).** Both handled by mpv and `mutagen` tags — no problem. Still TBD: a read-only SMB account on the Synology for StudioFire.
+8. **NAS access:** **PARTIAL — library is mixed MP3 + MP4 (M4A/AAC).** Both handled by mpv and `mutagen` tags — no problem. Still TBD: a read-only SMB account on the NAS for StudioFire.
 
 ## 8. Risks & Mitigations
 | Risk | Mitigation |

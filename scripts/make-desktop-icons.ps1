@@ -7,7 +7,7 @@
 #   powershell -NoProfile -ExecutionPolicy Bypass -File make-desktop-icons.ps1
 #   powershell -NoProfile -ExecutionPolicy Bypass -File make-desktop-icons.ps1 -AllUsers
 #   powershell -NoProfile -ExecutionPolicy Bypass -File make-desktop-icons.ps1 `
-#       -InstallDir "C:\StudioFire\StudioFire-OnAir-v1.0.0" -DesktopDir "C:\Temp\icons-test"
+#       -InstallDir "C:\Program Files\StudioFire" -DesktopDir "C:\Temp\icons-test"
 #
 # -AllUsers      put them on the shared Public desktop (needs an elevated prompt)
 # -Remove        delete the two shortcuts instead of creating them

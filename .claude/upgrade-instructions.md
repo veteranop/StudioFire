@@ -23,7 +23,7 @@ Architecture review found one real defect and three smaller items in P2 (`servic
 - **Defect — lost-update race on feeder state.** `Feeder` bookkeeping (`feeder_state` in SQLite settings) is read-modify-written with no lock. The background feeder loop (`loop()` at the bottom of `engine_bridge.py`, every 5s) holds a stale in-memory copy across slow NAS copies inside `tick()`, while FastAPI request threads (`insert_spot`, the `/api/engine/play_next` endpoint, `activate`, `resync_rotation`, show ops) load/mutate/save the same state concurrently. The stale save wins, the operator's entry vanishes from `st["fed"]`, then `_evict()` deletes its cached file while it is still pending in P1's queue → P1 skips it as "unplayable at prefetch". The DJ's cued track or a fired ad silently never airs.
 - **Design fix — feed depth vs cache depth are conflated.** The 45-minute target governs both how much is cached on disk AND how deep P1's pending queue is. Only the disk cache needs 45 min (NAS-outage armor + P1's emergency filler tier reads the precache dir). A deep P1 queue just makes the UI lag reality by ~45 min. Decouple them: feed P1 only a few tracks ahead; keep 45 min cached on disk via a lookahead.
 - **Spot affidavit gap.** `fire_due_spots` calls `spotmod.mark_fired` even when insertion failed — a transient failure means the ad never airs in its window and never retries.
-- **Stale docs.** `.claude/CLAUDE.md` references `python main.py` (doesn't exist) and a "KDPI protocol" (KDPI is the station's call sign, not a protocol).
+- **Stale docs.** `.claude/CLAUDE.md` references `python main.py` (doesn't exist) and a "station protocol" that is really just the audio chain.
 
 ---
 
@@ -171,7 +171,7 @@ New behavior (in-memory, no migration):
 - Quick Start: replace `python main.py` with the real entry points, e.g. `start-all.bat` for everything, or individually `python -m services.engine.main config/config.json` (P1), `python -m services.core.main config/config.json` (P2, GUI :8080), `python -m services.worker.main config/config.json` (P3). Confirm exact arg conventions from the files.
 - Remove `python main.py --dry-run` from the workflow section (no such flag); replace with running the test suite (Task 5 command) as the local verification step.
 - Key Files table: `main.py` row → `services/` row ("four isolated services: engine / core / worker / poller — see REVIEW.md §2").
-- Tech Stack: replace `**Streaming:** KDPI protocol` with the real chain: `**Audio path:** sound card → Barix Instreamer → WireGuard VPN → transmitter (KDPI)`.
+- Tech Stack: replace `**Streaming:** station protocol` with the real chain: `**Audio path:** sound card → hardware encoder → VPN link → transmitter site`.
 - Leave everything else (health-check emphasis, memory pointers, checklists) intact.
 
 ---

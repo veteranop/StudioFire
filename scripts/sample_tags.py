@@ -7,7 +7,7 @@ Read-only. Usage: python sample_tags.py [N] [root]
 import os
 import sys
 
-sys.path.insert(0, r"C:\Users\markd\Desktop\Projects\StudioFire")
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from mutagen import File as MFile  # noqa: E402
 
 TAGS = {
@@ -74,7 +74,7 @@ def from_db(db_path, n, offset=0):
 
 if __name__ == "__main__":
     n = int(sys.argv[1]) if len(sys.argv) > 1 else 40
-    root = sys.argv[2] if len(sys.argv) > 2 else r"Z:\G"
+    root = sys.argv[2] if len(sys.argv) > 2 else r"\\NAS\music"
     if root.lower().endswith(".db"):
         files = from_db(root, n)
     else:

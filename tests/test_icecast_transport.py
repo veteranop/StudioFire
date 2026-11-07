@@ -1,6 +1,6 @@
 """Tests for the Icecast `updinfo` now-playing transport (#747).
 
-A real HTTP server on 127.0.0.1 plays the part of the StreamGuys mount, so the
+A real HTTP server on 127.0.0.1 plays the part of the stream host's mount, so the
 request shape is exercised end to end without touching a production CDN.
 
 Covers:

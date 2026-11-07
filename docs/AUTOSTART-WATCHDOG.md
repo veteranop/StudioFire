@@ -1,128 +1,94 @@
 # StudioFire — the watchdog design (watch the watcher)
 
-**Status:** design / partially implemented. Companion to
-`docs/AUTOSTART-CONSENSUS.md` (which locked the auto-start architecture, 8.7/8.7)
-and `docs/ON-AIR-SETUP.md` (the deployment runbook).
+An unattended FM station needs more than "the process is running". This note is
+about the layers that keep a station on air when nobody is looking, and what each
+layer can and cannot prove.
 
-> **Rule (Elon, consensus 2026-09-29):**
-> *If the only thing that knows the station is silent lives on the silent PC, you have
-> no watchdog — you have a diary.*
-
-The `.200` incident is the proof. Services were Running, core answered
-`GET /health {"ok":true,"version":"1.3.2"}`, and the engine was burning through 3,529
-tracks with `audio output initialization failed`. **Everything on the box said it was
-fine.** A watchdog has to notice that from *outside*, and it has to reason about
-**silence**, not about process state.
-
----
+> Station-specific values (which PC, which encoder, which transmitter box, the LAN
+> addresses) are deliberately not in this file. They live in the private
+> `site-notes/` folder for each installation.
 
 ## The two tiers
 
-### Tier 1 — on-box (cheap, fast, already built)
+### Tier 1 — on-box (cheap, fast)
 
-`scripts\watchdog.bat`, run by the **StudioFire-Watchdog** scheduled task every 5
-minutes **in the interactive session** (`scripts\install-autostart.bat` creates it).
+StudioFire installs as Windows services:
 
-It runs `scripts\healthcheck.py`, which checks:
+* `StudioFireCore` — the web UI and API (default `http://127.0.0.1:8080`).
+* `StudioFireWorker` — indexing, tag reads, library scans.
+* the audio engine + supervisor — the process that actually feeds the playout.
 
-| Check | What it catches |
-|-------|-----------------|
-| `GET :8080/health` on core | the web/API layer is gone |
-| `GET :7701/status` on the engine | engine unreachable |
-| `mpv_alive` | the audio process died |
-| `emergency_mode` and not `forced_emergency` | **exactly the `.200` symptom**: alive but looping filler because the queue is not being fed |
+The supervisor restarts the engine if it exits, and the core reports a single
+health verdict (`/api/health/verdict`) built from facts it can see: engine
+reachable, audio not silent, a spot policy exists, the music library resolves,
+nothing important is missing.
 
-Behaviour: restart the stack **once**, and only after **two consecutive** failures, so a
-single hiccup cannot drop audio for no reason. Logs to `logs\watchdog.log`.
+Autostart is two independent things, and they are easy to confuse:
 
-**What Tier 1 cannot do:** it cannot hear the transmitter. It only proves the web layer
-and the engine's own opinion of itself. It also cannot survive its own host going
-silent — which is precisely when you need it.
+| Layer | What it does | Where it is configured |
+|---|---|---|
+| **Service autostart** | starts StudioFire at boot, before anyone logs in | `scripts/install-services.bat` |
+| **Autologon** | logs a Windows user in at boot so a desktop app can run | `scripts/autologon-lsa.ps1` (optional) |
 
-### Tier 2 — off-box (non-negotiable for unattended FM)
+A station that only needs the web UI + engine does **not** need autologon. A
+station that also wants the GUI visible on the studio monitor does. The installer
+sets services up silently; autologon is offered later, with a plain warning, and
+is never done without a deliberate choice.
 
-The watcher must live on **another machine** and reason about the **air chain**, because:
+### Tier 2 — off-box (the part that matters for FM)
 
-- a hung or wedged box cannot be trusted to report that it is hung;
-- the app's self-report is a hypothesis, not evidence;
-- HTTP 200 is not on-air.
+Everything on the box can be wrong at once: power, Windows, the service, the
+network card. An off-box check is the only one that can notice **the box itself**
+is gone.
 
-**Already built and running off-box:** the Hermes cron job *"KDPI chain watchdog (Phase 0
-+ gated recovery)"*, every 5 minutes, via `scripts/kdpi_report/kdpi_watch.py` /
-`kdpi_watch_cron.py`. It probes the **transmission chain from outside the StudioFire
-PC**:
+The minimum useful shape:
 
-1. studio Barix Instreamer `192.168.6.51` — `GET /status` -> **input audio level** + uptime
-2. mountain Barix Exstreamer `192.168.3.52` — decoder liveness
-3. TX150 exciter via the Moxa gateway `192.168.3.200:4001` — one CR, read, close
-   (the exciter is **alert-only**; there is no remote reboot, and one stray keystroke on
-   that serial port can MUTE R.F.)
+1. Probe the **transmission chain** from outside, not just StudioFire —
+   encoder/decoder liveness and, where the hardware allows it, the exciter's
+   forward power or audio level.
+2. Probe StudioFire's own `/api/health` and the engine's `/status`.
+3. Raise a ticket or alert when a probe fails twice in a row, and again when it
+   recovers — a flapping link is a fault, not a success.
 
-It is edge-triggered (silent when healthy), dwell-based on the silence decision (a song
-fade or a quiet passage must not fire a false "off air" alert and get the watchdog muted
-within a week — see the hardening note in `kdpi_watch.py`), and opens a TimeTrax ticket
-on a new incident.
-
-**This is the tier that actually protects the carrier.** The Barix input level is the
-closest thing to "is audio arriving at the STL", and it is measured off-box.
-
----
+Use documentation addresses in examples (`192.0.2.10`, `198.51.100.20`,
+`203.0.113.30`); never a station's real LAN addresses in the repo.
 
 ## The gap to close
 
-The two tiers currently watch **different halves** and do not talk:
+Tier 1 says "the software is fine". Tier 2 says "the station is on air". Neither
+proves the other:
 
-| | Watches | Blind to |
-|---|---|---|
-| Tier 1 (`watchdog.bat`) | StudioFire **software** state, on the box | the air; and its own host dying |
-| Tier 2 (`kdpi_watch.py`) | the **air chain** (Barix/TX150), off-box | the StudioFire PC's software state (engine in emergency with the Barix still passing whatever it is fed) |
+* Tier 1 can be green while the transmitter is fed silence (the software has no
+  way to hear its own output).
+* Tier 2 can be red while the software is perfectly healthy (the link, not the
+  box).
 
-The correlation that matters is: **the engine is in emergency/failed on the StudioFire
-PC *and* the studio Barix input level is at the meter floor.** That combination is
-unambiguous dead air, and it is the thing neither tier can see alone.
+That is why the health verdict is deliberately narrow, and why the off-box probe
+is described as non-negotiable for an unattended FM station.
 
-### Recommended extension (smallest useful change)
+### Recommended extension
 
-Add a **StudioFire probe** to the existing off-box `kdpi_watch.py` run, alongside the
-Barix/TX150 checks:
+Add a StudioFire probe to the off-box run alongside the existing hardware probes:
 
-- `GET http://192.168.6.200:8080/health` and `:7701/status` (the studio PC) — or the
-  on-air box when `.222` is the one under test;
-- from that status, the same fields Tier 1 uses: `mpv_alive`, `emergency_mode`,
-  `forced_emergency`, `now_title` advancing;
-- **correlate**, do not alert on each in isolation: engine emergency **AND** studio Barix
-  level at the floor for the dwell window => one incident, one ticket, one alert. Engine
-  emergency alone may just be a queue hiccup the on-box watchdog will restart; a Barix
-  level dip alone may be a fade.
-- **Verify the session, not just the process.** A service in session 0 and a console
-  stack in session 1 look identical over HTTP. Where possible, additionally assert the
-  stack is in an **interactive session** (e.g. `query session` / the task ran under
-  `InteractiveToken`) so a silent-services regression is caught as its own incident.
+* `GET http://<studio-pc>:8080/health` and `:7701/status`.
+* Treat "unreachable twice" as a fault with its own message, distinct from
+  "engine in emergency".
+* Record the check time so a human can tell a stale report from a live one.
 
 ### "Watch the watcher"
 
-- The off-box cron must have its **own** heartbeat that a human can see; if the cron
-  silently stops, the estate is unmonitored. (The Hermes job runner already records
-  `executions.db` / `ticker_heartbeat` — surface a missed-run alert rather than assuming
-  silence means health.)
-- **Alert to humans who can act** (Slack / SMS via the existing VeteranOp channels),
-  never just a log line on the dying box.
-- Keep the recovery actions **gated**: Phase 0 is monitor/alert/ticket only. The Barix
-  soft reboot already exists and is rate-limited + ticketed; the exciter stays
-  alert-only.
+The off-box probe is itself a single point of failure. The cheap answer is to run
+it from somewhere else as well (a second host, or a hosted cron), and to make each
+run say **when it last ran** so silence is visible.
 
----
+## What a health check does NOT prove
 
-## What `healthcheck.py` does NOT prove (say this out loud)
+Say this out loud when discussing monitoring:
 
-- That the **transmitter** is on. It checks the box, not the air.
-- That audio is **audible**: an engine can report "playing" with the output device open
-  on the wrong endpoint. That is why `scripts\set-audio-device.bat` pins the Barix-feed
-  device by GUID — but the only true proof is a level on the air chain.
-- Anything about its own host being down. A watchdog that cannot fail loudly is not a
-  watchdog.
+* it does not prove the audio is intelligible, only that samples are flowing;
+* it does not prove the transmitter is on the air, only that the chain answers;
+* it does not replace a listener — a human hearing the station is still the
+  ground truth.
 
-**Acceptance test for the whole design:** yank audio (stop the stack, or kill mpv) on the
-on-air box while it is live. Within one Tier-1 interval you should see a restart attempt
-in `logs\watchdog.log`; within one Tier-2 interval you should get an off-box ticket/alert
-that names the studio Barix level, not just "a process is not running".
+Keep the private runbook (which box, which address, who to call) in
+`site-notes/`, and keep this file about the design.

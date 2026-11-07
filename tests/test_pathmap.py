@@ -1,4 +1,4 @@
-"""Drive-letter-independent path resolution (the KDPI Z:-drop fix).
+"""Drive-letter-independent path resolution (the dropped-mapped-drive fix).
 
 Covers:
   * services/pathmap.py — the pure resolver + share-root derivation + the
@@ -56,56 +56,56 @@ def test_share_root():
     # config writes forward-slash UNC; drive-map.bat maps Z: -> the PARENT of
     # nas_music_root, so the share root is nas_music_root minus its last part.
     check("share_root: //host/share/G -> \\\\host\\share",
-          pathmap.share_root("//KDPI-Media/music/G")
-          == r"\\KDPI-Media\music")
+          pathmap.share_root("//NAS/music/Library")
+          == r"\\NAS\music")
     check("share_root: backslash UNC in, canonical out",
-          pathmap.share_root(r"\\KDPI-Media\music\G")
-          == r"\\KDPI-Media\music")
+          pathmap.share_root(r"\\NAS\music\Library")
+          == r"\\NAS\music")
     check("share_root: trailing slash tolerated",
-          pathmap.share_root("//KDPI-Media/music/G/")
-          == r"\\KDPI-Media\music")
+          pathmap.share_root("//NAS/music/Library/")
+          == r"\\NAS\music")
     check("share_root: empty -> empty", pathmap.share_root("") == "")
     check("share_root: None -> empty", pathmap.share_root(None) == "")
-    # a station whose nas_music_root is itself a drive path (e.g. Z:/G) gets a
-    # drive-shaped parent back, so the fallback stays a harmless no-op instead
-    # of inventing a bogus \\Z:\G
+    # a station whose nas_music_root is itself a drive path (e.g. Z:/Library)
+    # gets a drive-shaped parent back, so the fallback stays a harmless no-op
+    # instead of inventing a bogus \\Z:\Library
     check("share_root: drive-based music root -> drive-shaped parent",
-          pathmap.share_root("Z:/G") == "Z:")
+          pathmap.share_root("Z:/Library") == "Z:")
     check("share_root: local-disk music root -> its parent",
-          pathmap.share_root(r"C:\temp\music\G") == r"C:\temp\music")
+          pathmap.share_root(r"C:\temp\music\Library") == r"C:\temp\music")
     check("share_root: already a share root -> itself",
           pathmap.share_root("//HOST/share") == r"\\HOST\share")
 
 
 def test_resolve():
-    nas = "//KDPI-Media/music/G"
+    nas = "//NAS/music/Library"
 
     set_drive("Z", False)  # the reboot dropped the mapping
     check("resolve: missing-drive path re-points at the share root",
-          pathmap.resolve(r"Z:\John\New PSAs", {}, nas)
-          == r"\\KDPI-Media\music\John\New PSAs")
+          pathmap.resolve(r"Z:\Spots\New PSAs", {}, nas)
+          == r"\\NAS\music\Spots\New PSAs")
     check("resolve: forward-slash drive path also handled",
-          pathmap.resolve("Z:/John/New PSAs", {}, nas)
-          == r"\\KDPI-Media\music\John\New PSAs")
+          pathmap.resolve("Z:/Spots/New PSAs", {}, nas)
+          == r"\\NAS\music\Spots\New PSAs")
     check("resolve: bare drive root -> the share root itself",
-          pathmap.resolve("Z:\\", {}, nas) == r"\\KDPI-Media\music")
+          pathmap.resolve("Z:\\", {}, nas) == r"\\NAS\music")
 
     set_drive("Z", True)  # mapping present -> leave the path exactly alone
     check("resolve: present-drive path untouched",
-          pathmap.resolve(r"Z:\John\New PSAs", {}, nas)
-          == r"Z:\John\New PSAs")
+          pathmap.resolve(r"Z:\Spots\New PSAs", {}, nas)
+          == r"Z:\Spots\New PSAs")
 
     set_drive("Z", False)
     check("resolve: no NAS root -> unchanged even with the drive gone",
-          pathmap.resolve(r"Z:\John\New PSAs", {}, "")
-          == r"Z:\John\New PSAs")
+          pathmap.resolve(r"Z:\Spots\New PSAs", {}, "")
+          == r"Z:\Spots\New PSAs")
     check("resolve: explicit alias wins over the fallback",
-          pathmap.resolve(r"Z:\John\x.mp3",
+          pathmap.resolve(r"Z:\Spots\x.mp3",
                           {"Z:\\": "\\\\OTHER\\vol\\"}, nas)
-          == r"\\OTHER\vol\John\x.mp3")
+          == r"\\OTHER\vol\Spots\x.mp3")
     check("resolve: UNC path (no drive letter) untouched",
-          pathmap.resolve(r"\\KDPI-Media\music\G\a.mp3", {}, nas)
-          == r"\\KDPI-Media\music\G\a.mp3")
+          pathmap.resolve(r"\\NAS\music\Library\a.mp3", {}, nas)
+          == r"\\NAS\music\Library\a.mp3")
     check("resolve: empty stays empty", pathmap.resolve("", {}, nas) == "")
 
     set_drive("C", True)  # a real local drive is never rewritten
@@ -119,7 +119,7 @@ def test_spot_folder_resolves_without_drive():
     """A spot rule whose folder_path is Z:\\... must resolve to real files when
     the drive is absent — before the fix, insert_spot's bare os.path.isdir on the
     stored Z: value returned False and the spot 'folder is not there' (132 misses
-    at KDPI on 2026-09-29)."""
+    at the reference station on 2026-09-29)."""
     td = tempfile.mkdtemp(prefix="sf-pathmap-")
     dbp = os.path.join(td, "t.db")
     db.migrate(dbp)
@@ -129,13 +129,13 @@ def test_spot_folder_resolves_without_drive():
     # box (Z: == \\host\music, nas_music_root == \\host\music\G).
     nas_root = os.path.join(td, "music", "G")
     share = pathmap.share_root(nas_root)           # -> <td>\music
-    psas = os.path.join(share, "John", "New PSAs")
+    psas = os.path.join(share, "Spots", "New PSAs")
     touch(os.path.join(psas, "legal-id-01.mp3"))
 
     pl.set_path_aliases({}, nas_root)
     try:
         set_drive("Z", False)
-        folder = r"Z:\John\New PSAs"
+        folder = r"Z:\Spots\New PSAs"
         resolved = pl.alias_path(folder)
         check("alias_path: stored Z: spot folder resolves to the share",
               os.path.normcase(resolved) == os.path.normcase(psas))

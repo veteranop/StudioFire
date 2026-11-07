@@ -22,7 +22,7 @@ embedded Python runtime with all dependencies pre-installed.
   auto-restart on crash) — check it on the production on-air PC. **After
   installing**, set each service's Log On to a real user account. If the music
   is on a NAS, use a UNC root in `config\config.json` like
-  `//KDPI-Media/music/G`; only create `config\drive-map.bat` when you must
+  `//NAS/music`; only create `config\drive-map.bat` when you must
   support legacy mapped-drive paths in a service session.
   The bundled `runtime\` means Python itself works under any account.
 - Optional task: open firewall port 8080 for the LAN web GUI.

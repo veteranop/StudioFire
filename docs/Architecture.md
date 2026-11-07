@@ -50,8 +50,9 @@ services so nothing outside the audio path can ever cause dead air. Full spec in
 - **Show overlay** — a scheduled show interrupts the base rotation, plays once
   through, then hands back (`active_playlist_id`). Items are snapshot into the
   feeder overlay so they're [[StudioFire/docs/Roadmap|editable live]].
-- **Path aliases** — playlists store `\\KDPI-Media\music\…`; each box should
-  prefer a local UNC root such as `//KDPI-Media/music/G` in `paths.nas_music_root`.
+- **Path aliases** — playlists may store either a UNC path (`\\NAS\Music\…`) or a
+  mapped drive (`Z:\…`). Each box should prefer the UNC root in
+  `paths.nas_music_root`; `paths.share_aliases` maps the drive-letter form.
   Legacy mapped-drive aliases like `Z:` are only for compatibility. See [[StudioFire/docs/Gotchas|Gotchas]].
 
 ## Data

@@ -2,7 +2,7 @@
   "schema_version": 1,
   "station_name": "STATION NAME",
   "paths": {
-    "nas_music_root": "//KDPI-Media/music/G",
+    "nas_music_root": "//NAS/music",
     "path_aliases": {}
   },
   "engine": {
@@ -25,12 +25,7 @@
       "host": "",
       "api_key": ""
     },
-    "barix": [
-      {
-        "name": "Studio Instreamer",
-        "host": ""
-      }
-    ],
+    "barix": [],
     "tx150": {
       "host": "",
       "port": 0

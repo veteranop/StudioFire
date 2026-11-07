@@ -2,7 +2,7 @@
 feeder's model — and so must never have its cached file evicted — before P1
 has actually observed it as pending / on air.
 
-Live incident (KDPI, 2026-09-29, TimeTrax H2627206): after the v1.2.0 Z:-drop
+Live incident (the reference station, 2026-09-29, TimeTrax H2627206): after the v1.2.0 Z:-drop
 fix, spot rules fired again and P1 returned 202, but the spots never aired.
 `play_history` showed zero source='spot' rows; the boundary after each fire
 played the next SHOW/rotation item instead. Root cause: tick()'s reconcile

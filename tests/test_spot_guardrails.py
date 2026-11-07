@@ -67,7 +67,7 @@ def main():
         # folder_key empty. They must be protected too, or the guardrail misses
         # exactly the rules it exists for.
         db.set_setting(conn, "dir_station_ids", "Z:\Legal ID's")
-        db.set_setting(conn, "dir_ads", "Z:\1 - ALL DJ BREAKS")
+        db.set_setting(conn, "dir_ads", "Z:\\Ads")
         fp_ids = spots.add(conn, "", "clock", clock_minutes="0",
                            folder_path="z:/legal id's/")
         check("browse-picker legal-ID rule is protected",

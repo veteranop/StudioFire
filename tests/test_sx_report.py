@@ -100,9 +100,9 @@ def _period():
 
 def test_filing_filename():
     start, end = _period()
-    name = sx_report.filing_filename("Drop In Radio, Inc.", start, end)
+    name = sx_report.filing_filename("Example FM, Inc.", start, end)
     check("filename = letters+digits, ISO dates, .txt",
-          name == "DropInRadioInc20261001-20261031.txt")
+          name == "ExampleFMInc20261001-20261031.txt")
     check("filename drops accents and punctuation",
           sx_report.filing_filename("Képi & Sons, Inc.", start, end)
           .startswith("KepiSonsInc"))
@@ -197,13 +197,13 @@ def test_ath_columns():
     for r in rows:
         r["ath"] = 1234.5
     sx_report.write_filing(path, rows, "sample_ath",
-                           _cfg(mode="sample_ath", channel_name="KDPI"),
+                           _cfg(mode="sample_ath", channel_name="Example FM"),
                            start, end, dt.datetime(2026, 12, 31), False)
     cells = (open(path, "rb").read().split(b"\r\n")[0]
              .decode("ascii").split("|"))
     check("sample_ath: ten columns", len(cells) == 10)
     check("sample_ath: ATH bare and repeated", cells[7] == "1234.50")
-    check("sample_ath: channel name column", cells[8] == "^KDPI^")
+    check("sample_ath: channel name column", cells[8] == "^Example FM^")
     check("sample_ath: play frequency is the only count", cells[9] == "3")
 
 
@@ -267,22 +267,22 @@ def main():
     # the share root(s) and the drive letter now come from config, not from a
     # hard-coded "Z:" — this checks the mapping itself
     variants = sx_report._path_variants(
-        "//KDPI-Media/music/G\\Artist\\Album\\01 - Song.mp3",
-        ["\\\\KDPI-Media\\music"], "Z:")
+        "//NAS/music/Library\\Artist\\Album\\01 - Song.mp3",
+        ["\\\\NAS\\music"], "Z:")
     check("path variants include the Z: form",
-          "Z:\\G\\Artist\\Album\\01 - Song.mp3" in variants)
+          "Z:\\Library\\Artist\\Album\\01 - Song.mp3" in variants)
     check("path variants always include the stored form",
-          "//KDPI-Media/music/G\\Artist\\Album\\01 - Song.mp3" in variants)
+          "//NAS/music/Library\\Artist\\Album\\01 - Song.mp3" in variants)
 
     # -- period collection / join / fallback --------------------------------
     conn = fresh_conn()
-    lib = "//KDPI-Media/music/G\\Artist\\Album\\01 - Song.mp3"
+    lib = "//NAS/music/Library\\Artist\\Album\\01 - Song.mp3"
     add_track(conn, lib, "Song", "Artist", "Album", 201.0)
     cached = "C:\\SF\\precache\\" + sx_report.precache_digest(lib) + ".mp3"
     add_play(conn, "1-1", "2026-09-01T10:00:00.000-06:00", cached,
              "Artist - Song")
     # same file, but the feeder handed the engine the drive-letter form
-    zform = "Z:\\G\\Artist\\Album\\01 - Song.mp3"
+    zform = "Z:\\Library\\Artist\\Album\\01 - Song.mp3"
     add_play(conn, "1-2", "2026-09-01T10:05:00.000-06:00",
              "C:\\SF\\precache\\" + sx_report.precache_digest(zform) + ".mp3",
              "Artist - Song")
@@ -304,7 +304,7 @@ def main():
     tz = dt.timezone(dt.timedelta(hours=-6))
     start = dt.datetime(2026, 9, 1, tzinfo=tz)
     end = dt.datetime(2026, 9, 2, tzinfo=tz)
-    idx = sx_report.build_precache_index(conn, ["//KDPI-Media/music/G"], "Z:")
+    idx = sx_report.build_precache_index(conn, ["//NAS/music/Library"], "Z:")
     plays = sx_report.collect_period(conn, start, end, index=idx)
 
     check("period is start-inclusive / end-exclusive", len(plays) == 4)

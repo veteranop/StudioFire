@@ -55,8 +55,8 @@ Some preamble text that isn't part of any release.
 
 ## [1.1.0] - 2026-09-27
 
-### Added (operator feedback from KDPI)
-These came from John after the first live show.
+### Added (operator feedback from the station)
+These came from the operators after the first live show.
 - **Songs crossfade.** In the last 4 seconds the next song starts
   underneath it and rises.
 """
@@ -98,9 +98,9 @@ def test_parser():
     #      swallowed into the first bullet
     added_11 = rels[2]["groups"][0]
     check("group heading with trailing text kept whole",
-          added_11["heading"] == "Added (operator feedback from KDPI)")
+          added_11["heading"] == "Added (operator feedback from the station)")
     check("intro paragraph captured separately from the bullets",
-          added_11["intro"] == "These came from John after the first live show."
+          added_11["intro"] == "These came from the operators after the first live show."
           and len(added_11["entries"]) == 1)
     check("intro is not glued onto the first bullet",
           added_11["entries"][0].startswith("**Songs crossfade.**"))
@@ -138,9 +138,9 @@ def test_bold_segments():
     check("bold split into [text, is_bold] pairs",
           segs == [["Bold lead-in.", True], [" then plain text.", False]])
     # backslashes in paths must survive the segmenting untouched
-    segs2 = changelog.bold_segments(r"maps a drive like Z:\ and \\KDPI-Media\music")
+    segs2 = changelog.bold_segments(r"maps a drive like Z:\ and \\NAS\music")
     check("backslashes preserved through segmenting",
-          segs2 == [[r"maps a drive like Z:\ and \\KDPI-Media\music", False]])
+          segs2 == [[r"maps a drive like Z:\ and \\NAS\music", False]])
     check("no bold -> single plain segment",
           changelog.bold_segments("plain") == [["plain", False]])
 

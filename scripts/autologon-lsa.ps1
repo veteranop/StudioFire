@@ -31,11 +31,11 @@
     USAGE (elevated)
     ----------------
         # enable, password prompted securely (recommended)
-        powershell -NoProfile -ExecutionPolicy Bypass -File scripts\autologon-lsa.ps1 -User kdpi -Domain KDPI-STREAMING
+        powershell -NoProfile -ExecutionPolicy Bypass -File scripts\autologon-lsa.ps1 -User station -Domain STATION-PC
 
         # enable, password supplied (or leave -Password off and set the env var
         # STUDIOFIRE_AUTOLOGON_PW so it never lands on a command line)
-        powershell ... -File scripts\autologon-lsa.ps1 -User kdpi -Domain . -Password 'secret'
+        powershell ... -File scripts\autologon-lsa.ps1 -User station -Domain . -Password 'secret'
 
         # report the current state, change nothing, no password needed
         powershell ... -File scripts\autologon-lsa.ps1 -Check

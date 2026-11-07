@@ -14,7 +14,7 @@ REM  finds no music), starts them, and then VERIFIES they came up.
 REM
 REM  Usage (on the on-air PC, elevated):
 REM      scripts\install-services.bat                        (prompts)
-REM      scripts\install-services.bat .\kdpi MyPassword       (unattended)
+REM      scripts\install-services.bat .\station MyPassword       (unattended)
 REM      scripts\install-services.bat -check                 (no changes)
 REM
 REM  Undo:  scripts\remove-services.bat
