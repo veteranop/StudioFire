@@ -57,8 +57,16 @@ DEFAULTS_HELP = {
 
 # --------------------------------------------------------------- state
 def current_step(conn) -> str:
-    """The first step that is not finished yet."""
+    """The first step that is not finished yet.
+
+    An install that already has users and no wizard state predates the wizard —
+    it is set up, and must never be shown the first-run screens. Mark it done
+    once, on first look, and carry on.
+    """
     if (db.get_setting(conn, KEY_DONE) or "") == "1":
+        return "done"
+    if auth.any_users(conn) and not db.get_setting(conn, KEY_STEP):
+        db.set_setting(conn, KEY_DONE, "1")
         return "done"
     step = db.get_setting(conn, KEY_STEP) or STEPS[0][0]
     ids = [s for s, _ in STEPS]

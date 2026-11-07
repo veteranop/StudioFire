@@ -17,7 +17,7 @@ sys.path.insert(0, ROOT)
 from fastapi.testclient import TestClient                  # noqa: E402
 
 from services.core import config as core_config            # noqa: E402
-from services.core import db, setup as setup_mod           # noqa: E402
+from services.core import auth, db, setup as setup_mod           # noqa: E402
 from services.core.app import create_app                   # noqa: E402
 
 passed = 0
@@ -202,6 +202,16 @@ def main():
     finally:
         core_config.update_config = real_update
         core_config.load_config = real_load
+
+    # -- an install that predates the wizard must never see it ---------------
+    td2 = tempfile.mkdtemp(prefix="sf-legacy-")
+    app2 = create_app(bare_cfg(td2))
+    conn2 = db.connect(os.path.join(td2, "core.db"))
+    auth.create_user(conn2, "oldadmin", "longenough", "admin")
+    check("an older install with users is already set up",
+          setup_mod.current_step(conn2) == "done"
+          and setup_mod.is_complete(conn2))
+    conn2.close()
 
     print(f"\nSETUP WIZARD OK ({passed} checks)")
     return 0
