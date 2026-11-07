@@ -568,6 +568,48 @@ def _attribution_coverage(conn, lo: str, hi: str) -> dict:
             "pct": round(100.0 * (matched or 0) / total, 1) if total else 0.0}
 
 
+
+# Folders that hold station furniture, not music. Anything played out of these
+# is a spot, PSA, liner or legal ID and has no business in an artist/genre
+# count, even when it is scheduled from inside a playlist.
+FURNITURE_SETTINGS = ("dir_ads", "dir_psas", "dir_jingles", "dir_station_ids")
+
+
+def _furniture_clause(conn) -> tuple[str, list]:
+    """SQL fragment + params excluding non-music folders (set in Settings)."""
+    pats: list[str] = []
+    seen = set()
+    for key in FURNITURE_SETTINGS:
+        row = conn.execute("SELECT value FROM settings WHERE key = ?",
+                           (key,)).fetchone()
+        if not row or not row[0]:
+            continue
+        for part in str(row[0]).split(";"):
+            p = part.strip().rstrip("\\/")
+            if not p:
+                continue
+            norm = p.lower().replace("/", "\\") + "\\%"
+            if norm not in seen:
+                seen.add(norm)
+                pats.append(norm)
+    for (fp,) in conn.execute(
+            "SELECT folder_path FROM spot_rules "
+            " WHERE folder_path IS NOT NULL AND folder_path <> ''"):
+        p = str(fp).strip().rstrip("\\/")
+        if not p:
+            continue
+        norm = p.lower().replace("/", "\\") + "\\%"
+        if norm not in seen:
+            seen.add(norm)
+            pats.append(norm)
+    if not pats:
+        return "", []
+    path_expr = "lower(replace(pi.path, '/', char(92)))"
+    clause = ("           AND NOT (" +
+              " OR ".join("%s LIKE ?" % path_expr for _ in pats) + ")\n")
+    return clause, pats
+
+
 # --------------------------------------------------------------- charts (SVG)
 
 def bars_svg(series, width=760, bar_h=22, gap=6, unit="plays",
@@ -623,6 +665,7 @@ def _music_join(conn, lo: str, hi: str, group_col: str, limit: int | None = None
     through the attribution the feeder writes (playlist item -> track path). The
     caller discloses the coverage so nobody reads a subset as the whole period.
     """
+    furniture_sql, furniture_params = _furniture_clause(conn)
     sql = """
         SELECT COALESCE(NULLIF(TRIM(t.%s), ''), 'Unknown') AS grp,
                COUNT(*) AS spins
@@ -649,24 +692,30 @@ def _music_join(conn, lo: str, hi: str, group_col: str, limit: int | None = None
                 LIMIT 1)
          WHERE ph.event = 'track_start'
            AND ph.source IN ('playlist', 'show', 'manual')
-           AND julianday(ph.ts) BETWEEN julianday(?) AND julianday(?)
+           %s           AND julianday(ph.ts) BETWEEN julianday(?) AND julianday(?)
       GROUP BY grp
-      ORDER BY spins DESC""" % group_col
-    args = [lo, hi]
+      ORDER BY spins DESC""" % (group_col, furniture_sql)
+    args = furniture_params + [lo, hi]
     if limit:
         sql += " LIMIT %d" % int(limit)
     return _rows(conn, sql, tuple(args))
 
 
 def _music_coverage(conn, lo: str, hi: str) -> dict:
+    furniture_sql, furniture_params = _furniture_clause(conn)
+    # same exclusion as the counts, so coverage and rows describe the same set
     row = conn.execute(
         "SELECT COUNT(*) AS total, "
         "       SUM(CASE WHEN json_extract(extra, '$.item_id') IS NOT NULL "
         "                THEN 1 ELSE 0 END) AS linked "
-        "  FROM play_history WHERE event='track_start' "
-        "   AND source IN ('playlist','show','manual') "
-        "   AND julianday(ts) BETWEEN julianday(?) AND julianday(?)",
-        (lo, hi)).fetchone()
+        "  FROM play_history ph "
+        "  LEFT JOIN playlist_items pi "
+        "         ON pi.id = json_extract(ph.extra, '$.item_id') "
+        " WHERE ph.event='track_start' "
+        "   AND ph.source IN ('playlist','show','manual') "
+        + furniture_sql +
+        "   AND julianday(ph.ts) BETWEEN julianday(?) AND julianday(?)",
+        tuple(furniture_params) + (lo, hi)).fetchone()
     total = row["total"] if row else 0
     linked = (row["linked"] if row else 0) or 0
     return {"total": total, "matched": linked,
