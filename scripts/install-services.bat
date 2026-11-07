@@ -21,6 +21,12 @@ REM  Undo:  scripts\remove-services.bat
 REM  Stop/start by hand:  STOP-ON-AIR.bat / GO-LIVE.bat
 REM ============================================================
 setlocal EnableDelayedExpansion
+REM The installer runs this with no console attached: any "set /p" or "if not defined NOINPUT pause"
+REM would block forever and the setup would sit on "Registering Windows
+REM services..." (found 2026-11-07). SFC_NONINTERACTIVE turns those into
+REM explicit failures, and the credentials arrive as env vars so the
+REM password is never in a command line or a log.
+if defined SFC_NONINTERACTIVE set "NOINPUT=1"
 cd /d "%~dp0.."
 set "APP=%CD%"
 set "CHECK="
@@ -40,7 +46,7 @@ fltmc >nul 2>&1
 if errorlevel 1 (
   echo [X]  This needs Administrator rights.
   echo     Close this window, right-click this .bat, then "Run as administrator".
-  if not defined CHECK pause
+  if not defined CHECK if not defined NOINPUT pause
   exit /b 1
 )
 
@@ -68,7 +74,7 @@ if /i not "%~1"=="-i-understand-no-audio" if not defined CHECK (
   echo  makes sound^), re-run as:
   echo      scripts\install-services.bat -i-understand-no-audio
   echo.
-  if not defined CHECK pause
+  if not defined CHECK if not defined NOINPUT pause
   exit /b 1
 )
 
@@ -95,7 +101,7 @@ echo [ok] interpreter     : %PYTHON%
 if "%FATAL%"=="1" (
   echo.
   echo [X]  Fix the MISSING items above and run this again.
-  if not defined CHECK pause
+  if not defined CHECK if not defined NOINPUT pause
   exit /b 1
 )
 echo.
@@ -106,6 +112,8 @@ REM profile, no NAS credentials. LocalSystem therefore starts fine and then
 REM finds no music (learned 2026-07-08). Use the box's own account.
 set "SVCUSER="
 set "SVCPASS="
+if defined SFC_SVCUSER set "SVCUSER=%SFC_SVCUSER%"
+if defined SFC_SVCPASS set "SVCPASS=%SFC_SVCPASS%"
 REM the account is normally arg1, or arg2 when arg1 is the check flag
 if defined CHECK (
   if not "%~2"=="" set "SVCUSER=%~2"
@@ -115,6 +123,11 @@ if defined CHECK (
 )
 if defined CHECK goto :skipaccount
 if "%SVCUSER%"=="" (
+  if defined NOINPUT (
+    echo [X]  No service account given and no console to ask on.
+    echo      Pass it as arg 1, or set SFC_SVCUSER/SFC_SVCPASS.
+    exit /b 2
+  )
   echo  Which Windows account should the services run as?
   echo  It must be an account that can read the music library on the NAS.
   set /p "SVCUSER=  Account [.\%USERNAME%]: "
@@ -123,10 +136,15 @@ if "%SVCUSER%"=="" (
 if /i "%SVCUSER%"=="LocalSystem" (
   echo [X]  LocalSystem cannot read the NAS - the station would come up and find
   echo      no music. Use the box's real account instead.
-  if not defined CHECK pause
+  if not defined CHECK if not defined NOINPUT pause
   exit /b 1
 )
 if "%SVCPASS%"=="" (
+  if defined NOINPUT (
+    echo [X]  No password given for %SVCUSER% and no console to ask on.
+    echo      Set the services^' Log On account afterwards in services.msc.
+    exit /b 2
+  )
   echo.
   echo  Password for %SVCUSER%
   echo  ^(typed at this console only - it is NOT stored in this .bat or anywhere
@@ -175,7 +193,7 @@ if defined FAILED (
   echo [X]  A service could not be registered - see the message above.
   echo     Nothing was started. The station is still off air; to get it back
   echo     right now run GO-LIVE.bat, then tell Mark.
-  if not defined CHECK pause
+  if not defined CHECK if not defined NOINPUT pause
   exit /b 1
 )
 
@@ -236,12 +254,12 @@ echo.
 echo  [X]  Console mode ^(start-all.bat^) and service mode are not meant to run
 echo      together. Pick service mode on the on-air PC.
 echo.
-pause
+if not defined NOINPUT pause
 exit /b 0
 
 REM ============================================================
 :sleep
-REM seconds-ish pause that also works when stdin is redirected (unlike timeout)
+REM seconds-ish if not defined NOINPUT pause that also works when stdin is redirected (unlike timeout)
 ping -n %1 127.0.0.1 >nul
 goto :eof
 

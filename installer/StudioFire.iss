@@ -105,7 +105,8 @@ Name: "{commondesktop}\Quit StudioFire"; Filename: "{app}\stop-all.bat"; Working
 
 [Run]
 Filename: "netsh"; Parameters: "advfirewall firewall add rule name=""StudioFire Web"" dir=in action=allow protocol=TCP localport={code:GetPort} profile=private,domain"; Tasks: firewall; Flags: runhidden
-Filename: "{app}\scripts\install-services.bat"; Tasks: services; Flags: runhidden waituntilterminated; StatusMsg: "Registering Windows services..."
+Filename: "{cmd}"; Parameters: "/c ""{tmp}\sf-services.cmd"""; Tasks: services; Check: SvcCredsGiven; Flags: runhidden waituntilterminated; StatusMsg: "Registering Windows services..."
+Filename: "{cmd}"; Parameters: "/c del /q ""{tmp}\sf-services.cmd"""; Tasks: services; Flags: runhidden
 Filename: "{app}\start-all.bat"; Description: "Start StudioFire now"; Flags: postinstall nowait skipifsilent unchecked; Check: not WizardIsTaskSelected('services')
 Filename: "http://localhost:{code:GetPort}"; Description: "Open the web GUI (first visit creates the admin login)"; Flags: postinstall shellexec nowait skipifsilent
 
@@ -117,6 +118,7 @@ Filename: "netsh"; Parameters: "advfirewall firewall delete rule name=""StudioFi
 [Code]
 var
   StationPage: TInputQueryWizardPage;
+  SvcPage: TInputQueryWizardPage;
   PortNum: Integer;
 
 procedure InitializeWizard;
@@ -132,6 +134,21 @@ begin
   StationPage.Values[0] := 'My Station';
   StationPage.Values[1] := '';
   StationPage.Values[2] := '8080';
+
+  { The services start before anyone logs in, so they need a real account that
+    can read the music library. This used to be asked by the batch file - which
+    the installer runs with no console, so setup sat on "Registering Windows
+    services..." forever. Ask here, where the prompt is visible. }
+  SvcPage := CreateInputQueryPage(wpSelectTasks,
+    'Windows service account',
+    'Which Windows account should StudioFire run as?',
+    'StudioFire runs as Windows services so the station comes back by itself ' +
+    'after a reboot. Windows services cannot see your mapped drives or your ' +
+    'saved passwords, so they need an account that can open the music library ' +
+    'itself. Use the account you use on this PC.');
+  SvcPage.Add('Account:', False);
+  SvcPage.Add('Password:', True);
+  SvcPage.Values[0] := '';
 end;
 
 function ConfigPath: String;
@@ -142,6 +159,11 @@ end;
 function ShouldSkipPage(PageID: Integer): Boolean;
 begin
   { upgrades keep their existing config — don't re-ask }
+  if (SvcPage <> nil) and (PageID = SvcPage.ID) then
+  begin
+    Result := not WizardIsTaskSelected('services');
+    Exit;
+  end;
   if (StationPage <> nil) and (PageID = StationPage.ID) then
   begin
     PortNum := StrToIntDef(StationPage.Values[2], 0);
@@ -166,6 +188,43 @@ begin
   T := S;
   StringChangeEx(T, '\', '/', True);
   Result := T;
+end;
+
+{ Is there a password to register the services with? Without one the batch
+  file has nothing to log on with, so the step is skipped rather than retried
+  blindly (the station can be pointed at the services later in Settings). }
+function SvcCredsGiven: Boolean;
+begin
+  Result := (SvcPage <> nil) and (Trim(SvcPage.Values[1]) <> '');
+end;
+
+function SvcAccount: String;
+begin
+  Result := Trim(SvcPage.Values[0]);
+  if Result = '' then
+    Result := '.\' + GetUserNameString;
+end;
+
+{ The batch reads SFC_SVCUSER / SFC_SVCPASS from the environment, so the
+  password never appears in a command line, an installer log or the Services
+  UI. The file lives in the temporary folder and is deleted by the next
+  following run entry. }
+procedure WriteServicesWrapper;
+var
+  Lines: TStringList;
+begin
+  Lines := TStringList.Create;
+  try
+    Lines.Add('@echo off');
+    Lines.Add('set "SFC_NONINTERACTIVE=1"');
+    Lines.Add('set "SFC_SVCUSER=' + SvcAccount + '"');
+    Lines.Add('set "SFC_SVCPASS=' + SvcPage.Values[1] + '"');
+    Lines.Add('call "' + ExpandConstant('{app}\scripts\install-services.bat') + '"');
+    Lines.Add('exit /b %ERRORLEVEL%');
+    Lines.SaveToFile(ExpandConstant('{tmp}\sf-services.cmd'));
+  finally
+    Lines.Free;
+  end;
 end;
 
 { The web port, in precedence order: what the station's config already says
@@ -237,6 +296,16 @@ begin
       '  }' + #13#10 +
       '}' + #13#10;
     SaveStringToFile(ConfigPath, Cfg, False);
+  end;
+  if (CurStep = ssPostInstall) and WizardIsTaskSelected('services') then
+  begin
+    if SvcCredsGiven then
+      WriteServicesWrapper
+    else
+      MsgBox('StudioFire was installed, but the Windows services were not ' +
+        'registered because no password was given.' + #13#10 + #13#10 +
+        'Start StudioFire from the Start menu for now; you can turn on ' +
+        '"start at boot" later in Settings.', mbInformation, MB_OK);
   end;
 end;
 
