@@ -455,6 +455,14 @@ def migrate(db_path: str) -> None:
                         (version INTEGER NOT NULL)""")
         row = conn.execute("SELECT version FROM schema_version").fetchone()
         current = row["version"] if row else 0
+        # Running older code against a newer database silently writes the wrong
+        # columns and can lose data (a branch checkout, or a rollback that kept
+        # the migrated file). Refuse, with the way out named.
+        if current > SCHEMA_VERSION:
+            raise RuntimeError(
+                f"this database is schema v{current} but this build only knows "
+                f"v{SCHEMA_VERSION} — it was written by newer code. Restore the "
+                f"pre-migration snapshot in backups/, or update StudioFire.")
         # §6.4: back up + verify the DB BEFORE touching the schema, but only
         # when there is actually a pending migration. A failed/unverifiable
         # backup aborts the whole migrate (raises) — never migrate blind.

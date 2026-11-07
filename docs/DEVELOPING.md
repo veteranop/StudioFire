@@ -83,6 +83,27 @@ without an installer is not shippable.
 Write the release notes for an operator, not a developer: what changed, what
 they will notice, and anything they must do.
 
+## Running a branch against real station data
+
+A `git checkout` on the on-air or production PC is running unreleased code
+against a live library and a live database. Before you start the app:
+
+```powershell
+copy data\studiofire.db "data\backups\pre-branch-$(Get-Date -Format yyyyMMdd-HHmmss).db"
+```
+
+The app also takes its own snapshot: **every schema migration copies the database
+first** to `data\backups\pre-migration-v<old>-to-v<new>-<stamp>.db`, verifies the
+copy with `PRAGMA integrity_check`, and refuses to migrate if either step fails
+(`services/core/db.py`). The last five snapshots are kept. That covers the app's
+own startup path — it does **not** cover a migration you run by hand, a script
+that writes, or restoring after a bad branch. Make your own dated copy anyway,
+and put it outside the repo if the branch might move files around.
+
+To roll back a schema upgrade: stop both services, replace `data\studiofire.db`
+with the snapshot, `git checkout` the previous tag, restart. Older code will
+refuse to run against a newer schema — that is deliberate.
+
 ## Where things live
 
 | Path | What |

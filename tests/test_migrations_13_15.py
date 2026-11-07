@@ -143,6 +143,20 @@ def main():
         check("re-running migrate is a no-op", _version(fc) == db.SCHEMA_VERSION)
         fc.close()
 
+    # a database written by NEWER code must be refused, not silently mistreated
+    newer = os.path.join(tempfile.mkdtemp(prefix="sf-newer-"), "n.db")
+    db.migrate(newer)
+    nc = sqlite3.connect(newer)
+    nc.execute("DELETE FROM schema_version")
+    nc.execute("INSERT INTO schema_version VALUES (?)", (db.SCHEMA_VERSION + 1,))
+    nc.commit()
+    nc.close()
+    try:
+        db.migrate(newer)
+    except RuntimeError as exc:
+        check("a newer schema is refused", "newer code" in str(exc), str(exc)[:60])
+    else:
+        check("a newer schema is refused", False, "migrate accepted vN+1")
     print("\nMIGRATIONS 13+14 OK (%d checks)" % passed)
 
 
