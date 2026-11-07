@@ -178,14 +178,22 @@ def main() -> int:
         print("\nRunning tests:")
         run_tests()
 
-    # 4b. the installer — a release without one is not shippable any more
-    exe = build_installer(new)
-
-    # 5. commit, tag, push, publish
+    # 4b. the installer — a release without one is not shippable any more.
+    # VERSION and CHANGELOG are written FIRST: the Inno script stamps the version
+    # from the VERSION file, so building before this wrote the PREVIOUS version
+    # into the exe and the build then looked for an .exe that never appeared
+    # (this blocked every release until 2026-11-07).
     with open(CHANGELOG, "w", encoding="utf-8", newline="") as f:
         f.write(new_text)
     with open(os.path.join(ROOT, "VERSION"), "w", encoding="utf-8") as f:
         f.write(new + "\n")
+    try:
+        exe = build_installer(new)
+    except SystemExit:
+        git("checkout", "--", "CHANGELOG.md", "VERSION")
+        raise
+
+    # 5. commit, tag, push, publish
     git("add", "CHANGELOG.md", "VERSION")
     git("commit", "-m", f"Release {tag}")
     git("tag", "-a", tag, "-m", f"StudioFire {tag}")
