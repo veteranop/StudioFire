@@ -118,8 +118,13 @@ async function runReport() {
   document.getElementById("rep-head").hidden = false;
   document.getElementById("rep-title").textContent = d.title || "";
   document.getElementById("rep-sub").textContent = d.subtitle || "";
-  document.getElementById("rep-summary").textContent =
-    (d.rows || []).length + " row(s)" + (d.subtitle ? " · " + d.subtitle : "");
+  let summary = (d.rows || []).length + " row(s)" +
+                (d.subtitle ? " · " + d.subtitle : "");
+  if (d.coverage) {
+    summary += " · " + d.coverage.matched + " of " + d.coverage.total +
+               " songs attributable to a playlist (" + d.coverage.pct + "%)";
+  }
+  document.getElementById("rep-summary").textContent = summary;
 
   head.innerHTML = "";
   const htr = document.createElement("tr");

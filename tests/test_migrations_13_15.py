@@ -1,4 +1,4 @@
-"""Schema migrations 13 + 14 — prove BOTH directions before believing them.
+"""Schema migrations 13-15 — prove BOTH directions before believing them.
 
 `services/core/db.py` keeps an append-only MIGRATIONS list. A station that
 already ran version N never re-runs it, so a new migration must land cleanly on
@@ -8,10 +8,10 @@ version shipped in v1.6.3), puts data in it, then migrates and asserts:
   * schema_version ends at 14
   * existing rows are untouched and the new columns are NULL (nobody's rule
     appears "deleted" because of the upgrade)
-  * skipped_items (v14) exists and is empty
+  * skipped_items (v14) and the reporting tables (v15) exist and are empty
   * a FRESH database also lands at 14 with the same shape
 
-Run: python tests/test_migrations_13_14.py
+Run: python tests/test_migrations_13_15.py
 """
 import os
 import sqlite3
@@ -94,7 +94,7 @@ def main():
         # ---- the upgrade ----
         db.migrate(old)
         conn = db.connect(old)
-        check("migrated to v14", _version(conn) == 14)
+        check("migrated to the current schema", _version(conn) == db.SCHEMA_VERSION)
         after = [dict(r) for r in conn.execute(
             "SELECT id, label, enabled, folder_path FROM spot_rules ORDER BY id")]
         check("existing spot rules survive untouched", before == after,
@@ -111,6 +111,10 @@ def main():
                            "AND name='skipped_items'").fetchone()[0] == 1)
         check("skipped_items is empty after the upgrade",
               conn.execute("SELECT COUNT(*) FROM skipped_items").fetchone()[0] == 0)
+        check("reporting tables exist after the upgrade",
+              conn.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table' "
+                           "AND name IN ('queue_attribution','playlist_airings')"
+                           ).fetchone()[0] == 2)
         check("the new index exists",
               conn.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='index' "
                            "AND name='idx_spot_rules_deleted'").fetchone()[0] == 1)
@@ -125,7 +129,7 @@ def main():
         fresh = os.path.join(td, "fresh.db")
         db.migrate(fresh)
         fc = db.connect(fresh)
-        check("fresh install is at v14", _version(fc) == 14)
+        check("fresh install is at the current schema", _version(fc) == db.SCHEMA_VERSION)
         check("fresh install has skipped_items",
               fc.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table' "
                          "AND name='skipped_items'").fetchone()[0] == 1)
@@ -136,7 +140,7 @@ def main():
         fc.close()
         db.migrate(fresh)
         fc = db.connect(fresh)
-        check("re-running migrate is a no-op", _version(fc) == 14)
+        check("re-running migrate is a no-op", _version(fc) == db.SCHEMA_VERSION)
         fc.close()
 
     print("\nMIGRATIONS 13+14 OK (%d checks)" % passed)

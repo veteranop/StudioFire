@@ -44,6 +44,8 @@
            display: flex; justify-content: space-between; gap: 16px; }
   .note { max-width: 62%; }
   .empty { padding: 18px; text-align: center; color: var(--muted); }
+  .gapband { margin: 0 0 12px; padding: 8px 10px; border-left: 4px solid #8a5a00;
+             background: #fdf6e6; font-size: 11.5px; color: #4a3a12; }
 
   /* screen-only hint */
   .hint { font-size: 10.5px; color: var(--muted); text-align: right;
@@ -69,12 +71,21 @@
     <div><b>{{ rep.title }}</b></div>
     <div>{{ rep.subtitle }}</div>
     <div>Generated {{ generated }}</div>
-    <div>by StudioFire · {{ running_version or "" }}</div>
+    <div>by StudioFire {{ running_version or "" }}{% if host %} · {{ host }}{% endif %}</div>
   </div>
 </div>
 
 <h1>{{ rep.title }}</h1>
-<div class="window">{{ rep.subtitle }}{% if rep.rows %} · {{ rep.rows|length }} row(s){% endif %}</div>
+<div class="window">{{ rep.subtitle }}{% if rep.rows %} · {{ rep.rows|length }} row(s){% endif %} · inclusive dates, station local time</div>
+
+{% if rep.coverage %}
+<div class="gapband">
+  <b>How complete this is:</b> {{ rep.coverage.matched }} of
+  {{ rep.coverage.total }} songs in this period can be tied to a playlist
+  ({{ rep.coverage.pct }}%). Songs without that link are not shown as a named
+  playlist — they are counted here rather than smoothed over.
+</div>
+{% endif %}
 
 {% if rep.rows %}
 <table>

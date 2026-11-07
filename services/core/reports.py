@@ -184,6 +184,7 @@ def playlist_airings(conn, start: str, end: str, playlist_id: int | None = None
         "headers": ["Playlist", "From", "To", "Hours", "Tracks", "Started by",
                     "Ended because"],
         "rows": out,
+        "coverage": _attribution_coverage(conn, lo, hi),
         "note": ("“Estimated from plays” rows are reconstructed from the songs "
                  "that aired before airing-stretch recording was installed: the "
                  "start is the first song, the end the last, and a gap longer "
@@ -481,6 +482,91 @@ def play_census(conn, start: str, end: str) -> dict:
     }
 
 
+# ------------------------------------------------------------------- report 7
+
+def exceptions(conn, start: str, end: str) -> dict:
+    """What went wrong: songs skipped as missing, tracks cut short, library gaps.
+
+    Cheap and honest — every row here is a real event already recorded, not an
+    inference. This is the report that explains a strange as-aired log.
+    """
+    lo_ts, hi_ts = _epoch_bounds(start, end)
+    lo, hi = _day_bounds(start, end)
+    out = []
+
+    # one row per FILE, not per skip: a playlist laps, so the same dead file is
+    # re-skipped every pass and an event list is unreadable within a day
+    for r in _rows(conn, """
+            SELECT path, MAX(ts) AS last_ts, COUNT(*) AS n
+              FROM skipped_items WHERE ts BETWEEN ? AND ?
+          GROUP BY path ORDER BY last_ts DESC""", (lo_ts, hi_ts)):
+        name = (r["path"] or "").replace("/", "\\").split("\\")[-1]
+        out.append({
+            "when": _dt.datetime.fromtimestamp(r["last_ts"]).strftime(
+                "%Y-%m-%d %H:%M"),
+            "kind": "Skipped (file missing)",
+            "detail": "%s%s" % (name, (" (x%d)" % r["n"]) if r["n"] > 1 else ""),
+        })
+
+    for r in _rows(conn, """
+            SELECT ph.ts, ph.title,
+                   json_extract(ph.extra, '$.reason') AS reason
+              FROM play_history ph
+             WHERE ph.event = 'track_skip'
+               AND julianday(ph.ts) BETWEEN julianday(?) AND julianday(?)
+          ORDER BY ph.ts DESC""", (lo, hi)):
+        out.append({
+            "when": (r["ts"] or "")[:16].replace("T", " "),
+            "kind": "Track skipped by the engine",
+            "detail": (r["title"] or "") + (
+                (" (" + str(r["reason"]) + ")") if r["reason"] else ""),
+        })
+
+    missing = conn.execute("SELECT COUNT(*) FROM tracks WHERE missing = 1"
+                           ).fetchone()[0]
+    total = conn.execute("SELECT COUNT(*) FROM tracks").fetchone()[0]
+    if missing:
+        out.append({
+            "when": "now",
+            "kind": "Library files marked missing",
+            "detail": "%d of %d indexed files can no longer be found" % (
+                missing, total),
+        })
+
+    out.sort(key=lambda r: r["when"], reverse=True)
+    return {
+        "id": "exceptions",
+        "title": "Exceptions - what went wrong",
+        "subtitle": "%s to %s" % (start, end),
+        "columns": ["when", "kind", "detail"],
+        "headers": ["When", "What happened", "Detail"],
+        "rows": out,
+        "note": ("Every row is an event StudioFire actually recorded: a song it "
+                 "had to skip, a track cut short, or a library file that has "
+                 "gone missing. An empty report means nothing went wrong."),
+    }
+
+
+def _attribution_coverage(conn, lo: str, hi: str) -> dict:
+    """How much of the window's music we can actually attribute to a playlist.
+
+    Reports must disclose this: a named-playlist view built on a third of the
+    plays is evidence with a hole in it, and the hole belongs on the page.
+    """
+    row = conn.execute(
+        "SELECT COUNT(*) AS total, "
+        "       SUM(CASE WHEN json_extract(extra, '$.playlist_id') IS NOT NULL "
+        "                THEN 1 ELSE 0 END) AS matched "
+        "  FROM play_history WHERE event='track_start' "
+        "   AND source IN ('playlist','show','manual') "
+        "   AND julianday(ts) BETWEEN julianday(?) AND julianday(?)",
+        (lo, hi)).fetchone()
+    total = row["total"] if row else 0
+    matched = row["matched"] if row else 0
+    return {"total": total, "matched": matched or 0,
+            "pct": round(100.0 * (matched or 0) / total, 1) if total else 0.0}
+
+
 # --------------------------------------------------------------------- registry
 
 CATALOG = [
@@ -496,6 +582,8 @@ CATALOG = [
      "blurb": "Hour by hour: was a station ID heard? Flags missed hours and a missing rule."},
     {"id": "play-census", "name": "Play census — spins per track (internal)",
      "blurb": "How often each track ran. Internal only — not a SoundExchange filing."},
+    {"id": "exceptions", "name": "Exceptions — what went wrong",
+     "blurb": "Songs skipped as missing, tracks cut short, library files gone. Quiet days = empty report."},
 ]
 
 _RUNNERS = {
@@ -505,6 +593,7 @@ _RUNNERS = {
     "spot-detail": spot_detail,
     "legal-id-hours": legal_id_hours,
     "play-census": play_census,
+    "exceptions": exceptions,
 }
 
 
