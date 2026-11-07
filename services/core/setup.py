@@ -98,6 +98,9 @@ def state(conn, cfg: dict | None = None) -> dict:
         "audio_device_guid": (cfg.get("audio_device_guid") or ""),
         "np_file": db.get_setting(conn, "np_file") or "",
         "stream_endpoint": db.get_setting(conn, "stream_endpoint") or "",
+        # Telemetry is opt-in and asked once, on the Done step. Nothing has
+        # ticked it yet at this point, so the checkbox starts unchecked.
+        "telemetry": bool((cfg or {}).get("telemetry_enabled")),
     }
     for key, _lbl in (("dir_station_ids", None), ("dir_psas", None),
                       ("dir_jingles", None), ("dir_ads", None),

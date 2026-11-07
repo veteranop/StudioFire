@@ -73,8 +73,18 @@ def create_app(cfg: dict) -> FastAPI:
     templates = Jinja2Templates(directory=os.path.join(WEB, "templates"))
     # env globals so EVERY render (routers included) sees them without
     # threading extra ctx through each handler
-    templates.env.globals["ga_id"] = cfg.get("ga_measurement_id") or ""
-    templates.env.globals["ga_station"] = cfg["station_name"]
+    #
+    # Telemetry is OPT-IN. ``ga_id`` is empty unless an operator turned it on,
+    # and base.html keys the entire GA4 tag off it — so an untouched install
+    # ships no tracking script at all. ``ga_install_id`` is a random value
+    # minted at opt-in; the station name is deliberately NOT exposed to the
+    # templates, so it cannot ride along on anything that leaves the box.
+    def _telemetry_globals(c: dict) -> None:
+        on = bool(c.get("telemetry_enabled")) and bool(c.get("telemetry_install_id"))
+        templates.env.globals["ga_id"] = (c.get("ga_measurement_id") or "") if on else ""
+        templates.env.globals["ga_install_id"] = (
+            (c.get("telemetry_install_id") or "") if on else "")
+    _telemetry_globals(cfg)
     # cache-buster for /static/style.css: after an update the browser fetches
     # the new stylesheet instead of showing the old layout until a hard refresh
     # (read on every render — one stat — so a stylesheet updated while the
@@ -95,6 +105,7 @@ def create_app(cfg: dict) -> FastAPI:
     app.state.cfg = cfg
     app.state.sessions = sessions
     app.state.templates = templates
+    app.state.refresh_telemetry = _telemetry_globals
     app.mount("/static", StaticFiles(directory=os.path.join(WEB, "static")),
               name="static")
 
@@ -233,7 +244,7 @@ def create_app(cfg: dict) -> FastAPI:
     @app.post("/api/setup/step")
     def api_setup_step(request: Request, body: dict, conn=Depends(get_conn)):
         """Save one wizard step, then move to the next one."""
-        from .config import load_config, update_config
+        from .config import load_config, update_config, set_telemetry
         from . import playlists as pl
         step = (body.get("step") or "").strip()
         values = body.get("values") or {}
@@ -284,6 +295,17 @@ def create_app(cfg: dict) -> FastAPI:
                 db.set_setting(conn, nowplaying_file.K_PATH,
                                (values.get("np_file") or "").strip())
         elif step == "done":
+            # Telemetry is asked ONCE, here, and the checkbox is unchecked by
+            # default. An absent answer (Skip, or a stale wizard page in
+            # another tab) changes nothing, so nobody is ever opted in by
+            # omission — only an explicit tick sends anything.
+            if "telemetry" in values:
+                t = set_telemetry(bool(values.get("telemetry")))
+                _telemetry_globals({
+                    "telemetry_enabled": t["enabled"],
+                    "telemetry_install_id": t["install_id"],
+                    "ga_measurement_id": t["measurement_id"],
+                })
             setup_mod.complete(conn)
             return {"ok": True, "next": "done", "complete": True}
         else:
@@ -517,6 +539,30 @@ def create_app(cfg: dict) -> FastAPI:
         db.set_setting(conn, "time_format", fmt)
         sched.set_hour12(fmt == "12")   # live — affects the next label render
         return {"ok": True, "format": fmt}
+
+    # ---- anonymous feature-usage telemetry (opt-in, admin only)
+    @app.get("/api/settings/telemetry")
+    def get_telemetry(conn=Depends(get_conn), _=Depends(api_user)):
+        """Off unless someone turned it on. The install ID is shown so an
+        operator can see exactly what identifier their box would report."""
+        from .config import load_config
+        c = load_config()
+        return {"enabled": bool(c.get("telemetry_enabled")),
+                "install_id": c.get("telemetry_install_id") or ""}
+
+    @app.post("/api/settings/telemetry")
+    def set_telemetry_settings(body: dict, _=Depends(api_admin)):
+        """Turn feature-usage counting on or off. Admin only: it is a change to
+        what the station reports about itself, not a display preference."""
+        from .config import set_telemetry
+        t = set_telemetry(bool((body or {}).get("enabled")))
+        _telemetry_globals({
+            "telemetry_enabled": t["enabled"],
+            "telemetry_install_id": t["install_id"],
+            "ga_measurement_id": t["measurement_id"],
+        })
+        return {"ok": True, "enabled": t["enabled"],
+                "install_id": t["install_id"]}
 
     # ---- user administration (admin only: the one thing Basic can't do)
     def _norm_role(r: str | None) -> str | None:

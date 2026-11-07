@@ -57,6 +57,28 @@ exists so old playlists that contain `Z:\...` keep playing.
 | `feed_ahead_tracks` | How far ahead of the play head the engine queue is fed. | `3` |
 | `allow_gui_restart` | Shows a "restart everything" button in the UI. Set `false` on an on-air PC so nobody can drop audio from a browser. | `true` |
 | `update_check` | Look for a newer release every few hours. | `true` |
+| `telemetry_enabled` | Anonymous feature-usage counts from the web page. **Off unless you say yes** — asked once in the setup wizard, changeable in Settings. Missing key = off. | `false` |
+| `telemetry_install_id` | The random ID the usage counts are tagged with. Created automatically the first time telemetry is turned on; contains nothing about your station or PC. | empty |
+| `ga_measurement_id` | Send the counts to your own GA4 property instead of ours. Only used when `telemetry_enabled` is true. | empty (ours) |
+
+### Telemetry — what is and is not sent
+
+Feature-usage counting runs **only in the web page**, and only when
+`telemetry_enabled` is `true`. It is asked once at the end of the setup wizard
+(unchecked by default) and can be changed at any time in
+**Settings → About & updates**.
+
+- **Sent:** which screens and features the browser opens, tagged with
+  `telemetry_install_id` — a random value minted the first time telemetry is
+  turned on.
+- **Never sent:** your station name, any file path, IP addresses, user names,
+  song data or listener data.
+- **When the switch is off, nothing is sent at all** — the tracking tag is not
+  even rendered into the page.
+- **Nothing on the playout path has network code**, so this can never affect
+  audio, and the GUI works identically with no internet connection.
+- **A config written before this setting existed has no `telemetry_enabled`
+  key, and a missing key means off** — upgrading a station never opts it in.
 
 ## `nowplaying_push` — song titles to your stream host (optional)
 

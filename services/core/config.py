@@ -11,16 +11,75 @@ from __future__ import annotations
 import json
 import logging
 import os
+import uuid
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 log = logging.getLogger("core.config")
 
-# Product telemetry: GA4 measurement ID baked into every install so feature
-# usage across customer stations lands in one property (station_name rides
-# along as a user property). A station can override with its own ID — or
-# disable entirely with  "core": {"ga_measurement_id": ""}  — in config.json.
-# The GUI works identically offline; the tag just never loads.
+# Product telemetry: GA4 feature-usage counting in the WEB GUI — and it is
+# OFF unless the operator says yes. The setup wizard's Done step asks once
+# (unchecked) and Settings -> About & updates can change it later.
+#
+# What may leave the box when it is on: which screens/features the browser
+# opened, tagged with a random install ID minted once at opt-in. What must
+# NEVER leave: the station name, any file path, IP, user name or song data.
+# Nothing on the playout path has network code at all, so telemetry can never
+# touch audio; with the switch off, base.html renders no tag whatsoever.
 GA_MEASUREMENT_ID_DEFAULT = "G-3BK3GZDSJN"  # StudioFire GA4 property (VeteranOp)
+
+
+def load_telemetry(core: dict | None = None) -> dict:
+    """Telemetry state for a ``core`` config block. Absent key means OFF.
+
+    ``telemetry_enabled`` is the only switch. Every config written before
+    opt-in existed lacks it, so an upgraded station stays silent until a human
+    ticks the box — that is the whole compatibility story.
+
+    ``telemetry_install_id`` is the only identifier that reaches GA4. It is
+    minted at opt-in and contains nothing about the station or the machine.
+
+    ``measurement_id`` comes back EMPTY unless telemetry is on; ``base.html``
+    keys the whole tag off it, so an empty value means no script at all.
+    """
+    core = core or {}
+    enabled = bool(core.get("telemetry_enabled", False))
+    own_property = str(core.get("ga_measurement_id") or "").strip()
+    return {
+        "enabled": enabled,
+        "install_id": str(core.get("telemetry_install_id") or "").strip(),
+        "measurement_id": ((own_property or GA_MEASUREMENT_ID_DEFAULT)
+                           if enabled else ""),
+    }
+
+
+def new_install_id() -> str:
+    """A random install identifier — no hostname, MAC, path or user in it."""
+    return uuid.uuid4().hex
+
+
+def set_telemetry(enabled: bool, path: str | None = None) -> dict:
+    """Turn feature-usage telemetry on or off; mint the install ID once.
+
+    Turning it on mints ``telemetry_install_id`` if there is not one already,
+    and turning it off keeps the ID so re-opting-in stays the same install.
+    Written atomically through ``update_config`` because the web service reads
+    this file on every request.
+    """
+    p = (path or os.environ.get("STUDIOFIRE_CONFIG")
+         or os.path.join(ROOT, "config", "config.json"))
+    core: dict = {}
+    try:
+        with open(p, encoding="utf-8") as fh:
+            core = (json.load(fh).get("core") or {})
+    except (OSError, ValueError):
+        core = {}
+    values: dict = {"telemetry_enabled": bool(enabled)}
+    if enabled and not str(core.get("telemetry_install_id") or "").strip():
+        values["telemetry_install_id"] = new_install_id()
+    update_config({"core": values}, p)
+    merged = dict(core)
+    merged.update(values)
+    return load_telemetry(merged)
 
 
 # Now-playing push (#747): off-box, feature-flagged, fire-and-forget pusher
@@ -209,6 +268,7 @@ def load_config(path: str | None = None) -> dict:
     paths = cfg.get("paths", {})
     core = cfg.get("core", {})
     engine = cfg.get("engine", {})
+    telemetry = load_telemetry(core)
     # Where a station's own data lives — resolved by the SAME module the engine
     # uses (services/paths.py), because a disagreement here means the engine
     # writes the journal and heartbeat where the core never looks.
@@ -242,8 +302,12 @@ def load_config(path: str | None = None) -> dict:
         # dev/dry-run convenience: a GUI "restart everything" button. Set this
         # to false on the ON-AIR PC so nobody can drop audio from the browser.
         "allow_gui_restart": bool(core.get("allow_gui_restart", True)),
-        "ga_measurement_id": core.get("ga_measurement_id",
-                                      GA_MEASUREMENT_ID_DEFAULT),
+        "ga_measurement_id": telemetry["measurement_id"],
+        # Feature-usage telemetry is opt-in: both stay empty/false unless an
+        # operator turned it on. ``base.html`` keys the GA tag off the ID, so
+        # an untouched install renders no tracking script at all.
+        "telemetry_enabled": telemetry["enabled"],
+        "telemetry_install_id": telemetry["install_id"],
         "precache_target_minutes": int(core.get("precache_target_minutes", 45)),
         # how many tracks P1's queue itself is fed ahead of the play-head —
         # deliberately shallow; precache_target_minutes (disk cache) is what

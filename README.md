@@ -93,19 +93,23 @@ users and history.
 
 ## Telemetry & privacy
 
-The web GUI includes Google Analytics (GA4) usage telemetry so we can see
-which features stations actually use. What this means in practice:
+Telemetry is **off unless you turn it on**. Nothing leaves the box while it is
+off — the tracking tag is not even rendered into the page. What this means in
+practice:
 
 - It runs **only in the browser GUI** — the audio engine and playout path
   never send anything, and playback is never affected.
-- The data is feature usage (pages and actions in the GUI), with your
-  **station name** attached so we can tell deployments apart. No listener
-  data, no audio, no library contents.
+- If you turn it on (the setup wizard asks once, and
+  **Settings → About & updates** changes it later), the page reports **which
+  features are used**, tagged with a **random install ID** generated once and
+  stored in `config\config.json`. Your station name is never sent — nor a file
+  path, an IP address, a user name or any song data.
 - With no internet connection, the tag simply never loads and the GUI works
   identically.
-- **Opting out** is one line in `config\config.json`:
-  `"core": { "ga_measurement_id": "" }` — or set your own GA4 measurement ID
-  there to send usage data to your own property instead.
+- An existing config with no `telemetry_enabled` key counts as **off**, so
+  upgrading never opts a station in.
+- To send the counts to your own GA4 property instead, set
+  `"core": { "telemetry_enabled": true, "ga_measurement_id": "<your id>" }`.
 
 ## Architecture (the short version)
 

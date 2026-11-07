@@ -10,14 +10,17 @@
   <link rel="apple-touch-icon" href="/static/sf_icon_dark.png?v={{ asset_v }}">
   <link rel="stylesheet" href="/static/style.css?v={{ asset_v }}">
   {% if ga_id %}
-  <!-- GA4 product telemetry (see core/config.py); async + fail-silent, so an
-       offline studio LAN never notices it -->
+  <!-- GA4 feature-usage counting — OPT-IN ONLY (setup wizard's Done step, or
+       Settings -> About &amp; updates). Off means this block is not rendered at
+       all. What is sent: which screens were opened, tagged with a random
+       install ID. Never the station name, a path, a user name or song data.
+       Nothing on the playout path has network code. -->
   <script async src="https://www.googletagmanager.com/gtag/js?id={{ ga_id }}"></script>
   <script>
     window.dataLayer = window.dataLayer || [];
     function gtag(){dataLayer.push(arguments);}
     gtag('js', new Date());
-    gtag('set', 'user_properties', {station: {{ ga_station|tojson }}});
+    gtag('set', 'user_properties', {install_id: {{ ga_install_id|tojson }}});
     gtag('config', '{{ ga_id }}');
   </script>
   {% endif %}

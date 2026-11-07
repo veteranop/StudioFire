@@ -445,6 +445,27 @@
         </div>
       </div>
 
+      <div class="st-card">
+        <div class="st-switchrow">
+          <div>
+            <strong>Send anonymous feature-usage counts</strong>
+            <p class="st-help" id="tel-note">Off &mdash; nothing is being sent</p>
+          </div>
+          <button type="button" class="st-switch" id="tel-enabled" role="switch"
+                  aria-pressed="false" aria-label="Send anonymous feature-usage counts"
+                  {% if not is_admin %}disabled{% endif %}>
+            <span></span>
+          </button>
+        </div>
+        <p class="st-help" style="margin-top:.6rem">Optional, and off unless you turn it on.
+          When it is on, the web page reports which screens get used, linked only to a random
+          install ID &mdash; never your station name, file paths, user names or song data.
+          Nothing on the playout path sends anything, and the station stays on air with no
+          internet connection either way.</p>
+        <p class="st-help" id="tel-id"></p>
+        <div class="st-flash" id="tel-msg" aria-live="polite"></div>
+      </div>
+
       <div class="st-card st-danger">
         <h3>Quit StudioFire</h3>
         <p class="st-help">Stops all services, including playout. The station
@@ -1480,10 +1501,53 @@ document.getElementById("sup-contact") &&
     flash("sup-msg", r.ok ? "Saved ✓" : "Could not save that.", !r.ok);
   });
 
+/* ------------------------------------- telemetry (opt-in, admin only) */
+function telRender(enabled, installId) {
+  const note = document.getElementById("tel-note");
+  if (note) note.textContent = enabled
+    ? "On \u2014 feature counts are being sent" : "Off \u2014 nothing is being sent";
+  const idEl = document.getElementById("tel-id");
+  if (idEl) idEl.textContent = installId ? "This install's ID: " + installId : "";
+}
+
+async function loadTelemetry() {
+  const sw = document.getElementById("tel-enabled");
+  if (!sw) return;
+  try {
+    const r = await fetch("/api/settings/telemetry");
+    if (!r.ok) return;
+    const d = await r.json();
+    sw.setAttribute("aria-pressed", d.enabled ? "true" : "false");
+    telRender(d.enabled, d.install_id);
+  } catch (e) { /* offline: leave the switch as rendered */ }
+}
+
+const telSwitch = document.getElementById("tel-enabled");
+if (telSwitch) {
+  telSwitch.addEventListener("click", async e => {
+    if (e.currentTarget.disabled) return;
+    const b = e.currentTarget;
+    const next = b.getAttribute("aria-pressed") !== "true";
+    b.setAttribute("aria-pressed", next ? "true" : "false");
+    const r = await fetch("/api/settings/telemetry", {method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({enabled: next})});
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      b.setAttribute("aria-pressed", next ? "false" : "true");
+      flash("tel-msg", d.detail || "Could not save that.", true);
+      return;
+    }
+    telRender(d.enabled, d.install_id);
+    flash("tel-msg", "Saved \u2713");
+  });
+}
+
 /* ============================================================ boot */
 stShow(stGroupFromHash(), false);
 loadDirs();
 loadSupportContact();
+loadTelemetry();
 loadStreaming();
 loadUsers();
 loadDevices();
