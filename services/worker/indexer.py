@@ -150,6 +150,14 @@ def _walk_paths(conn: sqlite3.Connection, root: str, t0: float,
                 continue
             if os.path.splitext(e.name)[1].lower() not in AUDIO_EXTS:
                 continue
+            # macOS resource forks ("." + "_" prefix, e.g. "._Track 01.mp3")
+            # carry a .mp3 name but no audio: indexing them puts unplayable rows
+            # in the library and the engine gets a decode error when one is
+            # picked for air. Same for Finder metadata and __MACOSX folders.
+            if e.name.startswith("._") or e.name.startswith(".") \
+                    or os.path.basename(os.path.dirname(e.path)) == "__MACOSX":
+                stats["skipped_junk"] = stats.get("skipped_junk", 0) + 1
+                continue
             path = e.path
             stats["scanned"] += 1
             if stats["scanned"] % THROTTLE_EVERY == 0:
