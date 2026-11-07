@@ -82,7 +82,8 @@ def main():
         "journal_path": os.path.join(td2, "journal.jsonl"),
         "feeder_enabled": False,
     }
-    client = TestClient(create_app(cfg), follow_redirects=False)
+    app = create_app(cfg)
+    client = TestClient(app, follow_redirects=False)
 
     check("health open without auth",
           client.get("/health").json()["ok"] is True)
@@ -106,8 +107,19 @@ def main():
           r.status_code == 303 and auth.SESSION_COOKIE in r.cookies)
     check("dashboard renders when signed in",
           client.get("/").status_code == 200)
-    r = client.get("/setup")
-    check("setup locked after first run",
+    # The first-run wizard continues after the admin exists, so /setup is now a
+    # page for a signed-in admin. What must never happen is a SECOND account
+    # being created through the old form.
+    r = client.post("/setup", data={"username": "intruder",
+                                    "password": "longenough",
+                                    "password2": "longenough"})
+    check("setup cannot create a second admin",
+          r.status_code == 303 and r.headers["location"] == "/login")
+    check("the wizard is reachable for the signed-in admin",
+          client.get("/setup").status_code == 200)
+    anon = TestClient(app, follow_redirects=False)
+    r = anon.get("/setup")
+    check("anonymous visitors are sent to the login page",
           r.status_code == 303 and r.headers["location"] == "/login")
 
     # ---- logout + login

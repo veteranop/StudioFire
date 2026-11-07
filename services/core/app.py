@@ -202,7 +202,11 @@ def create_app(cfg: dict) -> FastAPI:
         if auth.any_users(conn):  # setup runs exactly once
             return RedirectResponse("/login", status_code=303)
         if not username.strip() or len(password) < 8 or password != password2:
+            from .config import load_config as _lc
             return render(request, "setup.html",
+                          setup=setup_mod.state(conn, _lc()),
+                          station=(_lc().get("station_name")
+                                   or "StudioFire"),
                           error="Passwords must match and be at least "
                                 "8 characters.")
         uid = auth.create_user(conn, username.strip(), password, "admin")
