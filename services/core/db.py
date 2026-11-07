@@ -346,6 +346,28 @@ CREATE TABLE IF NOT EXISTS playlist_airings (
 );
 CREATE INDEX IF NOT EXISTS idx_airings_started ON playlist_airings(started_at);
 """),
+    (16, """
+-- Offline music metadata ("what kind of music played"). The library files have
+-- carried genre/year/label tags all along; the indexer simply never read them,
+-- so a genre report was impossible without guessing. These columns are filled
+-- by the indexer (tag phase) and by scripts/backfill_track_meta.py for rows
+-- that were indexed before this migration. meta_read marks an ATTEMPT, so a
+-- file with no genre tag is not re-opened on every scan.
+ALTER TABLE tracks ADD COLUMN genre TEXT;
+ALTER TABLE tracks ADD COLUMN year TEXT;
+ALTER TABLE tracks ADD COLUMN label TEXT;
+ALTER TABLE tracks ADD COLUMN meta_read INTEGER NOT NULL DEFAULT 0;
+CREATE INDEX idx_tracks_genre ON tracks(genre);
+"""),
+    (17, """
+-- Path normalisation index. The library index stores some paths with forward
+-- slashes and playlist rows with backslashes, so matching a played item to its
+-- track row needs a case/separator-insensitive compare — and without an index
+-- that means scanning 283k rows per play (the first run of the genre report
+-- took minutes). This expression index makes those reports instant.
+CREATE INDEX idx_tracks_path_norm
+  ON tracks(lower(replace(path, '/', char(92))));
+"""),
 ]
 
 SCHEMA_VERSION = MIGRATIONS[-1][0]

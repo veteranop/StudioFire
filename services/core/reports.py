@@ -564,7 +564,182 @@ def _attribution_coverage(conn, lo: str, hi: str) -> dict:
     total = row["total"] if row else 0
     matched = row["matched"] if row else 0
     return {"total": total, "matched": matched or 0,
+            "label": "tied to a playlist",
             "pct": round(100.0 * (matched or 0) / total, 1) if total else 0.0}
+
+
+# --------------------------------------------------------------- charts (SVG)
+
+def bars_svg(series, width=760, bar_h=22, gap=6, unit="plays",
+             colour="#3f5be0"):
+    """A horizontal bar chart as inline SVG.
+
+    Why SVG and not a plotting library: the station updater ships SOURCE ONLY, so
+    matplotlib/pandas are not available on a box that installs from a release.
+    Inline SVG needs nothing, prints crisply at any size, and the browser's own
+    Print -> Save as PDF renders it into the delivered document.
+    """
+    series = [(str(k), float(v)) for k, v in series if v]
+    if not series:
+        return ""
+    top = max(v for _, v in series) or 1
+    label_w, value_w = 190, 62
+    height = len(series) * (bar_h + gap) + 10
+    plot_w = max(120, width - label_w - value_w - 8)
+    parts = ['<svg class="chart" viewBox="0 0 %d %d" width="100%%" '
+             'height="%d" role="img" xmlns="http://www.w3.org/2000/svg">'
+             % (width, height, height)]
+    for i, (label, value) in enumerate(series):
+        y = i * (bar_h + gap) + 4
+        w = max(2.0, plot_w * (value / top))
+        short = label if len(label) <= 30 else label[:29] + "…"
+        # currentColor, so the same SVG is legible on the dark screen and on
+        # the white printed page (the CSS sets the colour per context)
+        parts.append(
+            '<text x="0" y="%d" font-size="11.5" fill="currentColor">%s</text>'
+            % (y + bar_h * 0.72, _xml(short)))
+        parts.append(
+            '<rect x="%d" y="%d" width="%.1f" height="%d" rx="4" '
+            'fill="%s"></rect>' % (label_w, y, w, bar_h, colour))
+        parts.append(
+            '<text x="%.1f" y="%d" font-size="11.5" fill="currentColor" '
+            'opacity="0.65">%s %s</text>'
+            % (label_w + w + 6, y + bar_h * 0.72,
+               ("%d" % value) if value == int(value) else ("%.1f" % value),
+               unit))
+    parts.append("</svg>")
+    return "".join(parts)
+
+
+def _xml(text):
+    return (str(text).replace("&", "&amp;").replace("<", "&lt;")
+            .replace(">", "&gt;"))
+
+
+def _music_join(conn, lo: str, hi: str, group_col: str, limit: int | None = None):
+    """Plays grouped by a TRACK column (genre / artist).
+
+    Only plays we can tie to a real library row are counted — the join goes
+    through the attribution the feeder writes (playlist item -> track path). The
+    caller discloses the coverage so nobody reads a subset as the whole period.
+    """
+    sql = """
+        SELECT COALESCE(NULLIF(TRIM(t.%s), ''), 'Unknown') AS grp,
+               COUNT(*) AS spins
+          FROM play_history ph
+          JOIN playlist_items pi
+            ON pi.id = json_extract(ph.extra, '$.item_id')
+          -- the library index and the playlist rows do not always agree on
+          -- the separator (forward slashes vs backslashes), so compare a
+          -- normalised path instead of raw equality
+          JOIN tracks t
+            ON lower(replace(t.path, '/', char(92)))
+             = lower(replace(pi.path, '/', char(92)))
+         WHERE ph.event = 'track_start'
+           AND ph.source IN ('playlist', 'show', 'manual')
+           AND julianday(ph.ts) BETWEEN julianday(?) AND julianday(?)
+      GROUP BY grp
+      ORDER BY spins DESC""" % group_col
+    args = [lo, hi]
+    if limit:
+        sql += " LIMIT %d" % int(limit)
+    return _rows(conn, sql, tuple(args))
+
+
+def _music_coverage(conn, lo: str, hi: str) -> dict:
+    row = conn.execute(
+        "SELECT COUNT(*) AS total, "
+        "       SUM(CASE WHEN json_extract(extra, '$.item_id') IS NOT NULL "
+        "                THEN 1 ELSE 0 END) AS linked "
+        "  FROM play_history WHERE event='track_start' "
+        "   AND source IN ('playlist','show','manual') "
+        "   AND julianday(ts) BETWEEN julianday(?) AND julianday(?)",
+        (lo, hi)).fetchone()
+    total = row["total"] if row else 0
+    linked = (row["linked"] if row else 0) or 0
+    return {"total": total, "matched": linked,
+            "label": "tied to a library file",
+            "pct": round(100.0 * linked / total, 1) if total else 0.0}
+
+
+# ------------------------------------------------------------------- report 8
+
+def genre_mix(conn, start: str, end: str) -> dict:
+    """What kind of music actually played — by plays and by distinct tracks.
+
+    Possible only because the library files carry genre tags and the indexer now
+    reads them (migration 16). A track with no genre tag is counted as "Unknown"
+    rather than being guessed from its folder name.
+    """
+    lo, hi = _day_bounds(start, end)
+    plays = _music_join(conn, lo, hi, "genre")
+    cov = _music_coverage(conn, lo, hi)
+    lib = conn.execute(
+        "SELECT genre, COUNT(*) n FROM tracks WHERE missing = 0 "
+        "GROUP BY genre ORDER BY n DESC").fetchall()
+    # untagged files are reported separately, not as a giant "None" bar that
+    # hides the real shape of the library
+    untagged = sum(r[1] for r in lib if not r[0])
+    lib_rows = [(r[0], r[1]) for r in lib if r[0]][:12]
+    series = [(r["grp"], r["spins"]) for r in plays]
+    total_plays = sum(v for _, v in series)
+    rows = [{"genre": g, "plays": n,
+             "share": round(100.0 * n / total_plays, 1) if total_plays else 0.0}
+            for g, n in series[:40]]
+    charts = []
+    if series:
+        charts.append({"title": "Plays by genre",
+                       "svg": bars_svg(series[:12])})
+    if lib_rows:
+        charts.append({"title": "Library size by genre (tracks indexed%s)"
+                                % (", %d files not tagged yet" % untagged
+                                   if untagged else ""),
+                       "svg": bars_svg(lib_rows, unit="tracks",
+                                       colour="#f26a1b")})
+    return {
+        "id": "genre-mix",
+        "title": "What kind of music played — by genre",
+        "subtitle": "%s to %s" % (start, end),
+        "columns": ["genre", "plays", "share"],
+        "headers": ["Genre", "Plays", "% of plays"],
+        "rows": rows,
+        "charts": charts,
+        "coverage": cov,
+        "note": ("Genre comes from each file's own tags, read offline; a song "
+                 "with no genre tag is 'Unknown' and is never guessed from its "
+                 "folder name. Only plays that can be tied to a library file "
+                 "are counted — the coverage line says how many that was."),
+    }
+
+
+# ------------------------------------------------------------------- report 9
+
+def artist_spins(conn, start: str, end: str) -> dict:
+    """How many times each artist aired (spins, not songs)."""
+    lo, hi = _day_bounds(start, end)
+    plays = _music_join(conn, lo, hi, "artist")
+    cov = _music_coverage(conn, lo, hi)
+    series = [(r["grp"], r["spins"]) for r in plays]
+    total = sum(v for _, v in series)
+    rows = [{"artist": a, "spins": n,
+             "share": round(100.0 * n / total, 1) if total else 0.0}
+            for a, n in series[:60]]
+    charts = ([{"title": "Most-aired artists",
+                "svg": bars_svg(series[:15], unit="spins")}]
+              if series else [])
+    return {
+        "id": "artist-spins",
+        "title": "How many times each artist aired",
+        "subtitle": "%s to %s" % (start, end),
+        "columns": ["artist", "spins", "share"],
+        "headers": ["Artist", "Spins", "% of plays"],
+        "rows": rows,
+        "charts": charts,
+        "coverage": cov,
+        "note": ("A spin is one play of one song; an artist with three songs in "
+                 "rotation can out-count one with a single hit. 'Unknown' "
+                 "means the file had no artist tag."),
+    }
 
 
 # --------------------------------------------------------------------- registry
@@ -584,6 +759,10 @@ CATALOG = [
      "blurb": "How often each track ran. Internal only — not a SoundExchange filing."},
     {"id": "exceptions", "name": "Exceptions — what went wrong",
      "blurb": "Songs skipped as missing, tracks cut short, library files gone. Quiet days = empty report."},
+    {"id": "genre-mix", "name": "Music mix — plays by genre (charts)",
+     "blurb": "What kind of music aired, from each file's own genre tag, with a chart. Best printed."},
+    {"id": "artist-spins", "name": "Artist airplay — spins per artist (charts)",
+     "blurb": "How many times each artist aired in the period, with a chart."},
 ]
 
 _RUNNERS = {
@@ -594,6 +773,8 @@ _RUNNERS = {
     "legal-id-hours": legal_id_hours,
     "play-census": play_census,
     "exceptions": exceptions,
+    "genre-mix": genre_mix,
+    "artist-spins": artist_spins,
 }
 
 

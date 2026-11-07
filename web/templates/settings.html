@@ -16,15 +16,30 @@
 {% block content %}
 {% from "_changelog.html" import cl_groups with context %}
 
-<div class="card">
-  <h1>Station folders</h1>
+<h1 class="page-title">Settings</h1>
+<div class="sec-nav">
+  <a href="#sec-station-folders">Station folders</a>
+  <a href="#sec-playlists-folder">Playlists folder</a>
+  <a href="#sec-clock-and-time-format">Clock and time format</a>
+  <a href="#sec-library-duplicate-cleanup">Library duplicate cleanup</a>
+  <a href="#sec-station-equipment">Station equipment</a>
+  <a href="#sec-streaming-and-song-metadata">Streaming and song metadata</a>
+  <a href="#sec-users">Users</a>
+  <a href="#sec-full-playlist-export-and-restore">Full playlist export and restore</a>
+  <a href="#updates">Software updates</a>
+  <a href="#changelog">What's new / Change log</a>
+  <a href="#sec-system">System</a>
+</div>
+<div class="settings-grid">
+<div class="card" id="sec-station-folders">
+  <h2>Station folders</h2>
   <p class="muted">Point StudioFire at the folders where your station keeps
     things. These are used by playlists and (soon) automatic scheduling.</p>
   <div id="dir-rows"></div>
 </div>
 
-<div class="card">
-  <h1>Playlists folder</h1>
+<div class="card" id="sec-playlists-folder">
+  <h2>Playlists folder</h2>
   <p class="muted">Playlists are ZaraRadio-format <code>.lst</code> files.
     New playlists are saved into this folder; a playlist opened from
     somewhere else keeps saving back to its own file. Point this at the
@@ -42,8 +57,8 @@
   <div id="lst-msg" class="muted" style="margin-top:.5rem"></div>
 </div>
 
-<div class="card">
-  <h1>Clock &amp; time format</h1>
+<div class="card" id="sec-clock-and-time-format">
+  <h2>Clock &amp; time format</h2>
   <p class="muted">How times are shown across StudioFire — the clock in the top
     bar, the On Air log, reports, and the schedule.</p>
   <div class="row">
@@ -57,8 +72,8 @@
   <div id="tf-msg" class="muted" style="margin-top:.4rem"></div>
 </div>
 
-<div class="card">
-  <h1>Library duplicate cleanup</h1>
+<div class="card" id="sec-library-duplicate-cleanup">
+  <h2>Library duplicate cleanup</h2>
   <p class="muted">Find songs that appear more than once in the music library,
     review them side by side, and move the extras out of the way. It is a
     look-first, reversible tidy-up: nothing is deleted, and any file used by a
@@ -66,8 +81,8 @@
   <a class="btn" href="/duplicates">🧹 Open duplicate cleanup</a>
 </div>
 
-<div class="card">
-  <h1>Station equipment</h1>
+<div class="card" id="sec-station-equipment">
+  <h2>Station equipment</h2>
   <p class="muted">Gear to keep an eye on by ping (ICMP) — transmitter, Barix,
     switches, UniFi. <span class="tile-green-text">Green</span> = reachable,
     <span class="tile-red-text">red</span> = not responding.</p>
@@ -85,8 +100,8 @@
   </details>
 </div>
 
-<div class="card">
-  <h1>Streaming &amp; song metadata</h1>
+<div class="card" id="sec-streaming-and-song-metadata">
+  <h2>Streaming &amp; song metadata</h2>
   <p class="muted">Send the on-air artist and title to your streaming host, so the
     website player shows what is playing and the host keeps a record of what it
     carried (the listening half of a SoundExchange report). StudioFire sends from
@@ -141,8 +156,8 @@
 </div>
 
 {% if role == 'admin' %}
-<div class="card">
-  <h1>Users</h1>
+<div class="card card-wide" id="sec-users">
+  <h2>Users</h2>
   <p class="muted">Admins can do everything, including managing users. Basic
     users can do everything <em>except</em> add or remove users.</p>
   <div id="user-rows"></div>
@@ -164,8 +179,8 @@
   </details>
 </div>
 
-<div class="card">
-  <h1>Full playlist export &amp; restore</h1>
+<div class="card card-wide" id="sec-full-playlist-export-and-restore">
+  <h2>Full playlist export &amp; restore</h2>
   <p class="muted">One file containing every playlist — download it now and
     then, keep it somewhere safe (USB stick, email it to yourself), and
     restore from it if anything ever goes wrong.</p>
@@ -177,8 +192,8 @@
 </div>
 {% endif %}
 
-<div class="card" id="updates">
-  <h1>Software updates</h1>
+<div class="card card-wide" id="updates">
+  <h2>Software updates</h2>
   <p class="muted">New versions of StudioFire are published on GitHub.
     StudioFire checks for one every few hours. It never installs anything
     by itself — an admin presses <strong>Install</strong>.</p>
@@ -198,7 +213,7 @@
 </div>
 
 <div class="card" id="changelog">
-  <h1>What's new / Change log</h1>
+  <h2>What's new / Change log</h2>
   <p class="muted">This station is running
     <strong>StudioFire {{ running_version }}</strong>. Here's what changed in
     this version and the ones before it (newest first).</p>
@@ -235,13 +250,13 @@
   {% endif %}
 </div>
 
-<div class="card" style="background: #fff5f5; border-color: #ffcccc;">
-  <h1>System</h1>
+<div class="card card-danger" id="sec-system">
+  <h2>System</h2>
   <p class="muted">Stop all services and exit.</p>
   <button class="btn btn-red" onclick="quitStudioFire()">Quit StudioFire</button>
   <div id="quit-msg" class="muted" style="margin-top:.5rem"></div>
 </div>
-
+</div>
 <div class="card" id="picker-card" hidden>
   <h2 id="picker-title">Choose a folder</h2>
   <div class="row">

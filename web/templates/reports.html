@@ -58,6 +58,7 @@
   </div>
 
   <div id="rep-summary" class="muted" style="margin:.4rem 0"></div>
+  <div id="rep-charts" class="rep-charts" hidden></div>
   <div class="rep-table-wrap">
     <table class="table rep-table">
       <thead id="rep-head-row"></thead>
@@ -154,6 +155,23 @@ async function runReport() {
     }
     body.appendChild(tr);
   }
+  const charts = document.getElementById("rep-charts");
+  charts.innerHTML = "";
+  if ((d.charts || []).length) {
+    charts.hidden = false;
+    for (const c of d.charts) {
+      const fig = document.createElement("figure");
+      fig.className = "chart-card";
+      const cap = document.createElement("figcaption");
+      cap.textContent = c.title;
+      fig.appendChild(cap);
+      fig.insertAdjacentHTML("beforeend", c.svg || "");
+      charts.appendChild(fig);
+    }
+  } else {
+    charts.hidden = true;
+  }
+
   const note = document.getElementById("rep-note");
   note.hidden = !d.note;
   note.textContent = d.note || "";

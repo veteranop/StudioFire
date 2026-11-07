@@ -15,7 +15,19 @@ body {
   padding: .6rem 1.5rem; background: var(--panel);
   border-bottom: 1px solid var(--border);
 }
-.brand { display: inline-flex; align-items: center; text-decoration: none; }
+.brand { display: inline-flex; align-items: center; gap: .55rem;
+         text-decoration: none; }
+/* the dark brand tile reads on the navy header with no light chip behind it */
+.brand-mark {
+  height: 34px; width: 34px; display: block; border-radius: 9px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, .45);
+}
+.brand-word {
+  font-size: 1.06rem; font-weight: 800; letter-spacing: .01em;
+  color: var(--text); white-space: nowrap;
+}
+.brand-fire { color: #f26a1b; }
+@media (max-width: 1100px) { .brand-word { display: none; } }
 .brand-logo {
   height: 42px; display: block; padding: 6px 12px; border-radius: 8px;
   background: #f4f5f7; box-shadow: 0 1px 3px rgba(0, 0, 0, .35);
@@ -684,3 +696,81 @@ select {
 .rep-not-aired { color: var(--red); }
 .rep-missed    { color: var(--red); font-weight: 700; }
 .rep-note { font-size: .82rem; margin-top: .7rem; }
+
+/* ---- Settings: one tidy grid instead of a tall pile of boxes ------------ */
+.sec-nav {
+  position: sticky; top: 0; z-index: 5; display: flex; flex-wrap: wrap;
+  gap: .35rem; padding: .55rem 0 .7rem; margin-bottom: .35rem;
+  background: linear-gradient(var(--bg) 78%, rgba(0,0,0,0));
+}
+.sec-nav a {
+  font-size: .78rem; padding: .28rem .6rem; border-radius: 999px;
+  border: 1px solid var(--border); color: var(--muted); text-decoration: none;
+  background: var(--panel); white-space: nowrap;
+}
+.sec-nav a:hover { color: var(--text); border-color: var(--accent); }
+
+/* CSS columns, not grid rows: cards vary wildly in height, and a grid leaves
+   big dead holes under the short ones */
+.settings-grid { columns: 3 420px; column-gap: 1rem; }
+.settings-grid .card {
+  break-inside: avoid; margin: 0 0 1rem; display: inline-block; width: 100%;
+}
+.settings-grid .card-wide { column-span: all; }
+
+/* consistent card furniture: same heading size, same rhythm, same controls */
+.settings-grid .card { padding: 1.05rem 1.15rem; }
+.settings-grid .card h2 {
+  font-size: 1rem; font-weight: 700; letter-spacing: .01em;
+  margin: 0 0 .2rem; color: var(--text);
+}
+.settings-grid .card > p.muted {
+  font-size: .82rem; line-height: 1.45; margin: 0 0 .85rem; max-width: 62ch;
+}
+.settings-grid label {
+  font-size: .76rem; letter-spacing: .02em; text-transform: uppercase;
+  color: var(--muted); display: block; margin-bottom: .55rem;
+}
+.settings-grid label input, .settings-grid label select {
+  margin-top: .28rem; width: 100%; text-transform: none;
+  font-size: .92rem; letter-spacing: 0;
+}
+.settings-grid .row { margin: .5rem 0; align-items: flex-end; }
+.settings-grid .row label { margin-bottom: 0; }
+.settings-grid .card > .btn { margin-top: .2rem; }
+.settings-grid code {
+  font-size: .78rem; background: rgba(255,255,255,.05);
+  padding: .1rem .35rem; border-radius: 5px;
+}
+
+/* a device/folder row: label left, value middle, actions right */
+.settings-grid .dirrow {
+  display: grid; grid-template-columns: minmax(9rem, 1.1fr) minmax(0, 1.6fr) auto;
+  gap: .6rem; align-items: center; padding: .5rem 0;
+  border-top: 1px solid var(--border);
+}
+.settings-grid .dirrow:first-of-type { border-top: 0; }
+.settings-grid .dirrow strong { font-size: .88rem; }
+.settings-grid .dirval { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.settings-grid .dirrow > div:last-child { display: flex; gap: .35rem; flex-wrap: wrap; }
+
+/* the one card that can take the station off air deserves its own colour */
+.settings-grid .card-danger {
+  border-color: #6b2a2a; background: #2a1616;
+}
+.settings-grid .card-danger h2 { color: #ffb4b4; }
+.page-title { font-size: 1.35rem; font-weight: 800; margin: .2rem 0 .6rem; }
+
+/* charts on the Reports screen (same SVG the printed page uses) */
+.rep-charts { display: flex; flex-wrap: wrap; gap: 1rem; margin: .8rem 0; }
+.rep-charts[hidden] { display: none; }
+.rep-charts .chart-card {
+  flex: 1 1 420px; margin: 0; padding: .8rem .9rem .4rem;
+  border: 1px solid var(--border); border-radius: 12px; background: var(--panel);
+  color: var(--text);
+}
+.rep-charts figcaption {
+  font-size: .82rem; font-weight: 700; color: var(--accent);
+  margin-bottom: .5rem; letter-spacing: .02em;
+}
+.rep-charts svg { display: block; width: 100%; height: auto; }

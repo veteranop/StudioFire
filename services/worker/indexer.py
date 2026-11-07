@@ -40,9 +40,35 @@ THROTTLE_NAP = 0.05       # seconds
 TAG_BATCH = 100           # rows fetched per tag-backfill batch
 
 
+def _tag_first(tags, keys):
+    """First non-empty value for any of `keys` — easy-mode names AND the raw
+    frame ids. mutagen's easy mapping does not expose genre for every ID3 file
+    (the value sits in TCON while easy mode hands back raw frames), so a
+    genre report built on easy keys alone silently reads "no genre" for a
+    library that is 100% tagged."""
+    if not tags:
+        return None
+    for k in keys:
+        try:
+            v = tags.get(k)
+        except Exception:      # noqa: BLE001
+            v = None
+        if not v:
+            continue
+        if isinstance(v, (list, tuple)):
+            v = v[0] if v else None
+        if v is None:
+            continue
+        s = str(v).strip()
+        if s:
+            return s
+    return None
+
+
 def read_tags(path: str) -> dict:
     """Best-effort tag read; a corrupt file must never kill the scan."""
     out = {"title": None, "artist": None, "album": None,
+           "genre": None, "year": None, "label": None,
            "duration_sec": None, "format": None}
     try:
         m = mutagen.File(path, easy=True)
@@ -60,6 +86,17 @@ def read_tags(path: str) -> dict:
         out["title"] = first("title")
         out["artist"] = first("artist")
         out["album"] = first("album")
+        # Offline music metadata (migration 16). Genre drives the music-mix
+        # report, year the era view, label the royalty/underwriting evidence.
+        # Swept raw AND easy: easy mode hides genre on some ID3 files (TCON).
+        out["genre"] = _tag_first(m.tags, ("genre", "Genre", "TCON",
+                                           "\xa9gen", "gnre"))
+        _year = _tag_first(m.tags, ("date", "year", "Date", "TDRC", "TYER",
+                                    "\xa9day", "originaldate"))
+        out["year"] = _year[:4] if _year and _year[:4].isdigit() else None
+        out["label"] = _tag_first(m.tags, ("label", "Label", "publisher",
+                                           "Publisher", "TPUB",
+                                           "organization", "\xa9pub"))
     if not out["title"]:
         out["title"] = os.path.splitext(os.path.basename(path))[0]
     return out
@@ -205,9 +242,11 @@ def _backfill_tags(conn: sqlite3.Connection, root: str, t0: float,
             with conn:
                 conn.execute(
                     "UPDATE tracks SET title = ?, artist = ?, album = ?, "
-                    "  duration_sec = ?, format = ?, tags_read = 1 "
+                    "  genre = ?, year = ?, label = ?, "
+                    "  duration_sec = ?, format = ?, tags_read = 1, meta_read = 1 "
                     "WHERE path = ?",
                     (tags["title"], tags["artist"], tags["album"],
+                     tags.get("genre"), tags.get("year"), tags.get("label"),
                      tags["duration_sec"], tags["format"], path))
             tagged += 1
             if tagged % THROTTLE_EVERY == 0:
