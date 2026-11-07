@@ -155,8 +155,16 @@ def build_precache_index(conn, nas_music_root: str | None = None) -> dict:
             share = pathmap.share_root(nas_music_root)
         except Exception:
             share = None
-    for row in conn.execute(
-            "SELECT path, title, artist, album, duration_sec, format FROM tracks"):
+    # The library index can hold the same file twice (two scan vintages, one
+    # with tags and one without). Taking the first row seen meant the royalty
+    # report printed blank Featured Artist for plays whose file WAS tagged, so
+    # keep whichever row carries the most metadata.
+    has_label = any(r[1] == "label" for r in conn.execute(
+        "PRAGMA table_info(tracks)"))
+    cols = "path, title, artist, album, duration_sec, format"
+    if has_label:
+        cols += ", label"
+    for row in conn.execute("SELECT " + cols + " FROM tracks"):
         path = row["path"]
         if not path:
             continue
@@ -167,9 +175,16 @@ def build_precache_index(conn, nas_music_root: str | None = None) -> dict:
             "album": row["album"],
             "duration_sec": row["duration_sec"],
             "format": row["format"],
+            "label": (row["label"] if has_label else None),
         }
+        score = (bool(meta["artist"]), bool(meta["album"]),
+                 bool(meta["label"]), bool(meta["title"]))
         for form in _path_variants(path, share):
-            idx.setdefault(precache_digest(form), meta)
+            digest = precache_digest(form)
+            have = idx.get(digest)
+            if have is None or score > have.get("_score", (False,) * 4):
+                meta["_score"] = score
+                idx[digest] = meta
     return idx
 
 
@@ -242,7 +257,11 @@ def collect_period(conn, start: dt.datetime, end: dt.datetime,
             "source": row["source"],
             "library_path": (meta or {}).get("path") or "",
             "isrc": "",
-            "marketing_label": "",
+            # (v) allows ISRC OR (album AND marketing label). The album comes
+            # from the library row; the label now comes from the tag the
+            # indexer stores (migration 16), so a filing does not depend on
+            # re-reading every file off the share.
+            "marketing_label": (meta or {}).get("label") or "",
             "resolve": "indexed" if meta else ("unmatched" if digest else "no-digest"),
             "listeners": None,
         })
