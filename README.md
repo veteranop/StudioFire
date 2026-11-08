@@ -56,7 +56,7 @@ just runs the services.
 
 ## Install
 
-**1.** [Download `StudioFire-Setup-<version>.exe` from Releases](https://github.com/veteranop/StudioFire/releases/latest)
+**1.** [Download `StudioFire-Setup-<version>.exe`](https://studiofire.io/dl?src=github) — that link always resolves to the newest release and hands the file over from GitHub
 
 **2.** Run it and accept the UAC prompt — that is the only one. The installer
 bundles everything (embedded Python, mpv, NSSM); there is nothing else to
