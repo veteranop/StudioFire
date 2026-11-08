@@ -56,6 +56,7 @@
     <a href="#streaming">Song titles &amp; streaming</a>
     <a href="#royalty">The royalty report</a>
     <a href="#settings">Settings</a>
+    <a href="#privacy">Privacy — what leaves the box</a>
     <a href="#start-at-boot">Start at boot — services</a>
     <a href="#cleanup">Duplicate cleanup</a>
     <a href="#whats-new">What's new</a>
@@ -309,6 +310,8 @@
         <a href="#royalty">The royalty report</a>.</td></tr>
       <tr><td>Software updates</td><td>Installs new StudioFire versions. See the
         note below.</td></tr>
+      <tr><td>Anonymous usage counts</td><td>Optional feature-usage counting, <strong>off by
+        default</strong>. See <a href="#privacy">Privacy — what leaves the box</a>.</td></tr>
       <tr><td>Backup / restore</td><td>Save a copy of your setup, or restore
         one.</td></tr>
       <tr><td>What's new</td><td>The full history of this version and the ones
@@ -324,6 +327,26 @@
       accident — it needs an admin to type the version number in on purpose. So
       it's safe to click the normal update button.
     </div>
+
+    <h2 id="privacy">Privacy — what leaves the box</h2>
+    <p><strong>By default, nothing.</strong> StudioFire plays, schedules and reports on this PC
+      and the studio network. Nothing on the playout path — neither the audio engine nor the
+      scheduler — has any code that sends data anywhere, so no privacy setting can affect the
+      audio, and the station stays on air with no internet connection.</p>
+    <table>
+      <tr><th>What</th><th>When it sends anything</th></tr>
+      <tr><td><strong>Anonymous usage counts</strong></td><td><strong>Off unless someone turns it
+        on.</strong> The setup wizard asks once, and an admin can change it in
+        <strong>Settings → About &amp; updates</strong>. When it is on, the web page reports which
+        screens get used, tagged with a random install ID — never the station name, a file path,
+        a user name or song data. While it is off, nothing is sent.</td></tr>
+      <tr><td><strong>Software update check</strong></td><td>A periodic request to GitHub to see
+        whether a newer version exists. It installs nothing without an admin clicking
+        <span class="help-key">Install</span>.</td></tr>
+      <tr><td><strong>Song titles to your stream</strong></td><td>Only if you set it up: the
+        now-playing file your encoder reads, or the optional direct push to the stream host.
+        See <a href="#streaming">Song titles &amp; streaming</a>.</td></tr>
+    </table>
 
     <h2 id="start-at-boot">Start at boot — Windows services</h2>
     <p>If the installer set StudioFire up to run as Windows services (the

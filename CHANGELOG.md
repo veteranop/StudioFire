@@ -7,6 +7,20 @@ plain English a non-technical operator can understand.
 
 ## [Unreleased]
 
+### Changed
+- **Anonymous usage counts are now off unless you say yes.** Before this, the
+  web page reported which screens were used and attached your **station name**
+  to it. Now nothing is sent until someone opts in: the last step of the setup
+  wizard asks once (unchecked), and **Settings → About & updates** has the
+  switch, which an admin can turn either way at any time.
+  * When it is on, the page reports which features are used, tagged with a
+    **random install ID** generated once — never the station name, a file path,
+    an IP address, a user name or any song data.
+  * An existing install has no setting for this, and a missing setting counts
+    as **off** — upgrading a station never starts sending anything.
+  * Nothing on the playout path has network code, so this cannot touch audio
+    either way. While it is off the tracking tag is not rendered at all.
+
 ## [1.6.4] - 2026-11-07
 
 ### Added

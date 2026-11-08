@@ -220,6 +220,16 @@
           <td class="st-path"><code>{{ a.audio_device_guid or 'Windows default' }}</code></td></tr>
       </tbody></table>
     </div>
+    <div class="st-card">
+      <label class="wiz-check">
+        <input type="checkbox" id="wz-telemetry"{% if a.telemetry %} checked{% endif %}>
+        <span>Help improve StudioFire by sending anonymous feature-usage counts?</span></label>
+      <p class="st-help" style="margin-top:.5rem">Optional, and <strong>off unless you tick
+        it</strong>. If you do, the web page reports which screens get used, linked only to a
+        random install ID — never your station name, file paths, user names or song data.
+        Nothing on the playout path sends anything, and you can change this later in
+        Settings → About &amp; updates.</p>
+    </div>
     <div class="wiz-actions">
       <button class="btn btn-ghost" onclick="wizBack()">Back</button>
       <a class="btn btn-ghost" href="/api/setup/settings-copy">Download a copy of your settings</a>
@@ -301,9 +311,10 @@ async function wizSkip(step) {
 function wizBack() { history.back(); }
 
 async function wizFinish() {
+  const tel = document.getElementById("wz-telemetry");
   await fetch("/api/setup/step", {method: "POST",
     headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({step: "done", values: {}})});
+    body: JSON.stringify({step: "done", values: tel ? {telemetry: tel.checked} : {}})});
   location.href = "/";
 }
 
