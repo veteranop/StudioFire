@@ -7,6 +7,8 @@ plain English a non-technical operator can understand.
 
 ## [Unreleased]
 
+## [1.6.5] - 2026-11-08
+
 ### Fixed
 - **"Fix broken file paths" now actually repairs a song that moved inside your music
   folder, and lands on the song's real new home.** When a folder is renamed or moved on
