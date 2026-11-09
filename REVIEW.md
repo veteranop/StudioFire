@@ -608,6 +608,25 @@ human-reviewed playlist generator. The vision, the locked consensus (8.7), the
 release-safety** rules are in `docs/2.0-Design-Decisions.md`; the branch/release
 model and the major-version gate are in `docs/Release-and-Branches.md`.
 
+## Audit — 2026-11-08: relink accuracy (ticket H2631203, branch `fix/relink-in-root`)
+`relink_broken` ("Fix broken file paths") was re-pointing dead playlist items on a
+bare file-name match. On a copy of the live DB that put **60 songs on air as the
+WRONG recording** (e.g. `Led Zeppelin\IV\01 Black Dog` → Dread Zeppelin's reggae
+cover; `The Rascals\…\Good Lovin'` → The Paladins). Replaced the bare match with a
+matching ladder: (1) longest trailing path-segment match — a unique winner at
+depth ≥ 2 (name + ≥1 folder) is the moved file, which also fixes re-encodes that
+kept their album folder; (2) a byte-identical-size tie-break; (3) bare-name
+fallback only for a flattened/brand-new folder, and there a size+duration
+contradiction REFUSES the guess. Added one-shot share-reachability probe → on-disk
+verification before rewrite (`verified_on_disk` in the result; skipped, not failed,
+where the share is unreachable so the repair stays reproducible), and a self-heal
+guard so a restored song is healed in place, not hijacked to a same-named copy.
+Measured (copy of live DB, root `//KDPI-Media/music/G`): relinked **3631**
+(by_suffix 3004 / by_basename 627 / by_size 0), conflict 60, ambiguous 27, unmatched
+6872; dead playlist items **10,617 → 6,995**; 250/250 sampled new paths exist on the
+NAS; second pass re-points 0. Pure DB work + one stat per re-point; no schema change.
+Tests: `tests/test_relink_in_root.py` (32 checks) + the five named suites green.
+
 ## Related
 - [[StudioFire/docs/2.0-Design-Decisions|2.0 Design Decisions]]
 - [[StudioFire/docs/Release-and-Branches|Release & Branches]]

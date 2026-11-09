@@ -477,28 +477,170 @@ def _renumber(conn: sqlite3.Connection, pid: int) -> None:
                      (pos, row["id"]))
 
 
+# A re-point must never aim into the duplicate-cleanup quarantine: those folders
+# are meant to be emptied once the operator is happy, so a playlist pointing into
+# one is dead the day it is cleared (2026-11: 56k index rows pointed into
+# _Duplicates folders that had already been removed from the NAS).
+QUARANTINE_DIR = "\\_duplicates\\"
+
+# Two durations within this many seconds count as the same recording. A re-encode
+# keeps a track's length; a different take/song does not. Used only to REFUSE a
+# bare-basename guess (see _different_recording), never to pick one.
+_DURATION_TOL = 1.5
+
+
+# A file's NAME without its extension and without a copy marker, so the same
+# track matches whether it is stored as Song.mp3, Song.m4a or Song (1).mp3. The
+# library has been through several transcodes (mp3 -> m4a/flac) and the duplicate
+# cleaner appends " (1)"; a name-only comparison misses both. Same rule as
+# duplicates.py::_stem — kept as a copy of the rule, not an import, because that
+# module registers HTTP routes and importing it here would drag FastAPI plumbing
+# into the playlist layer.
+_FILENAME_COPY = re.compile(
+    r"\s*(?:\(\s*(?:copy|\d+)\s*\)|\[\s*(?:copy|\d+)\s*\]|[-_]\s*copy|\bcopy)\s*$",
+    re.IGNORECASE)
+
+
+def _file_key(path: str) -> str:
+    """The match key for a file: name without extension or copy marker."""
+    base = os.path.splitext(os.path.basename(path or ""))[0]
+    base = _FILENAME_COPY.sub("", base).strip()
+    return re.sub(r"\s+", " ", base).casefold()
+
+
+def _path_parts(path: str) -> list[str]:
+    """A path's components, normcased and separator-agnostic, with the FILENAME
+    reduced to _file_key. The library index holds the SAME file as both
+    \\\\KDPI-Media\\music\\... and //KDPI-Media/music\\... (two ways the station's
+    tools wrote the share), so trailing-segment matching must treat '/' and '\\'
+    alike — normcase already lowercases and flips '/'→'\\' on Windows; we flip
+    too so it is right off-Windows as well.
+    """
+    parts = [c for c in os.path.normcase(path).replace("/", "\\").split("\\")
+             if c]
+    if parts:
+        parts[-1] = _file_key(path)
+    return parts
+
+
+def _suffix_depth(a: list[str], b: list[str]) -> int:
+    """How many trailing components two component lists share: filename first,
+    then parent folder, grandparent, … A depth ≥ 2 means the file name AND at
+    least one enclosing folder match — strong evidence it is the same recording
+    that moved, even if it was re-encoded to a different size on the way."""
+    d = 0
+    i, j = len(a) - 1, len(b) - 1
+    while i >= 0 and j >= 0 and a[i] == b[j]:
+        d += 1
+        i -= 1
+        j -= 1
+    return d
+
+
+def _different_recording(dead: sqlite3.Row, cand: dict) -> bool:
+    """True when the index's own facts PROVE the candidate is a different
+    recording from the dead item: size AND duration are both recorded on both
+    sides and both differ. This is the guard that stops a bare file-name match
+    putting Dread Zeppelin's cover on air where 'Led Zeppelin\\IV\\01 Black
+    Dog.mp3' used to be. It is deliberately one-sided — it only ever REFUSES,
+    never confirms — and stays silent when either datum is missing (a freshly
+    indexed file may not be tag-read yet), so a same-file move or a file in a
+    brand-new folder still resolves."""
+    ds, cs = dead["size"], cand["size"]
+    dd, cd = dead["duration_sec"], cand["duration_sec"]
+    return (ds is not None and cs is not None and ds != cs
+            and dd is not None and cd is not None
+            and abs(dd - cd) > _DURATION_TOL)
+
+
 def relink_broken(conn: sqlite3.Connection, music_root: str,
                   pid: int | None = None) -> dict:
     """Repoint stale playlist file paths to the real file in the library.
 
-    Many playlists (imported before the NAS install) point at old
-    locations OUTSIDE the current music root. The files just moved — same
-    name, now under music_root. For each file item whose path is not under
-    music_root, look up the same-named file in the index (present only) and,
-    on a UNIQUE match, rewrite the item's path. Pure DB work — no NAS access,
-    so it's fast even over a slow link. Items already under the root are left
-    alone (they're correct, or just not scanned yet).
+    Three kinds of item, and the INDEX decides which — never a stat per item, so
+    a slow NAS link cannot turn this into a walk of the share:
+
+    * ALIVE   — the index holds the path and does not flag it missing. Leave it.
+    * DEAD    — the index holds the path and flags it missing, i.e. the indexer
+                PROVED the file is gone. The file moved or was renamed, so find
+                the present file it became and rewrite the item's path.
+    * UNKNOWN — the index has no row at all (a spot/PSA folder outside
+                nas_music_root, or something not scanned yet). Leave it alone if
+                it is under the root — "not indexed" is not evidence of death —
+                otherwise fall back to a unique same-named file, which is how
+                playlists imported before the NAS install get repaired.
+
+    The DEAD case is the one that used to be invisible. This function only looked
+    at paths OUTSIDE the root, so an item whose file moved WITHIN the library (a
+    folder renamed on the NAS) was counted "in_place" and skipped — the operator
+    pressed "Fix broken file paths", got "0 track(s) re-pointed", and 66% of the
+    on-air playlist stayed dead while the files sat one folder away.
+
+    Finding the file it BECAME — the matching ladder, first stage with a single
+    winner wins (all against the index, no walk of the share):
+
+      1. Trailing-segment match. Among present files sharing the basename, score
+         by how many trailing path components also match. A unique winner at
+         depth ≥ 2 (name + ≥1 folder) IS the moved file — this catches a folder
+         un-nested (``New JB Music\\Neil Young\\x`` → ``Neil Young\\x``) and a
+         re-encode that kept its album folder, where the size differs but the
+         folder path corroborates.
+      2. Size tie-break. If several tie at the deepest match, prefer the one
+         whose recorded size equals the dead row's (the byte-identical file that
+         moved). No unique size winner → ambiguous, left alone.
+      0. The NAME compares extension- and copy-marker-insensitively, so a file
+         that was transcoded (Song.mp3 -> Song.m4a) or copied by the duplicate
+         cleaner (Song (1).mp3) still matches its own recording.
+      3. Bare-basename fallback. A single same-named survivor at depth 1 (only
+         the file name matches — a folder renamed AND flattened, e.g. ``Charlie
+         Parker … Birdsong\\18 Big Foot`` → ``charlie parker new\\18 Big Foot``).
+         Here the folder gives no corroboration, so a size+duration contradiction
+         (``_different_recording``) REFUSES the guess rather than risk the wrong
+         recording on air.
+
+    Safety rails: ambiguity is never guessed; the quarantine folder is never a
+    target; an item is never re-pointed at its own path. When the share is
+    reachable (probed ONCE) the chosen target is confirmed on disk before the
+    rewrite, and a DEAD item whose own file is back on disk is healed in place
+    instead of hijacked to a same-named copy. On a host where the share does not
+    resolve (``verified_on_disk`` is False in the result) the re-points are still
+    computed from the index so the repair is reproducible, just without the probe.
     """
     import collections
     root_norm = os.path.normcase(os.path.normpath(music_root)) + os.sep
-    by_base: dict[str, set] = collections.defaultdict(set)
-    for row in conn.execute("SELECT path FROM tracks WHERE missing = 0"):
-        by_base[os.path.normcase(os.path.basename(row["path"]))].add(row["path"])
+    by_base: dict[str, list] = collections.defaultdict(list)
+    known: dict[str, int] = {}          # normalised path -> index `missing` flag
+    dead_meta: dict[str, sqlite3.Row] = {}   # normalised path -> the dead row
+    for row in conn.execute(
+            "SELECT path, missing, size, duration_sec FROM tracks"):
+        key = os.path.normcase(row["path"])
+        known[key] = row["missing"] or 0
+        if row["missing"]:
+            dead_meta[key] = row
+        else:
+            by_base[_file_key(row["path"])].append(
+                {"path": row["path"], "parts": _path_parts(row["path"]),
+                 "size": row["size"], "duration_sec": row["duration_sec"]})
+
+    # Probe the share ONCE. A hard isfile() gate on every re-point would make the
+    # function do nothing on a host that can't see the share (Mark's workstation
+    # can't reach \\KDPI-Media; the on-air box can) and silently stop the repair
+    # from being reproducible — so when the root isn't reachable we skip the
+    # on-disk checks and say so, rather than re-point nothing.
+    can_verify = os.path.isdir(music_root)
 
     pids = ([pid] if pid is not None
             else [r["id"] for r in conn.execute("SELECT id FROM playlists")])
-    stats = {"checked": 0, "in_place": 0, "relinked": 0,
-             "ambiguous": 0, "unmatched": 0, "unmatched_examples": []}
+    stats = {"checked": 0, "in_place": 0, "relinked": 0, "ambiguous": 0,
+             "unmatched": 0, "dead": 0, "conflict": 0, "self_healed": 0,
+             "unverified": 0, "by_suffix": 0, "by_size": 0, "by_basename": 0,
+             "verified_on_disk": can_verify, "unmatched_examples": []}
+
+    def _unmatched(it):
+        stats["unmatched"] += 1
+        if len(stats["unmatched_examples"]) < 25:
+            stats["unmatched_examples"].append(os.path.basename(it["path"]))
+
     with conn:
         for p in pids:
             items = conn.execute(
@@ -506,24 +648,74 @@ def relink_broken(conn: sqlite3.Connection, music_root: str,
                 "WHERE playlist_id = ? AND item_type = 'file'", (p,)).fetchall()
             for it in items:
                 stats["checked"] += 1
-                if os.path.normcase(os.path.normpath(it["path"])).startswith(
-                        root_norm):
-                    stats["in_place"] += 1            # already under the root
+                key = os.path.normcase(it["path"])
+                missing = known.get(key)
+                if missing == 0:
+                    stats["in_place"] += 1            # the index says it is there
                     continue
-                matches = by_base.get(os.path.normcase(
-                    os.path.basename(it["path"])))
-                if not matches:
-                    stats["unmatched"] += 1
-                    if len(stats["unmatched_examples"]) < 25:
-                        stats["unmatched_examples"].append(
-                            os.path.basename(it["path"]))
+                if missing == 1:
+                    stats["dead"] += 1                # the index PROVED it is gone
+                elif key.startswith(root_norm):
+                    stats["in_place"] += 1            # not indexed != dead
                     continue
-                if len(matches) > 1:
-                    stats["ambiguous"] += 1           # same name in 2+ folders
+
+                cands = [c for c in
+                         by_base.get(_file_key(it["path"])) or ()
+                         if os.path.normcase(c["path"]) != key
+                         and QUARANTINE_DIR not in os.path.normcase(c["path"])]
+                if not cands:
+                    _unmatched(it)
                     continue
+
+                # Self-heal: a DEAD item whose own file is back on disk (a
+                # restore) must not be hijacked to a same-named copy. Checked
+                # only when there IS a candidate to hijack with, so the stat
+                # stays bounded (never a walk of every dead item).
+                if missing == 1 and can_verify and os.path.isfile(it["path"]):
+                    conn.execute("UPDATE tracks SET missing = 0 WHERE path = ?",
+                                 (it["path"],))
+                    stats["self_healed"] += 1
+                    stats["in_place"] += 1
+                    continue
+
+                dead = dead_meta.get(key)
+                it_parts = _path_parts(it["path"])
+                scored = [(_suffix_depth(it_parts, c["parts"]), c)
+                          for c in cands]
+                best = max(d for d, _ in scored)
+                winners = [c for d, c in scored if d == best]
+
+                winner = stage = None
+                if len(winners) == 1:
+                    cand = winners[0]
+                    if best >= 2:
+                        winner, stage = cand, "by_suffix"
+                    elif dead is not None and _different_recording(dead, cand):
+                        stats["conflict"] += 1       # same name, proven not it
+                        continue
+                    else:
+                        winner, stage = cand, "by_basename"
+                else:
+                    if dead is not None and dead["size"] is not None:
+                        tied = [c for c in winners if c["size"] == dead["size"]]
+                        if len(tied) == 1:
+                            winner, stage = tied[0], "by_size"
+                    if winner is None:
+                        stats["ambiguous"] += 1       # same name in 2+ folders
+                        continue
+
+                # Confirm the chosen target exists before rewriting, so a stale
+                # index row can't replace a dead entry with another dead one.
+                # One stat per re-point, never per item.
+                if can_verify and not os.path.isfile(winner["path"]):
+                    stats["unverified"] += 1
+                    _unmatched(it)
+                    continue
+
                 conn.execute("UPDATE playlist_items SET path = ? WHERE id = ?",
-                             (next(iter(matches)), it["id"]))
+                             (winner["path"], it["id"]))
                 stats["relinked"] += 1
+                stats[stage] += 1
     return stats
 
 

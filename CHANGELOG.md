@@ -7,6 +7,26 @@ plain English a non-technical operator can understand.
 
 ## [Unreleased]
 
+### Fixed
+- **"Fix broken file paths" now actually repairs a song that moved inside your music
+  folder, and lands on the song's real new home.** When a folder is renamed or moved on
+  the NAS, every playlist that points into it keeps the old path, so those songs are
+  skipped - and the repair button reported **0 re-pointed**, because the stale path was
+  still inside the music folder and the check only ever looked at paths outside it. It
+  now uses the library index to tell a file that has gone from a path that was simply
+  never scanned, and finds where the file went: it prefers the copy sitting in the same
+  album/artist folder (so a re-named artist folder or a re-encoded track is matched by
+  its folder, not just its name), falls back to the file name alone for a folder that
+  was flattened or newly created, and - when the only song with that name is clearly a
+  **different recording** (its length and size both disagree) - leaves the entry alone
+  rather than put the wrong song on air. It still never guesses when the same name is in
+  two folders, never re-points into the `_Duplicates` quarantine folder, and (on the
+  on-air PC, where the music share is reachable) confirms the file is really there
+  before changing anything and heals a restored song in place. It also recognises the
+  same track stored under a different file type or with a "(1)" copy marker - the
+  library has been through several transcodes - so a song that is still on the disk is
+  found instead of being reported missing. A second press changes nothing.
+
 ## [1.6.4] - 2026-11-07
 
 ### Added

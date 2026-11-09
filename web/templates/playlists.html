@@ -148,6 +148,8 @@ async function relinkAll() {
     "<strong>" + b.relinked + " track(s) re-pointed.</strong> " +
     b.in_place + " already OK · " + b.unmatched + " not found in library · " +
     b.ambiguous + " skipped (same name in 2+ folders)." +
+    (b.conflict ? " " + b.conflict + " left alone (only match is a different " +
+                  "recording)." : "") +
     (b.unmatched_examples && b.unmatched_examples.length
       ? "<br><small class='muted'>Not found (examples): " +
         b.unmatched_examples.slice(0, 10).map(esc).join(", ") + "</small>" : "");
