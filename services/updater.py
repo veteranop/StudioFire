@@ -82,6 +82,11 @@ SERVICES = ["engine", "core", "worker"]
 NSSM_NAMES = {"engine": "StudioFireEngine", "core": "StudioFireWeb",
               "worker": "StudioFireWorker"}
 HEALTH_TIMEOUT = 120.0     # seconds for a restarted service to come back
+# A service counts as back only once it is STILL there after this long: the
+# worker used to launch, die ~12s later on the migration race, and still pass
+# the gate (it only asked "is a process with that name running right now?"),
+# so the updater reported success over a half-dead stack (ticket #997).
+WORKER_SETTLE_SEC = 20.0
 KEEP_BACKUPS = 3
 LOCK_STALE_SEC = 45 * 60
 
@@ -600,6 +605,7 @@ def wait_healthy(names: list[str], version: str,
     deadline = start + timeout
     pending = set(names)
     gone: dict[str, int] = {}   # consecutive polls with no process at all
+    seen_at: dict[str, float] = {}   # first poll that saw the process alive
     while pending and time.monotonic() < deadline:
         # fail fast when a restarted service has simply died (e.g. a release
         # that crashes on startup) instead of waiting out the full timeout —
@@ -622,8 +628,15 @@ def wait_healthy(names: list[str], version: str,
             # matters when rolling back to one) — then 'ok' is enough
             if h and h.get("ok") and h.get("version", version) == version:
                 pending.discard("core")
-        if "worker" in pending and service_pids().get("worker"):
-            pending.discard("worker")
+        if "worker" in pending:
+            if service_pids().get("worker"):
+                # survive the launch window before believing it (see
+                # WORKER_SETTLE_SEC) - existence at one poll is not health
+                seen_at.setdefault("worker", time.monotonic())
+                if time.monotonic() - seen_at["worker"] >= WORKER_SETTLE_SEC:
+                    pending.discard("worker")
+            else:
+                seen_at.pop("worker", None)
         if pending:
             time.sleep(2.0)
     if pending:
