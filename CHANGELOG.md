@@ -20,6 +20,7 @@ plain English a non-technical operator can understand.
   safety net skipped it. Setup now copies a handful of tracks from your library into it
   (once; a folder you have filled yourself is never touched), and the installer ships
   the `assets` folder those clips are seeded from.
+- **An update no longer switches the library scan off.** When a box restarted after an update, two parts of StudioFire both tried to upgrade the database at the same moment - one won, the other stopped with an error - and the screen still said everything was healthy while new music stopped showing up in search and in **Fix broken file paths**. Now only one part upgrades the database and the other waits for it, and an update only reports success once that part is still running a few seconds later.
 
 ## [1.6.5] - 2026-11-08
 
