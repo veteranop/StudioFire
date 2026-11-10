@@ -10,6 +10,7 @@ WAL mode makes concurrent readers + one writer safe across P2/P3/P4.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import sqlite3
@@ -448,7 +449,88 @@ def _rm(path: str) -> None:
         pass
 
 
+@contextlib.contextmanager
+def _migration_lock(db_path: str):
+    """Cross-process exclusive lock around the migration chain.
+
+    core and worker both call migrate() at startup. Without a lock each
+    process reads schema_version OUTSIDE any transaction and then applies
+    the whole chain, so the loser starts mid-chain and dies on the first
+    already-applied statement ("duplicate column name: deleted_at") - the
+    indexer then never runs and the library index freezes while /health
+    stays green (ticket #997). One migrator, the other waits and finds
+    nothing pending.
+    """
+    lock_path = db_path + ".migrate.lock"
+    fh = open(lock_path, "a+b")
+    try:
+        if os.name == "nt":
+            import msvcrt
+            while True:
+                try:
+                    fh.seek(0)
+                    msvcrt.locking(fh.fileno(), msvcrt.LK_LOCK, 1)
+                    break
+                except OSError:      # LK_LOCK gives up after ~10s
+                    time.sleep(0.25)
+        else:
+            import fcntl
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+        yield
+    finally:
+        try:
+            if os.name == "nt":
+                import msvcrt
+                fh.seek(0)
+                msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+        except OSError:
+            pass
+        fh.close()
+
+
+def schema_version(db_path: str) -> int:
+    """The DB's current schema version; 0 while it has no schema yet."""
+    try:
+        conn = connect(db_path)
+    except sqlite3.Error:
+        return 0
+    try:
+        row = conn.execute("SELECT version FROM schema_version").fetchone()
+        return int(row["version"]) if row else 0
+    except sqlite3.Error:
+        return 0
+    finally:
+        conn.close()
+
+
+def wait_for_schema(db_path: str, timeout: float = 180.0,
+                    poll: float = 1.0) -> bool:
+    """Wait for whoever migrates the DB to finish. True once it is current.
+
+    The worker starts alongside core and must not run the chain itself: a
+    second migrator is what killed the indexer on every schema-changing
+    release. Returns False when nothing migrated it within `timeout`, so a
+    worker started on its own can migrate as the only migrator.
+    """
+    deadline = time.monotonic() + timeout
+    while True:
+        if schema_version(db_path) >= SCHEMA_VERSION:
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(poll)
+
+
 def migrate(db_path: str) -> None:
+    """Run the pending migration chain, holding the cross-process lock."""
+    with _migration_lock(db_path):
+        _migrate_chain(db_path)
+
+
+def _migrate_chain(db_path: str) -> None:
     conn = connect(db_path)
     try:
         conn.execute("""CREATE TABLE IF NOT EXISTS schema_version

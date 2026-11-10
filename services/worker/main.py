@@ -60,7 +60,15 @@ def main() -> int:
     setup_logging(cfg["logs_dir"])
     lower_priority()
     log.info("StudioFire worker starting (pid %d)", os.getpid())
-    coredb.migrate(cfg["db_path"])
+    # Core owns the schema: a second migrator used to kill this process on
+    # every release that changed it (ticket #997 - "duplicate column name"
+    # while core was mid-chain, and the library index silently froze). Wait
+    # for core to finish; only migrate when nobody else did.
+    if not coredb.wait_for_schema(cfg["db_path"]):
+        log.warning("schema still behind after waiting - migrating from the "
+                    "worker (no other migrator started)")
+        coredb.migrate(cfg["db_path"])
+    log.info("schema ready: v%d", coredb.SCHEMA_VERSION)
 
     stop = []
     signal.signal(signal.SIGINT, lambda *a: stop.append(1))
