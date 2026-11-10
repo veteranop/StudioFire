@@ -7,6 +7,8 @@ plain English a non-technical operator can understand.
 
 ## [Unreleased]
 
+## [1.6.6] - 2026-11-10
+
 ### Fixed
 - **A brand-new install no longer plays a constant tone.** Before any music was added,
   the safety net had nothing to fall back on and dropped straight through to its very
