@@ -277,8 +277,20 @@ def create_app(cfg: dict) -> FastAPI:
             guid = (values.get("audio_device_guid") or "").strip()
             update_config({"engine": {"audio_device_guid": guid}})
         elif step == "emergency":
+            want = bool(values.get("fill_from_library"))
             db.set_setting(conn, "emergency_fill_from_library",
-                           "1" if values.get("fill_from_library") else "0")
+                           "1" if want else "0")
+            if want:
+                # the wizard promises a local copy "filled from my library" --
+                # actually fill it (best effort; a slow share must not block
+                # setup). Without this the folder stays empty and the failover
+                # chain falls through to the precache and then the tone.
+                try:
+                    made = setup_mod.fill_emergency_from_library(conn, load_config())
+                except Exception:            # noqa: BLE001 - setup never dies here
+                    made = 0
+                if made:
+                    log.warning("emergency folder filled with %d library track(s)", made)
         elif step == "streaming":
             if values.get("np_file") is not None:
                 db.set_setting(conn, nowplaying_file.K_PATH,

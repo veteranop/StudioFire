@@ -77,6 +77,10 @@ Source: "..\config\config.example.json"; DestDir: "{app}\config"; Flags: ignorev
 Source: "..\bin\mpv.exe"; DestDir: "{app}\bin"; Flags: ignoreversion
 Source: "payload\nssm.exe"; DestDir: "{app}\bin"; Flags: ignoreversion
 Source: "payload\runtime\*"; DestDir: "{app}\runtime"; Flags: recursesubdirs ignoreversion
+; emergency clips the engine seeds into {app}\emergency on first start
+; (services/paths.py seed_emergency). Without this line the install ships the
+; empty folder above and tier 2 of the failover chain can never engage.
+Source: "..\assets\*"; DestDir: "{app}\assets"; Flags: recursesubdirs ignoreversion; Excludes: ".gitkeep"
 
 [Dirs]
 ; the install folder must be writable by the (non-admin) account the services

@@ -42,7 +42,10 @@ services so nothing outside the audio path can ever cause dead air. Full spec in
   dir (scanned fresh each time, since its contents churn) → **(4)** a baked-in
   last-resort source (an `av://lavfi` tone by default, or a configured
   `engine.baked_in_asset`). It exits emergency the instant a playable queue item
-  exists again. A 1 s watchdog checks mpv liveness **and** that the play-head is
+  exists again. **Tier 4 only plays on a station that has actually aired
+  something** (a persisted `engine_has_aired` marker, queue entries, or an
+  explicit `engine.baked_in_asset`): a virgin install stays silent and reports
+  `needs_setup` instead of blasting the tone at a first-run user — ticket 1003. A 1 s watchdog checks mpv liveness **and** that the play-head is
   advancing (to catch a silent hang where mpv is "alive" but frozen).
 - **Two-deck crossfade** — two mpv players alternate; the mixer thread ramps
   volume so songs overlap (`engine.crossfade_sec`, default 4; 0 = back-to-back).

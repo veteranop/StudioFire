@@ -41,6 +41,9 @@
 </div>
 <div id="emergency-banner" class="banner banner-yellow" hidden> EMERGENCY FILLER IS ON AIR — the normal playlist could not continue.
 </div>
+<div id="setup-banner" class="banner banner-yellow" hidden> NOTHING TO PLAY YET — no music has been queued.
+  <a href="/setup">Finish setup</a> or add a playlist, then press play.
+</div>
 
 <div class="onair-wrap">
 <div class="onair-left">
@@ -1236,6 +1239,10 @@ async function refresh() {
     oa.textContent = onAir ? "ON AIR" : "OFF AIR";
     document.querySelector(".np-card").classList.toggle("np-offair", !onAir);
     document.getElementById("emergency-banner").hidden = !q.emergency_mode;
+    // silent-by-design first run: the engine has no library and no history,
+    // so it stays quiet and points at setup instead of playing a tone
+    document.getElementById("setup-banner").hidden =
+      !(q.needs_setup && q.engine_online && !q.emergency_mode);
     // song title on the big line, "Artist • Album" underneath
     let title = q.now_song || q.now_title;
     if (!title && q.now_playing) {

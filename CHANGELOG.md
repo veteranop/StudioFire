@@ -7,6 +7,20 @@ plain English a non-technical operator can understand.
 
 ## [Unreleased]
 
+### Fixed
+- **A brand-new install no longer plays a constant tone.** Before any music was added,
+  the safety net had nothing to fall back on and dropped straight through to its very
+  last resort - a 600 Hz tone, looped at full volume, forever. (A Reddit user installed
+  it, heard that tone, and uninstalled.) The last-resort tone is meant for a station
+  that **lost** its programme, so it now only plays once the station has actually aired
+  something. A fresh install stays quiet and says so: a yellow **NOTHING TO PLAY YET**
+  banner on the On Air screen points at setup instead.
+- **"Keep a local emergency copy filled from my library" now actually fills it.** The
+  wizard saved the answer and nothing ever read it, so that folder stayed empty and the
+  safety net skipped it. Setup now copies a handful of tracks from your library into it
+  (once; a folder you have filled yourself is never touched), and the installer ships
+  the `assets` folder those clips are seeded from.
+
 ## [1.6.5] - 2026-11-08
 
 ### Fixed

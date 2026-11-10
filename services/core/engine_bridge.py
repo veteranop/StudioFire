@@ -1441,6 +1441,10 @@ def register(app: FastAPI) -> None:
                 "stop_after_current": (st or {}).get("stop_after_current", False),
                 "emergency_mode": (st or {}).get("emergency_mode", False),
                 "forced_emergency": (st or {}).get("forced_emergency", False),
+                # engine has nothing to play and no sign it was ever set up
+                # (first-run install; the failover tone is deliberately NOT
+                # played there — ticket 1003)
+                "needs_setup": (st or {}).get("needs_setup", False),
                 "pending": pending_view}
 
     def _queue_mutate(mutation_body: dict) -> dict:

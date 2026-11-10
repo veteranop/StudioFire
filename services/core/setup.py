@@ -26,6 +26,9 @@ import sys
 
 from . import auth, db
 
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__))))
+
 # Order matters: this is the wizard.
 STEPS = [
     ("station", "Your station"),
@@ -186,6 +189,70 @@ def audio_devices() -> list[dict]:
         out.append({"id": ident, "label": desc,
                     "guid": ident.split("/", 1)[1]})
     return out
+
+
+AUDIO_EXTS = (".mp3", ".wav", ".flac", ".m4a", ".aac", ".ogg", ".opus",
+              ".wma", ".aiff", ".aif")
+
+
+def fill_emergency_from_library(conn, cfg: dict | None = None,
+                                count: int = 5,
+                                max_bytes: int = 60 * 1024 * 1024) -> int:
+    """Copy a few library tracks into the local emergency folder.
+
+    The wizard asks "Keep a local emergency copy filled from my library
+    (recommended)" and until now only wrote a setting nobody read: the folder
+    stayed empty, so the failover chain fell past it to the precache and then
+    to the baked-in tone. This is the step that makes the answer true.
+
+    Best effort by design — the operator is mid-setup and must never be
+    blocked by a slow share: every failure is skipped, the count returned is
+    what actually landed, and an existing (curated) folder is never touched.
+    """
+    from .. import paths as shared_paths
+    cfg = cfg or {}
+    resolved = shared_paths.resolve(cfg.get("paths") or {}, ROOT)
+    dest = resolved.get("emergency_dir")
+    if not dest:
+        return 0
+    try:
+        os.makedirs(dest, exist_ok=True)
+        if any(f.lower().endswith(AUDIO_EXTS) for f in os.listdir(dest)):
+            return 0                       # already has audio — leave it alone
+    except OSError:
+        return 0
+    try:
+        rows = conn.execute(
+            "SELECT path FROM tracks WHERE COALESCE(missing, 0) = 0 "
+            "AND path IS NOT NULL ORDER BY RANDOM() LIMIT ?",
+            (count * 4,)).fetchall()
+    except Exception:                      # noqa: BLE001 - sqlite shape varies
+        return 0
+    copied, used = 0, 0
+    for row in rows:
+        if copied >= count or used >= max_bytes:
+            break
+        src = (row[0] or "").strip()
+        if not src or not src.lower().endswith(AUDIO_EXTS):
+            continue
+        try:
+            if not os.path.isfile(src):
+                continue
+            size = os.path.getsize(src)
+            if size <= 0 or used + size > max_bytes:
+                continue
+            name = os.path.basename(src)
+            target = os.path.join(dest, name)
+            if os.path.exists(target):
+                continue
+            part = target + ".part"
+            shutil.copy2(src, part)
+            os.replace(part, target)       # atomic: the engine never sees half a file
+            copied += 1
+            used += size
+        except OSError:
+            continue
+    return copied
 
 
 def test_tone(guid: str = "", seconds: float = 1.5) -> tuple[bool, str]:

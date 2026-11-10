@@ -209,6 +209,19 @@ class EngineSupervisor:
         self._emergency_dir = c["emergency_dir"]
         self._precache_dir = c.get("precache_dir") or ""
         self._baked_in = c.get("baked_in_asset") or BAKED_IN_DEFAULT
+        # A station that has never been set up must not be screamed at by the
+        # last-resort tone. The failover chain protects a station that LOST its
+        # programme, not one that has not been given one yet: a first-run user
+        # was greeted with a constant 600 Hz sine and uninstalled (ticket 1003).
+        # Evidence that this IS a station: it has aired something before (the
+        # marker), it has queue entries, or an operator pinned a real
+        # baked_in_asset. Music in the emergency/precache tiers needs no
+        # evidence — it is real audio and plays as it always did.
+        self._marker_path = c.get("configured_marker_path") or os.path.join(
+            os.path.dirname(c["state_path"]) or ".", "engine_has_aired")
+        self._configured = bool((c.get("baked_in_asset") or "").strip()) \
+            or os.path.exists(self._marker_path)
+        self._needs_setup_logged = False
         self._extra_mpv_args = list(c.get("extra_mpv_args", []))
         self._watchdog_interval = float(c.get("watchdog_interval", 1.0))
         self._heartbeat_path = c["heartbeat_path"]
@@ -246,6 +259,7 @@ class EngineSupervisor:
                         "position": None, "paused": False,
                         "stop_after_current": False,
                         "emergency_mode": False, "forced_emergency": False,
+                        "needs_setup": False,
                         "mpv_alive": False,
                         "queue_version": 0, "current_index": -1,
                         "queue_len": 0, "pending_ids": []}
@@ -261,6 +275,8 @@ class EngineSupervisor:
     def start(self) -> None:
         self._journal.append("engine_start")
         self._state = self._store.load()
+        if self._state.entries:
+            self._configured = True   # a station with a programme is set up
         # publish the restored state so /status is truthful before playback
         self._set_status(queue_version=self._state.queue_version,
                          current_index=self._state.current_index,
@@ -518,6 +534,7 @@ class EngineSupervisor:
     def _announce(self, deck: Deck, path: str, entry: dict | None) -> None:
         """Bookkeeping for 'this is now on air' (was start-file handling)."""
         if entry is not None:
+            self._mark_configured()
             idx = self._index_of(entry)
             if idx is not None and idx != self._state.current_index:
                 self._state.current_index = idx
@@ -838,6 +855,9 @@ class EngineSupervisor:
         return files
 
     def _enter_emergency(self, why: str) -> None:
+        if not self._configured and not self._emergency_candidates():
+            self._idle_unconfigured(why)
+            return
         if not self._state.emergency_mode:
             self._journal.append("emergency_enter", reason=why)
             log.error("ENTERING EMERGENCY MODE: %s", why)
@@ -870,6 +890,9 @@ class EngineSupervisor:
             self._emergency_idx += 1
             self._go_on_air(deck, p, None)
         else:
+            if not self._configured:
+                self._idle_unconfigured("no filler available and no station set up")
+                return
             # tier 3: baked-in source, looped — the last line of defense
             self._go_on_air(deck, self._baked_in, None)
             deck.client.set_property("loop-file", "inf")
@@ -881,6 +904,53 @@ class EngineSupervisor:
         self._set_status(emergency_mode=False, forced_emergency=False)
         self._journal.append("emergency_exit", reason=reason)
         log.warning("exited emergency mode: %s", reason)
+
+    def _mark_configured(self) -> None:
+        """Remember, once, that this station has actually played something.
+
+        Persisted on disk so a later start with an empty queue (a reboot
+        between playlists, a queue file lost) still gets the whole failover
+        chain — including the tone — instead of being treated as a fresh,
+        unconfigured install.
+        """
+        if self._configured:
+            return
+        self._configured = True
+        try:
+            with open(self._marker_path, "w", encoding="utf-8") as f:
+                f.write("%d\n" % int(time.time()))
+        except OSError as exc:
+            log.warning("could not write the configured marker %s (%s) — "
+                        "failover re-derives it from the queue instead",
+                        self._marker_path, exc)
+        self._set_status(needs_setup=False)
+        log.info("station has aired its first item — failover chain armed")
+
+    def _idle_unconfigured(self, why: str) -> None:
+        """Nothing to play, and nothing says this station was ever set up.
+
+        Stay silent and SAY so. This is the fix for a first-run user hearing a
+        constant tone (ticket 1003): the baked-in tone belongs to a station
+        that lost its audio, never to one that has not been given a library.
+        The old behaviour played `av://lavfi:sine=frequency=600` looped at full
+        volume forever, which is indistinguishable from a broken machine.
+        """
+        if self._state.emergency_mode:
+            self._state.emergency_mode = False
+            self._store.save(self._state)
+        if self._onair is None:
+            self._set_status(emergency_mode=False, needs_setup=True,
+                             now_playing=None, now_title=None,
+                             now_source=None, now_id=None)
+        else:
+            self._set_status(emergency_mode=False, needs_setup=True)
+        if not self._needs_setup_logged:
+            self._needs_setup_logged = True
+            self._journal.append("needs_setup", reason=why)
+            log.warning("nothing has ever played and no library is queued (%s): "
+                        "staying SILENT instead of playing the failover tone. "
+                        "Finish setup (http://localhost:8080/setup) or add a "
+                        "playlist.", why)
 
     def _safe_enter_emergency(self, why: str) -> None:
         try:

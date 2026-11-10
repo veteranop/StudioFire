@@ -175,12 +175,21 @@ def main():
     finally:
         sup2.stop()
 
-    # ---- 7. empty emergency folder -> baked-in tier 3
+    # ---- 7. empty emergency folder + a station that LOST its music -> tier 3
+    # (a fresh install with no history is deliberately silent — ticket 1003;
+    # the tone is for a station whose programme disappeared, so this fixture
+    # carries a queue entry whose file is gone)
     td3 = tempfile.mkdtemp(prefix="sf-bench3-")
     emdir3 = os.path.join(td3, "emergency-empty")
     os.makedirs(emdir3)
     cfg3 = build_config(td3, emdir3)
     cfg3["pipe_name"] += "-t3"
+    from services.engine.queue_store import QueueStore, QueueState
+    lost = QueueState()
+    lost.queue_version = 1
+    lost.entries = [{"id": "gone", "path": os.path.join(td3, "deleted.wav"),
+                     "title": "Track that vanished", "source": "playlist"}]
+    QueueStore(cfg3["state_path"]).save(lost)
     sup3 = EngineSupervisor(cfg3)
     sup3.start()
     try:
