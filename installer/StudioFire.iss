@@ -80,7 +80,8 @@ Source: "payload\runtime\*"; DestDir: "{app}\runtime"; Flags: recursesubdirs ign
 ; emergency clips the engine seeds into {app}\emergency on first start
 ; (services/paths.py seed_emergency). Without this line the install ships the
 ; empty folder above and tier 2 of the failover chain can never engage.
-Source: "..\assets\*"; DestDir: "{app}\assets"; Flags: recursesubdirs ignoreversion; Excludes: ".gitkeep"
+; assets/ ships only .gitkeep until real emergency clips exist, so the wildcard matches nothing and Inno ABORTS the whole compile ("No files found matching"). skipifsourcedoesntexist keeps the entry for when clips are added without blocking every release in the meantime.
+Source: "..\assets\*"; DestDir: "{app}\assets"; Flags: recursesubdirs ignoreversion skipifsourcedoesntexist; Excludes: ".gitkeep"
 
 [Dirs]
 ; the install folder must be writable by the (non-admin) account the services
