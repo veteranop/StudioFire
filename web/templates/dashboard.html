@@ -421,8 +421,9 @@ async function refreshSchedule() {
       now.innerHTML = "<strong>On now:</strong> " + esc(sc.base.name) +
         " <span class='muted'>(regular rotation)</span>";
     else
-      now.innerHTML = "<span class='muted'>No rotation on air — put a " +
-        "playlist on air from the Playlists page.</span>";
+      now.innerHTML = "<span class='muted'>No rotation on air — choose one in " +
+        "<b>Settings &rarr; Playlists</b>, or press &ldquo;&#9654; Put on air&rdquo; " +
+        "on the Playlists page.</span>";
     const ol = document.getElementById("sched-list");
     ol.innerHTML = "";
     if (!sc.upcoming.length) {
@@ -1086,8 +1087,10 @@ function renderRotation() {
   const q = document.getElementById("rot-search").value.trim().toLowerCase();
   ol.innerHTML = "";
   if (!rotItems.length) {
-    ol.innerHTML = "<li class='muted'>No rotation on air — put a playlist " +
-      "on air from the Playlists page.</li>";
+    ol.innerHTML = "<li class='muted'>No rotation on air — choose one in " +
+      "<b>Settings &rarr; Playlists</b> (or press &#9654; Put on air on the " +
+      "Playlists page). If it was set and is now empty, the playlist it " +
+      "pointed at was deleted.</li>";
     return;
   }
   const filtering = q.length > 0;
