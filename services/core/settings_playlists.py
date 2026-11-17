@@ -265,6 +265,7 @@ def mirror_status(conn: sqlite3.Connection, cfg: dict | None = None) -> dict:
         except OSError:
             pass
     current = _int_or_none(coredb.get_setting(conn, EMERGENCY_KEY))
+    partial = bool(man.get("partial"))
     return {"dir": dest,
             "mirrored": len(names),
             "on_disk": len(on_disk),
@@ -272,11 +273,16 @@ def mirror_status(conn: sqlite3.Connection, cfg: dict | None = None) -> dict:
             "bytes": int(man.get("bytes") or 0),
             "max_bytes": int(man.get("max_bytes") or max_bytes(cfg)),
             "truncated": bool(man.get("truncated")),
+            "partial": partial,
             "playlist_id": man.get("playlist_id"),
             "playlist_name": man.get("playlist_name"),
             "synced_at": man.get("synced_at"),
-            # the copy belongs to the setting only if they name the same list
-            "in_sync": bool(names) and man.get("playlist_id") == current,
+            # The copy belongs to the setting only if they name the same list
+            # AND that copy was complete. A partial copy protects the station
+            # but is not finished, so it must not read as "in sync" — that is
+            # what silently skipped the refresh after a reboot mid-outage.
+            "in_sync": (bool(names) and man.get("playlist_id") == current
+                        and not partial),
             "missing": list(man.get("missing") or [])[:20]}
 
 
@@ -617,6 +623,12 @@ class EmergencyMirror:
                     continue
                 self._publish(res, playlist_id)
                 return
+            # Ran out of passes — the operator is changing the playlist faster
+            # than it can be copied. Publish what the last pass actually did:
+            # a worker that leaves the card showing "⏳ Copying…" forever is a
+            # lie, and the honest state (copied X, slot now points at Y) is
+            # exactly what makes the Refresh button the obvious next step.
+            self._publish(res, playlist_id)
         except Exception as exc:            # noqa: BLE001 — never kills the core
             log.exception("emergency mirror failed")
             with self._lock:

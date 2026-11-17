@@ -901,6 +901,10 @@ function renderPlaylists(d) {
     plBanner("pl-emergency-warn",
       "No local copy yet, so a lost music share would fall through to " +
       "leftover cached clips. Press \u201cRefresh the local copy\u201d.");
+  else if (em.id && m.partial)
+    plBanner("pl-emergency-warn",
+      "The last copy was incomplete \u2014 some songs could not be read. Press " +
+      "\u201cRefresh the local copy\u201d once the music folder is back.");
   else if (em.id && m.playlist_id !== em.id)
     plBanner("pl-emergency-warn",
       "The local copy belongs to a different playlist (\u201c" +

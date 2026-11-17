@@ -241,6 +241,13 @@ def main():
         check("partial: the manifest still claims all five, so a later "
               "healthy sync can still prune them",
               len(sp.mirrored_names(part_dir)) == 5)
+        # Sr Dev round 2: after a reboot during a partial outage this copy was
+        # reported in sync, so startup_sync SKIPPED the refresh and the
+        # incomplete copy stayed silent until someone pressed Refresh.
+        st = sp.mirror_status(conn, part_cfg)
+        check("a partial copy is not reported in sync", st["in_sync"] is False)
+        check("and the partial flag is surfaced to the page",
+              st["partial"] is True)
         # sources come back: a healthy sync converges, including a removal
         for p in part_tracks[1:]:
             os.rename(p + ".gone", p)
@@ -400,6 +407,35 @@ def main():
               sp.mirror_status(conn, cfg)["mirrored"] == 0)
         check("and the emergency slot is empty again",
               sp.get_emergency(conn, cfg)["id"] is None)
+
+        # ---- changing it faster than it copies must still end honestly ----
+        # Sr Dev round 2: when the mid-copy loop ran out of passes the worker
+        # never published, so the card showed "Copying…" forever with a dead
+        # thread. It now reports what the last pass actually did.
+        flip_a = pl.create_playlist(conn, "Flip A")
+        pl.add_items_bulk(conn, flip_a, [{"path": tracks[0], "title": "a"}])
+        flip_b = pl.create_playlist(conn, "Flip B")
+        pl.add_items_bulk(conn, flip_b, [{"path": tracks[2], "title": "c"}])
+        real_sync = sp.sync_now
+        passes = {"n": 0}
+
+        def dithering_sync(c, pid, cfg_=None, **kw):
+            passes["n"] += 1
+            coredb.set_setting(c, sp.EMERGENCY_KEY,
+                               str(flip_b if passes["n"] % 2 else flip_a))
+            return real_sync(c, pid, cfg_)
+
+        sp.sync_now = dithering_sync
+        try:
+            sp.EMERGENCY_MIRROR.__init__()
+            sp.EMERGENCY_MIRROR.start(flip_a, dict(cfg, db_path=dbp))
+            sp.EMERGENCY_MIRROR.wait(25)
+            st = sp.EMERGENCY_MIRROR.status()
+        finally:
+            sp.sync_now = real_sync
+        check("a playlist changed faster than it copies still ends on a real "
+              "state, not a stuck spinner",
+              st["state"] in ("done", "warn") and passes["n"] == 3)
 
         r = client.post("/api/settings/playlists", json={"emergency_playlist_id": None})
         check("clearing the emergency playlist wipes its copy",
