@@ -7,6 +7,8 @@ plain English a non-technical operator can understand.
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-11-17
+
 ### Added
 - **Settings now has a Playlists card: set the everyday playlist and the emergency
   playlist in one place.** The first picker is the default rotation — the playlist that
