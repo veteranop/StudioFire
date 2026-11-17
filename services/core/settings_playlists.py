@@ -146,36 +146,53 @@ def mirrored_names(dest: str) -> set[str]:
             if f.get("name")}
 
 
-def _wanted_files(conn: sqlite3.Connection, playlist_id: int) -> list[dict]:
+def _wanted_files(conn: sqlite3.Connection,
+                  playlist_id: int) -> tuple[list[dict], int]:
     """The concrete audio files a playlist stands for, in playlist order.
 
     `file` items contribute that one file; a folder item contributes the audio
     files inside it (sorted by name so the mirror is stable between syncs —
     folder-rotation's persisted cursor is deliberately NOT consulted: the
     emergency copy must not move a live rotation cursor).
+
+    Returns (files, unresolved_items, db_ok). The second number is the whole reason
+    this is not a plain list: an item that yields NOTHING (a file that has
+    moved, a folder that is not reachable right now) is an item we cannot see,
+    not an item the operator deleted — and the mirror must not read the
+    difference as "prune these copies".
     """
     out: list[dict] = []
+    unresolved = 0
     try:
         rows = conn.execute(
             "SELECT item_type, path, title FROM playlist_items "
             "WHERE playlist_id = ? ORDER BY position, id",
             (int(playlist_id),)).fetchall()
     except sqlite3.Error:
-        return out
+        # We could not read the playlist at all. That is NOT an empty playlist:
+        # a locked or mid-migration DB must never be read as "the operator
+        # deleted everything" and prune the folder on the way past.
+        return out, 0, False
     for row in rows:
         kind = row["item_type"]
         raw = (row["path"] or "").strip()
         if not raw:
+            unresolved += 1
             continue
         path = pl.alias_path(raw)
+        made = 0
         if kind == "file":
             out.append({"src": path, "title": row["title"], "origin": "file"})
+            made = 1
         elif kind in ("folder-newest", "folder-rotation", "folder-random"):
             for f in sorted(pl._audio_files(path),
                             key=lambda p: os.path.basename(p).lower()):
                 out.append({"src": f, "title": row["title"],
                             "origin": kind})
-    return out
+                made += 1
+        if not made:
+            unresolved += 1
+    return out, unresolved, True
 
 
 # ------------------------------------------------------------- the two slots
@@ -303,17 +320,23 @@ def sync_now(conn: sqlite3.Connection, playlist_id: int, cfg: dict | None = None
 
     wanted: list[dict] = []
     seen_names: dict[str, int] = {}
-    for item in _wanted_files(conn, playlist_id):
+    files, unresolved_items, db_ok = _wanted_files(conn, playlist_id)
+    dropped = 0
+    for item in files:
         src = item["src"]
         if not src:
+            dropped += 1
             continue
         try:
             if not os.path.isfile(src):
+                dropped += 1
                 continue
             size = os.path.getsize(src)
         except OSError:
+            dropped += 1
             continue
         if size <= 0:
+            dropped += 1
             continue
         base = os.path.basename(src)
         if base in seen_names:          # two folders, same filename
@@ -324,6 +347,10 @@ def sync_now(conn: sqlite3.Connection, playlist_id: int, cfg: dict | None = None
             seen_names[base] = 1
         wanted.append({"name": base, "src": src, "size": size,
                        "title": item.get("title")})
+    # A source we cannot read is NOT a deletion. A share that is half reachable
+    # — one folder up, one folder down — is the ordinary shape of a mid-outage,
+    # and pruning on that deletes exactly the copies this folder exists to keep.
+    unresolved = unresolved_items + dropped
 
     def _abort(msg: str, truncated_: bool = False) -> dict:
         """Nothing usable this run — keep the copy that is already there."""
@@ -334,6 +361,10 @@ def sync_now(conn: sqlite3.Connection, playlist_id: int, cfg: dict | None = None
                 "max_bytes": budget, "truncated": truncated_,
                 "total_wanted": 0, "missing": [msg][:20], "kept_existing": True,
                 "synced_at": old.get("synced_at")}
+
+    if not db_ok:
+        return _abort("the playlist could not be read this time — the existing "
+                      "copy was left alone")
 
     # The playlist has items but not one of them is readable on this machine:
     # a NAS outage looks exactly like this, and it is precisely the moment the
@@ -378,12 +409,24 @@ def sync_now(conn: sqlite3.Connection, playlist_id: int, cfg: dict | None = None
 
     new_names = {c["name"] for c in copied}
     removed = 0
-    for name in sorted(old_names - new_names):
-        try:
-            os.remove(os.path.join(dest, name))
-            removed += 1
-        except OSError:
-            pass
+    # If ANY source was unreadable this run we do not prune at all: we carry
+    # the copies we already hold forward, unchanged and still owned, so nothing
+    # the operator needs is thrown away because a share blinked.
+    partial = bool(unresolved)
+    if partial:
+        carried = [{"name": str(f.get("name")), "size": int(f.get("size") or 0)}
+                   for f in (old.get("files") or [])
+                   if str(f.get("name")) not in new_names
+                   and os.path.isfile(os.path.join(dest, str(f.get("name"))))]
+        mirrored = copied + carried
+    else:
+        for name in sorted(old_names - new_names):
+            try:
+                os.remove(os.path.join(dest, name))
+                removed += 1
+            except OSError:
+                pass
+        mirrored = copied
     for junk in os.listdir(dest):
         if junk.endswith(".part"):
             try:
@@ -391,19 +434,22 @@ def sync_now(conn: sqlite3.Connection, playlist_id: int, cfg: dict | None = None
             except OSError:
                 pass
 
+    total_bytes = sum(int(m.get("size") or 0) for m in mirrored)
     result = {"playlist_id": row["id"], "playlist_name": row["name"],
               "dir": dest, "copied": len(copied), "removed": removed,
-              "bytes": used, "max_bytes": budget,
+              "bytes": total_bytes, "max_bytes": budget,
               "truncated": truncated, "total_wanted": len(wanted),
+              "unresolved": unresolved, "partial": partial,
+              "mirrored": len(mirrored),
               "kept_curated": kept_curated[:20],
               "missing": missing[:20], "synced_at": time.time()}
     try:
         _write_manifest(dest, {
             "playlist_id": row["id"], "playlist_name": row["name"],
-            "synced_at": result["synced_at"], "bytes": used,
+            "synced_at": result["synced_at"], "bytes": total_bytes,
             "max_bytes": budget, "truncated": truncated,
-            "files": [{"name": c["name"], "size": c["size"]}
-                      for c in copied],
+            "partial": partial, "unresolved": unresolved,
+            "files": mirrored,
             "missing": missing[:20]})
     except OSError as exc:
         log.warning("emergency manifest write failed: %s", exc)
@@ -522,28 +568,55 @@ class EmergencyMirror:
             t.join(timeout)
         return self.status()
 
-    def _run(self, playlist_id: int, cfg: dict, db_path: str) -> None:
-        conn = None
-        try:
-            conn = coredb.connect(db_path)
-            res = sync_now(conn, playlist_id, cfg)
-            if res.get("kept_existing"):
-                why = (res.get("missing") or ["nothing could be copied"])[0]
-                with self._lock:
-                    self._state = {"state": "error",
-                                   "message": f"Kept the existing copy — {why}",
-                                   "pid": playlist_id,
-                                   "finished_at": time.time(),
-                                   "result": res}
-                return
+    def _publish(self, res: dict, playlist_id: int) -> None:
+        if res.get("kept_existing"):
+            why = (res.get("missing") or ["nothing could be copied"])[0]
+            state = {"state": "error",
+                     "message": f"Kept the existing copy — {why}",
+                     "pid": playlist_id, "finished_at": time.time(),
+                     "result": res}
+        elif res.get("partial"):
+            state = {"state": "warn",
+                     "message": (f"Copied {res['copied']} track(s); "
+                                 f"{res['unresolved']} source(s) could not be "
+                                 "read, so the previous copies were kept"),
+                     "pid": playlist_id, "finished_at": time.time(),
+                     "result": res}
+        else:
             msg = (f"Copied {res['copied']} track(s) "
                    f"({res['bytes'] / 1048576:.0f} MB)")
             if res["truncated"]:
                 msg += " — stopped at the size cap"
-            with self._lock:
-                self._state = {"state": "done", "message": msg,
-                               "pid": playlist_id, "finished_at": time.time(),
-                               "result": res}
+            state = {"state": "done", "message": msg, "pid": playlist_id,
+                     "finished_at": time.time(), "result": res}
+        with self._lock:
+            self._state = state
+
+    def _run(self, playlist_id: int, cfg: dict, db_path: str) -> None:
+        conn = None
+        try:
+            conn = coredb.connect(db_path)
+            # The operator can change or delete the playlist while a copy of a
+            # 500-track folder is still running. Rather than drop that change
+            # on the floor (the old code returned False and nothing else ever
+            # copied it), re-check the setting afterwards and go round again.
+            for _ in range(3):
+                res = sync_now(conn, playlist_id, cfg)
+                current = _int_or_none(coredb.get_setting(conn, EMERGENCY_KEY))
+                if not current:
+                    # cleared or deleted mid-copy: undo it rather than leave a
+                    # folder of files nobody owns any more
+                    clear_mirror(cfg)
+                    with self._lock:
+                        self._state = {"state": "idle", "message": "",
+                                       "pid": None, "finished_at": time.time(),
+                                       "result": None}
+                    return
+                if current != playlist_id:
+                    playlist_id = current
+                    continue
+                self._publish(res, playlist_id)
+                return
         except Exception as exc:            # noqa: BLE001 — never kills the core
             log.exception("emergency mirror failed")
             with self._lock:
@@ -553,6 +626,18 @@ class EmergencyMirror:
         finally:
             try:
                 if conn is not None:
+                    # Last word on ownership: if the slot is empty by the time
+                    # we finish (the operator cleared it, or the playlist was
+                    # deleted while we were copying it), nothing may be left on
+                    # disk claiming to be their emergency copy. This also runs
+                    # when the copy raised part-way through, which is exactly
+                    # when a half-written folder would otherwise be orphaned.
+                    try:
+                        if not _int_or_none(
+                                coredb.get_setting(conn, EMERGENCY_KEY)):
+                            clear_mirror(cfg)
+                    except sqlite3.Error:
+                        pass
                     conn.close()
             except Exception:               # noqa: BLE001
                 pass

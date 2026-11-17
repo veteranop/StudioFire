@@ -20,7 +20,9 @@ plain English a non-technical operator can understand.
   instead of leftover cached clips. The copy is capped at 2 GB / 500 files, your own
   files in that folder are never touched or overwritten, and the card shows how many
   tracks are copied and when. "Refresh the local copy" re-copies after you edit the
-  playlist.
+  playlist. If the music folder is only partly reachable — which is what a failing
+  share usually looks like — the copy it already holds is kept rather than trimmed,
+  and the card says so.
 
 ### Fixed
 - **Deleting a playlist can no longer leave the station pointing at nothing.** A

@@ -210,6 +210,71 @@ def main():
         check("curated audio still survives a deliberate clear",
               audio_files(dest) == ["station-id.wav"])
 
+        # ---- THE PARTIAL-OUTAGE RULE (Sr Dev finding 1, BLOCKER) ---------
+        # A share that is half reachable must not prune the copies it cannot
+        # re-read. This is the case the first version got wrong: 4 of 5
+        # sources go dark, 1 still resolves, and the prune deleted the other 4
+        # — from inside the folder that exists to survive exactly that.
+        part_lib = os.path.join(tmp, "partlib")
+        part_tracks = []
+        for i in range(5):
+            p = os.path.join(part_lib, f"p{i}.mp3")
+            make_wav(p, freq=200 + 20 * i)
+            part_tracks.append(p)
+        part_pl = pl.create_playlist(conn, "Partial")
+        pl.add_items_bulk(conn, part_pl, [
+            {"path": p, "title": os.path.basename(p)} for p in part_tracks])
+        part_dir = os.path.join(tmp, "emergency_partial")
+        part_cfg = {"paths": {"data_root": tmp, "emergency_dir": part_dir}}
+        first = sp.sync_now(conn, part_pl, part_cfg)
+        check("partial: the first sync copies all five",
+              first["copied"] == 5 and first["partial"] is False)
+        for p in part_tracks[1:]:                  # four sources go dark
+            os.rename(p, p + ".gone")
+        second = sp.sync_now(conn, part_pl, part_cfg)
+        check("partial: a half-reachable share prunes NOTHING",
+              second["removed"] == 0)
+        check("partial: every copy is still in the folder",
+              len(audio_files(part_dir)) == 5)
+        check("partial: the run is reported as partial, with the count",
+              second["partial"] is True and second["unresolved"] == 4)
+        check("partial: the manifest still claims all five, so a later "
+              "healthy sync can still prune them",
+              len(sp.mirrored_names(part_dir)) == 5)
+        # sources come back: a healthy sync converges, including a removal
+        for p in part_tracks[1:]:
+            os.rename(p + ".gone", p)
+        third = sp.sync_now(conn, part_pl, part_cfg)
+        check("partial: once the share is back the sync is clean again",
+              third["partial"] is False and third["copied"] == 5
+              and len(audio_files(part_dir)) == 5)
+        item_id = conn.execute(
+            "SELECT id FROM playlist_items WHERE playlist_id = ? AND path = ?",
+            (part_pl, part_tracks[0])).fetchone()[0]
+        pl.remove_item(conn, part_pl, item_id)
+        fourth = sp.sync_now(conn, part_pl, part_cfg)
+        check("partial: a REAL removal still prunes once everything is readable",
+              fourth["removed"] == 1 and len(audio_files(part_dir)) == 4)
+
+        # ---- a database that cannot be read is not an empty playlist ------
+        class HalfBrokenConn:
+            """Reads playlist_items like a locked / mid-migration DB would."""
+
+            def __init__(self, real):
+                self._real = real
+
+            def execute(self, sql, *a):
+                if "FROM playlist_items" in sql and sql.strip().upper(
+                ).startswith("SELECT ITEM_TYPE"):
+                    raise sqlite3.OperationalError("database is locked")
+                return self._real.execute(sql, *a)
+
+        before_db = audio_files(part_dir)
+        res = sp.sync_now(HalfBrokenConn(conn), part_pl, part_cfg)
+        check("a locked DB leaves the copy alone instead of pruning it",
+              res.get("kept_existing") is True
+              and audio_files(part_dir) == before_db)
+
         # ---- the ENGINE sees a copy made while it is on air --------------
         # The engine used to scan this folder once, at startup. A playlist set
         # at 09:00 whose copy landed at 09:01 was therefore invisible to a
@@ -316,6 +381,25 @@ def main():
         sp.EMERGENCY_MIRROR.wait(15)
         check("refresh reports a finished job",
               sp.EMERGENCY_MIRROR.status()["state"] == "done")
+
+        # ---- changing / deleting the playlist mid-copy --------------------
+        slow = pl.create_playlist(conn, "Slow Copy")
+        pl.add_items_bulk(conn, slow, [{"path": tracks[2], "title": "c"}])
+        other = pl.create_playlist(conn, "Other Copy")
+        pl.add_items_bulk(conn, other, [{"path": tracks[1], "title": "b"}])
+        client.post("/api/settings/playlists", json={"emergency_playlist_id": slow})
+        client.post("/api/settings/playlists", json={"emergency_playlist_id": other})
+        sp.EMERGENCY_MIRROR.wait(25)
+        st = sp.mirror_status(conn, cfg)
+        check("a playlist changed mid-copy still ends up copied",
+              st["playlist_id"] == other and st["in_sync"] is True)
+        client.post("/api/settings/playlists", json={"emergency_playlist_id": slow})
+        pl.delete_playlist(conn, slow, cfg)      # the Playlists-page delete path
+        sp.EMERGENCY_MIRROR.wait(25)
+        check("deleting the playlist mid-copy leaves no orphan copy",
+              sp.mirror_status(conn, cfg)["mirrored"] == 0)
+        check("and the emergency slot is empty again",
+              sp.get_emergency(conn, cfg)["id"] is None)
 
         r = client.post("/api/settings/playlists", json={"emergency_playlist_id": None})
         check("clearing the emergency playlist wipes its copy",

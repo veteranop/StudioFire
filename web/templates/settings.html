@@ -916,6 +916,9 @@ function renderPlaylists(d) {
       txt = "\u23f3 Copying the playlist to this PC\u2026";
     else if (job.state === "error")
       txt = "The last copy failed: " + (job.message || "unknown error");
+    else if (job.state === "warn")
+      txt = job.message || "Some tracks could not be read; the previous copy " +
+            "was kept.";
     else if (em.dangling_id)
       txt = "No usable emergency playlist, so nothing is keeping the local " +
             "copy up to date.";
