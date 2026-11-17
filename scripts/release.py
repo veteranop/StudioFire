@@ -13,6 +13,9 @@ Steps (stops at the first problem, before changing anything):
   5. Renames the Unreleased section to "## [1.1.0] - <today>", writes
      VERSION, commits "Release v1.1.0", tags v1.1.0, pushes both, and
      creates the GitHub release (needs the `gh` CLI, logged in).
+  6. Publishes the installer's SHA-256 — attached as
+     `StudioFire-Setup-<version>.exe.sha256` and printed in the notes, so an
+     operator can verify the download before running an unsigned .exe.
 
 The VERSION in the tagged commit MUST equal the tag — the updater refuses a
 release where they differ, so always release with this script.
@@ -20,6 +23,7 @@ Developer tool: runs only in a git checkout.
 """
 import argparse
 import datetime
+import hashlib
 import os
 import re
 import subprocess
@@ -110,6 +114,48 @@ def _find_iscc() -> str:
             return cand
     return ""
 
+
+def sha256_of(path: str) -> str:
+    """SHA-256 of a file, streamed — the installer is ~56 MB."""
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def write_checksum(exe: str) -> tuple[str, str]:
+    """Write `<exe>.sha256` beside the installer; return (digest, path).
+
+    The README tells operators they can verify what they are about to run —
+    and for a long time it claimed "checksums are published with each release"
+    while no release carried one (found 2026-11-17). This step is what makes the
+    claim true: the file is attached to the release AND the hash is printed in
+    the notes, because `certutil -hashfile` is the command a Windows operator
+    actually has. The format matches `sha256sum -c`, so the same file verifies
+    on Linux too.
+    """
+    digest = sha256_of(exe)
+    name = os.path.basename(exe)
+    out = exe + ".sha256"
+    with open(out, "w", encoding="ascii", newline="\n") as fh:
+        fh.write(f"{digest}  {name}\n")
+    print(f"[ok] {name}.sha256 — {digest}")
+    return digest, out
+
+
+def checksum_block(digest: str, exe_name: str) -> str:
+    """The release-notes section that makes the installer verifiable."""
+    return (
+        "\n\n---\n\n"
+        f"**Installer SHA-256** (`{exe_name}`): `{digest}`\n\n"
+        f"Verify it before you run it — on Windows, "
+        f"`certutil -hashfile {exe_name} SHA256` should print that same hash. "
+        f"The value is also attached as `{exe_name}.sha256` for "
+        "`sha256sum -c`.\n"
+    )
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("version", help="new version, e.g. 1.1.0")
@@ -189,9 +235,17 @@ def main() -> int:
         f.write(new + "\n")
     try:
         exe = build_installer(new)
+        digest, chk = write_checksum(exe)
     except SystemExit:
         git("checkout", "--", "CHANGELOG.md", "VERSION")
         raise
+
+    # The hash belongs in the notes as well as in the asset: the README points
+    # operators at certutil, and "what you downloaded matches what we published"
+    # is the only claim that makes an unsigned installer reasonable to run.
+    # Deliberately NOT part of new_text — a checksum in CHANGELOG.md would be
+    # wrong the moment the same version is ever rebuilt.
+    notes_with_checksum = notes + checksum_block(digest, os.path.basename(exe))
 
     # 5. commit, tag, push, publish
     git("add", "CHANGELOG.md", "VERSION")
@@ -201,10 +255,10 @@ def main() -> int:
     git("push", "origin", tag)
     with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False,
                                      encoding="utf-8") as nf:
-        nf.write(notes + "\n")
+        nf.write(notes_with_checksum + "\n")
     r = subprocess.run(["gh", "release", "create", tag, "--title",
                         f"StudioFire {tag}", "--notes-file", nf.name,
-                        "--verify-tag", exe], cwd=ROOT)
+                        "--verify-tag", exe, chk], cwd=ROOT)
     os.remove(nf.name)
     if r.returncode != 0:
         fail(f"tag {tag} is pushed but `gh release create` failed — run it "

@@ -54,6 +54,7 @@ jobs:
             "test_pathmap",
             "test_playlists",
             "test_queue_store",
+            "test_release_checksum",
             "test_reporting",
             "test_schedule",
             "test_settings_playlists",

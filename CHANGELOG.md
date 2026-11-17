@@ -7,6 +7,15 @@ plain English a non-technical operator can understand.
 
 ## [Unreleased]
 
+### Added
+- **Every release now publishes a checksum of its installer.** The releases page
+  carries `StudioFire-Setup-<version>.exe.sha256` next to the download, and the same
+  hash is printed in the release notes. Run
+  `certutil -hashfile StudioFire-Setup-<version>.exe SHA256` after downloading and
+  compare — if the two match, the file is exactly the one we built. It matters
+  because the installer is not yet code-signed, so Windows asks you to click past a
+  warning: this is how you check what you are about to run.
+
 ## [1.7.0] - 2026-11-17
 
 ### Added

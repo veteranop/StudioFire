@@ -77,7 +77,8 @@ a local disk or NAS share.
 > code-signed, so Windows will show "Windows protected your PC" on first run.
 > Click **More info → Run anyway**. You can verify what you're running — the
 > installer is built from this repository (`installer/`), and the SHA-256 of the
-> published installer is printed in that release's notes
+> published installer is printed in that release's notes and attached as
+> `StudioFire-Setup-<version>.exe.sha256`
 > (`certutil -hashfile StudioFire-Setup-<version>.exe SHA256`).
 
 Installing from source, running the tests, or building a release yourself:
