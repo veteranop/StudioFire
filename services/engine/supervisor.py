@@ -249,6 +249,15 @@ class EngineSupervisor:
 
         self._emergency_files: list[str] = []
         self._emergency_idx = 0
+        # decode-probe results, keyed by (path, size, mtime): a rescan after
+        # the folder changes must not re-probe every file with mpv (that is a
+        # second of silence per file, and the rescan happens at the worst
+        # possible moment — when the music has already stopped).
+        self._emergency_probe: dict[tuple, bool] = {}
+        # the folder's contents as of the last scan, so a change made while we
+        # are on air is noticed WITHOUT trusting directory timestamps — NTFS
+        # defers those by up to an hour, which would silently defeat this.
+        self._emergency_scan_names: frozenset = frozenset()
         self._stop_after_current = False  # pause when the current song ends
         self._paused = False
         self._last_restart = 0.0
@@ -819,12 +828,21 @@ class EngineSupervisor:
                 continue
             if os.path.splitext(n)[1].lower() not in AUDIO_EXTS:
                 continue  # .gitkeep and friends are not bad assets
-            if probe_decodable(self._mpv_path, p):
+            try:
+                key = (p, os.path.getsize(p), os.path.getmtime(p))
+            except OSError:
+                continue
+            ok = self._emergency_probe.get(key)
+            if ok is None:
+                ok = probe_decodable(self._mpv_path, p)
+                self._emergency_probe[key] = ok
+                if not ok:
+                    self._journal.append("emergency_asset_bad", path=p)
+                    log.error("emergency folder file failed decode probe: %s", p)
+            if ok:
                 files.append(p)
-            else:
-                self._journal.append("emergency_asset_bad", path=p)
-                log.error("emergency folder file failed decode probe: %s", p)
         self._emergency_files = files
+        self._emergency_scan_names = frozenset(names)
         if not files:
             self._journal.append("emergency_folder_empty",
                                  dir=self._emergency_dir)
@@ -837,7 +855,20 @@ class EngineSupervisor:
         """Playable filler, best tier first: curated emergency-folder assets,
         else real music from the precache dir (scanned fresh each time — the
         feeder adds/evicts files constantly, so the startup snapshot model
-        used for the emergency folder doesn't apply)."""
+        used for the emergency folder doesn't apply).
+
+        The emergency folder IS rechecked when it changes: an operator can set
+        an emergency playlist at any hour (Settings > Playlists copies the
+        tracks in from the web service while this engine is on air), and the
+        startup snapshot alone would keep playing — or failing to play — the
+        folder as it looked at boot.
+        """
+        try:                       # cheap: a local listdir of a small folder
+            if (self._emergency_scan_names !=
+                    frozenset(os.listdir(self._emergency_dir))):
+                self._validate_emergency_folder()
+        except OSError:
+            pass
         files = [p for p in self._emergency_files if playable(p)]
         if files:
             return files

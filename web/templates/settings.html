@@ -108,6 +108,39 @@
         <div class="st-flash" id="lst-msg" aria-live="polite"></div>
       </div>
 
+      <div class="st-card" id="pl-card">
+        <div class="st-card-head">
+          <h3>Playlists</h3>
+          <div class="st-tools">
+            <span class="st-saved">&#10003; Changes save automatically</span>
+          </div>
+        </div>
+
+        <div class="st-field" style="max-width:560px;margin-bottom:1.15rem">
+          <label for="pl-default">Default playlist &mdash; the everyday rotation</label>
+          <select id="pl-default"></select>
+          <p class="st-help">What plays day to day. Every scheduled show hands
+            back to this one when it ends. This is the same slot as
+            &ldquo;&#9654; Put on air&rdquo; on the Playlists page.</p>
+          <div class="st-banner st-banner-error" id="pl-default-warn" hidden></div>
+        </div>
+
+        <div class="st-field" style="max-width:560px">
+          <label for="pl-emergency">Emergency playlist &mdash; if the music stops</label>
+          <select id="pl-emergency"></select>
+          <p class="st-help">A copy of this playlist is kept on this PC, so it
+            still plays if the music folder or the network goes away. Leave it
+            blank to let StudioFire fill the emergency folder from the library.</p>
+          <div class="st-banner st-banner-error" id="pl-emergency-warn" hidden></div>
+          <p class="st-help" id="pl-emergency-status"></p>
+          <div class="st-foot">
+            <button class="btn btn-ghost btn-sm" id="pl-emergency-refresh"
+                    onclick="refreshEmergencyCopy()">Refresh the local copy</button>
+          </div>
+        </div>
+        <div class="st-flash" id="pl-msg" aria-live="polite"></div>
+      </div>
+
       <div class="st-card">
         <div class="st-tfrow">
           <div>
@@ -800,6 +833,164 @@ async function saveTimeFormat(fmt) {
   flash("tf-msg", "Saved \u2713");
 }
 
+/* ============================================================ playlists */
+let plPoll = null;
+
+function plBanner(id, text) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.hidden = !text;
+  el.textContent = text || "";
+  if (text) el.className = "st-banner st-banner-error";
+}
+
+function plOptions(sel, list, current, blankLabel) {
+  if (!sel) return;
+  sel.textContent = "";
+  const blank = document.createElement("option");
+  blank.value = "";
+  blank.textContent = blankLabel;
+  sel.appendChild(blank);
+  for (const p of list) {
+    const o = document.createElement("option");
+    o.value = String(p.id);
+    const n = p.tracks || 0;
+    o.textContent = p.name + " \u2014 " +
+      (n ? n + (n === 1 ? " track" : " tracks") : "empty");
+    sel.appendChild(o);
+  }
+  sel.value = (current === null || current === undefined) ? ""
+                                                         : String(current);
+}
+
+function plSize(bytes) {
+  const b = Number(bytes) || 0;
+  if (b >= 1073741824) return (b / 1073741824).toFixed(1) + " GB";
+  if (b >= 1048576) return Math.round(b / 1048576) + " MB";
+  return Math.max(0, Math.round(b / 1024)) + " KB";
+}
+
+function renderPlaylists(d) {
+  const def = d.default || {};
+  const em = d.emergency || {};
+  const m = em.mirror || {};
+  const job = d.mirror_job || {};
+
+  plOptions(document.getElementById("pl-default"), d.playlists || [],
+            def.id, "(none \u2014 no everyday playlist)");
+  plOptions(document.getElementById("pl-emergency"), d.playlists || [],
+            em.id, "(none \u2014 fill from the library)");
+
+  if (def.dangling_id)
+    plBanner("pl-default-warn",
+      "The saved default playlist no longer exists (id " + def.dangling_id +
+      "). Pick one here \u2014 until you do, nothing plays between shows and " +
+      "StudioFire falls back to the emergency filler.");
+  else if (!def.id)
+    plBanner("pl-default-warn",
+      "No default playlist is set. When a scheduled show ends there is " +
+      "nothing to go back to, and the emergency filler takes the air.");
+  else
+    plBanner("pl-default-warn", "");
+
+  if (em.dangling_id)
+    plBanner("pl-emergency-warn",
+      "The saved emergency playlist no longer exists (id " + em.dangling_id +
+      "). Choose another one.");
+  else if (em.id && !m.mirrored)
+    plBanner("pl-emergency-warn",
+      "No local copy yet, so a lost music share would fall through to " +
+      "leftover cached clips. Press \u201cRefresh the local copy\u201d.");
+  else if (em.id && m.playlist_id !== em.id)
+    plBanner("pl-emergency-warn",
+      "The local copy belongs to a different playlist (\u201c" +
+      (m.playlist_name || "unknown") + "\u201d). Press \u201cRefresh the " +
+      "local copy\u201d.");
+  else
+    plBanner("pl-emergency-warn", "");
+
+  const st = document.getElementById("pl-emergency-status");
+  if (st) {
+    let txt;
+    if (job.state === "copying")
+      txt = "\u23f3 Copying the playlist to this PC\u2026";
+    else if (job.state === "error")
+      txt = "The last copy failed: " + (job.message || "unknown error");
+    else if (em.dangling_id)
+      txt = "No usable emergency playlist, so nothing is keeping the local " +
+            "copy up to date.";
+    else if (!em.id)
+      txt = "Nothing set \u2014 StudioFire fills the emergency folder from " +
+            "the library on this PC.";
+    else {
+      txt = "Local copy: " + (m.mirrored || 0) + " track(s), " +
+            plSize(m.bytes);
+      if (m.truncated)
+        txt += " (stopped at the " + plSize(m.max_bytes) + " limit)";
+      if (m.synced_at)
+        txt += " \u2014 copied " +
+               new Date(m.synced_at * 1000).toLocaleString();
+      if ((m.curated || []).length)
+        txt += ". " + m.curated.length + " of your own file(s) in that " +
+               "folder are left alone";
+    }
+    st.textContent = txt;
+    st.className = "st-help" + (job.state === "error" ? " tile-red-text" : "");
+  }
+
+  const rf = document.getElementById("pl-emergency-refresh");
+  if (rf) rf.disabled = !em.id || job.state === "copying";
+
+  if (job.state === "copying" && !plPoll)
+    plPoll = setInterval(loadPlaylists, 2500);
+  if (job.state !== "copying" && plPoll) { clearInterval(plPoll); plPoll = null; }
+}
+
+async function loadPlaylists() {
+  if (!document.getElementById("pl-default")) return;
+  try {
+    const r = await fetch("/api/settings/playlists", {cache: "no-store"});
+    if (!r.ok) return;
+    renderPlaylists(await r.json());
+  } catch (e) { /* the rest of the page works without this card */ }
+}
+
+async function savePlaylistSlot(key, value) {
+  const body = {};
+  body[key] = value === "" ? null : Number(value);
+  const r = await fetch("/api/settings/playlists", {method: "POST",
+    headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    flash("pl-msg", d.detail || "Could not save that.", true);
+    loadPlaylists();
+    return;
+  }
+  renderPlaylists(d);
+  if (key === "default_playlist_id")
+    flash("pl-msg", "Saved \u2014 that playlist is now the everyday rotation.");
+  else if (value === "")
+    flash("pl-msg", "Emergency playlist cleared.");
+  else
+    flash("pl-msg", "Saved \u2014 copying the playlist to this PC\u2026");
+}
+
+document.getElementById("pl-default") &&
+  document.getElementById("pl-default").addEventListener("change", e =>
+    savePlaylistSlot("default_playlist_id", e.target.value));
+document.getElementById("pl-emergency") &&
+  document.getElementById("pl-emergency").addEventListener("change", e =>
+    savePlaylistSlot("emergency_playlist_id", e.target.value));
+
+async function refreshEmergencyCopy() {
+  flash("pl-msg", "Refreshing the local emergency copy\u2026");
+  const r = await fetch("/api/settings/playlists/emergency/refresh",
+                        {method: "POST"});
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) { flash("pl-msg", d.detail || "Could not refresh.", true); return; }
+  renderPlaylists(d);
+}
+
 /* ============================================================ devices */
 let devices = [];
 
@@ -1483,6 +1674,7 @@ document.getElementById("sup-contact") &&
 /* ============================================================ boot */
 stShow(stGroupFromHash(), false);
 loadDirs();
+loadPlaylists();
 loadSupportContact();
 loadStreaming();
 loadUsers();

@@ -932,6 +932,10 @@ select {
                   color: var(--muted); margin: 0 0 .3rem; }
 .st-field input { width: 100%; margin: 0; font-size: .92rem; padding: .5rem .65rem;
                   border-radius: 8px; }
+/* a field's <select> must fill the field like an <input> does, or the Settings
+   pickers render as a narrow box next to full-width text boxes */
+.st-field select { width: 100%; margin: 0; font-size: .92rem;
+                   padding: .5rem .65rem; border-radius: 8px; }
 .st-field input.missing { border-color: #a97b1e;
                           box-shadow: 0 0 0 1px rgba(214, 158, 46, .35); }
 .st-field .st-help { text-transform: none; letter-spacing: 0; font-weight: 400;

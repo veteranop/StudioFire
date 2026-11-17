@@ -7,6 +7,32 @@ plain English a non-technical operator can understand.
 
 ## [Unreleased]
 
+### Added
+- **Settings now has a Playlists card: set the everyday playlist and the emergency
+  playlist in one place.** The first picker is the default rotation — the playlist that
+  is always on air and that every scheduled show hands back to when it ends (the same
+  slot as "Put on air" on the Playlists page, so the two can never disagree). If that
+  slot is ever empty, the card says so in red instead of the On Air screen showing a
+  blank with no explanation.
+- **An emergency playlist that keeps its own local copy.** Pick a playlist under
+  "Emergency playlist — if the music stops" and StudioFire copies its tracks onto the
+  PC, so if the music folder or the network goes away the station plays real music
+  instead of leftover cached clips. The copy is capped at 2 GB / 500 files, your own
+  files in that folder are never touched or overwritten, and the card shows how many
+  tracks are copied and when. "Refresh the local copy" re-copies after you edit the
+  playlist.
+
+### Fixed
+- **Deleting a playlist can no longer leave the station pointing at nothing.** A
+  deleted playlist that happened to be the everyday rotation left an empty slot
+  behind — which is how one station aired an hour and a half of public-service
+  announcements with nothing on screen to explain it. Deleting a playlist now clears
+  both slots and removes its local emergency copy.
+- **A newly copied emergency playlist is used straight away.** The audio engine only
+  read the emergency folder when it started, so a copy made while the station was on
+  air stayed invisible until a restart. It now notices the folder changing, without
+  re-probing every file.
+
 ## [1.6.6] - 2026-11-10
 
 ### Fixed

@@ -110,9 +110,19 @@ def rename_playlist(conn: sqlite3.Connection, pid: int, name: str) -> None:
                      "WHERE id = ?", (name, time.time(), pid))
 
 
-def delete_playlist(conn: sqlite3.Connection, pid: int) -> None:
+def delete_playlist(conn: sqlite3.Connection, pid: int,
+                    cfg: dict | None = None) -> None:
     with conn:
         conn.execute("DELETE FROM playlists WHERE id = ?", (pid,))
+    # A deleted playlist must not leave a dangling reference behind: that is
+    # exactly what put 1h41m of PSA filler on air at KDPI (M2632102 — the base
+    # rotation kept pointing at a playlist that no longer existed, the On Air
+    # page showed an empty slot, and nothing said why).
+    try:
+        from . import settings_playlists as sp
+        sp.clear_references(conn, pid, cfg)
+    except Exception:                     # noqa: BLE001 — never block the delete
+        log.exception("could not clear playlist references for %s", pid)
 
 
 def duplicate_playlist(conn: sqlite3.Connection, pid: int, name: str) -> int:
@@ -929,7 +939,7 @@ def register(app: FastAPI) -> None:
     @app.delete("/api/playlists/{pid}")
     def api_delete(pid: int, conn=Depends(get_conn), _=Depends(api_user)):
         row = _playlist_or_404(conn, pid)
-        delete_playlist(conn, pid)
+        delete_playlist(conn, pid, app.state.cfg)
         # Zara-style: deleting the playlist deletes its .lst file
         src = row["source_path"] if "source_path" in row.keys() else None
         if src:

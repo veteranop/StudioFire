@@ -605,6 +605,22 @@ def create_app(cfg: dict) -> FastAPI:
     def _start_pinger():
         pinger.start()
 
+    @app.on_event("startup")
+    def _check_emergency_copy():
+        """An emergency playlist with no local copy is the same as no emergency
+        playlist at all — the failover tier would fall through to leftover
+        precache (the KDPI PSA loop, M2632102). Refresh a missing/stale copy
+        once, in the background, and never block startup for it."""
+        from . import settings_playlists as sp
+        try:
+            conn = db.connect(cfg["db_path"])
+            try:
+                sp.startup_sync(conn, cfg)
+            finally:
+                conn.close()
+        except Exception:                 # noqa: BLE001 — startup is sacred
+            log.exception("emergency mirror startup check failed")
+
     @app.on_event("shutdown")
     def _stop_pinger():
         pinger.stop()
@@ -1280,10 +1296,11 @@ def create_app(cfg: dict) -> FastAPI:
                 "first_weekday": datetime.date(y, m, 1).weekday(),
                 "base": base, "days": days}
 
-    from . import duplicates, engine_bridge, playlists, streaming
+    from . import duplicates, engine_bridge, playlists, settings_playlists, streaming
     playlists.register(app)
     engine_bridge.register(app)
     duplicates.register(app)
     streaming.register(app)      # Settings > Streaming: config + live monitor
+    settings_playlists.register(app)   # Settings > Playlists: default + emergency
 
     return app
