@@ -76,8 +76,9 @@ a local disk or NAS share.
 > **A note on the Windows SmartScreen warning:** the installer is not yet
 > code-signed, so Windows will show "Windows protected your PC" on first run.
 > Click **More info → Run anyway**. You can verify what you're running — the
-> installer is built from this repository (`installer/`), and checksums are
-> published with each release.
+> installer is built from this repository (`installer/`), and the SHA-256 of the
+> published installer is printed in that release's notes
+> (`certutil -hashfile StudioFire-Setup-<version>.exe SHA256`).
 
 Installing from source, running the tests, or building a release yourself:
 see [docs/DEVELOPING.md](docs/DEVELOPING.md).
