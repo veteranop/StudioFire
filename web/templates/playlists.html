@@ -337,6 +337,10 @@ function renderMissing() {
       : "<div class='st-banner st-banner-warn'><strong>Can’t reach the music " +
         "library.</strong> These are the last known results — nothing has been " +
         "deleted, so check the share before doing anything else.</div>") +
+    "<div class='row' style='margin:.5rem 0 0'>" +
+      "<input id='miss-q' placeholder='Find a song or folder…' " +
+      "oninput='filterMissing()' autocomplete='off'>" +
+    "</div>" +
     "<p class='st-help'>" + (d.moved_hints
       ? d.moved_hints + " of these look like they moved, and the new location is " +
         "named on the row. Use Tools → Fix broken paths to re-point them."
@@ -353,15 +357,16 @@ function renderMissing() {
     return;
   }
 
+  let opened = 0;
   for (const g of groups) {
-    const card = document.createElement("div");
-    card.className = "st-card";
-    card.innerHTML = "<div class='st-card-head'><h3>" + g.files.length +
-      " file(s)</h3></div>";
-    const folder = document.createElement("p");
-    folder.className = "miss-folder";
-    folder.textContent = g.folder;
-    card.appendChild(folder);
+    const card = document.createElement("details");
+    card.className = "st-card miss-group";
+    if (opened++ < 3) card.open = true;      // the worst three, open by default
+    const sum = document.createElement("summary");
+    sum.className = "miss-sum";
+    sum.innerHTML = "<strong>" + g.files.length + " file(s)</strong> " +
+      "<span class='miss-folder'>" + esc(g.folder) + "</span>";
+    card.appendChild(sum);
     const ul = document.createElement("ul");
     ul.className = "miss-list";
     for (const f of g.files) {
@@ -383,6 +388,21 @@ function renderMissing() {
     }
     card.appendChild(ul);
     body.appendChild(card);
+  }
+}
+
+// find one song in a long list (client-side: the data is already here)
+function filterMissing() {
+  const q = (document.getElementById("miss-q").value || "").toLowerCase().trim();
+  for (const g of document.querySelectorAll(".miss-group")) {
+    let hits = 0;
+    for (const li of g.querySelectorAll("li")) {
+      const hit = !q || li.textContent.toLowerCase().includes(q);
+      li.hidden = !hit;
+      if (hit) hits++;
+    }
+    g.hidden = !hits;
+    if (q && hits) g.open = true;
   }
 }
 

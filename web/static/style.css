@@ -1154,3 +1154,24 @@ dialog.sf-picker::backdrop { background: rgba(6, 9, 13, .68); }
 .editlist li.item-unknown { opacity: .85; }
 .editlist li.item-missing .item-label strong { text-decoration: line-through;
                                                 text-decoration-color: #ff8a8a; }
+
+/* the all-playlists table needs room between columns: it is the one table with
+   eight columns and its headers were running together */
+.pl-table th { padding: .15rem .7rem .55rem; font-size: .7rem; font-weight: 700;
+               letter-spacing: .05em; text-transform: uppercase;
+               color: var(--muted); text-align: left; white-space: nowrap; }
+.pl-table th.num { text-align: right; }
+.pl-table td { padding: .55rem .7rem; }
+.pl-table td.st-name { min-width: 15rem; }
+.pl-table td.st-name a { font-weight: 650; }
+.pl-table td:nth-last-child(1), .pl-table td:nth-last-child(2) { white-space: nowrap; }
+
+/* collapsible folder groups in Missing files + the search box */
+.miss-group { padding: .2rem .9rem .6rem; }
+.miss-sum { cursor: pointer; list-style: none; display: flex; gap: .6rem;
+            align-items: baseline; padding: .55rem 0; }
+.miss-sum::-webkit-details-marker { display: none; }
+.miss-sum:before { content: "▸"; color: var(--muted); font-size: .8rem; }
+.miss-group[open] > .miss-sum:before { content: "▾"; }
+.miss-sum .miss-folder { margin: 0; flex: 1 1 auto; }
+#miss-q { width: 100%; max-width: 30rem; }
