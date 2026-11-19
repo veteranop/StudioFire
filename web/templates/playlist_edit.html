@@ -370,12 +370,29 @@ function searchLib() {
       "/api/library/search?q=" + encodeURIComponent(q))).json();
     if (!rows.length)
       ul.innerHTML = "<li class='muted'>No matches</li>";
+    // the index lists files it has proved are gone (so a wrongly-flagged one
+    // is still findable) — say so on the row, or an operator adds one and it
+    // comes in dead with no explanation
+    const gone = rows.filter(t => t.missing).length;
+    if (gone) {
+      const note = document.createElement("li");
+      note.className = "res-note";
+      note.innerHTML = "<strong>" + gone + " of these " + rows.length +
+        " match(es) are not in the library.</strong> The index says the file " +
+        "is gone, so adding one puts it in the playlist but it will be " +
+        "skipped on air until the file is back.";
+      ul.appendChild(note);
+    }
     for (const t of rows) {
       const li = document.createElement("li");
+      if (t.missing) li.classList.add("res-missing");
       const label = (t.artist ? t.artist + " — " : "") + (t.title || t.path);
       const btn = document.createElement("button");
-      btn.className = "btn btn-sm btn-green";
-      btn.textContent = "+ Add";
+      btn.className = "btn btn-sm " + (t.missing ? "btn-yellow" : "btn-green");
+      btn.textContent = t.missing ? "+ Add anyway" : "+ Add";
+      if (t.missing)
+        btn.title = "The library index says this file is gone — it will be " +
+                     "skipped on air until it is restored";
       btn.onclick = async () => {
         if (await addItem("file", t.path, label)) btn.textContent = "✓ Added";
       };
@@ -385,7 +402,13 @@ function searchLib() {
       cue.title = "Play this right after the current song";
       cue.onclick = () => playNext(t.path, label, cue);
       const span = document.createElement("span");
-      span.textContent = label;
+      span.textContent = label + " ";
+      if (t.missing) {
+        const tag = document.createElement("span");
+        tag.className = "miss-tag is-bad";
+        tag.textContent = "not in library";
+        span.appendChild(tag);
+      }
       li.append(btn, cue, span);
       ul.appendChild(li);
     }

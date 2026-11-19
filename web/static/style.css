@@ -1196,3 +1196,10 @@ dialog.sf-picker::backdrop { background: rgba(6, 9, 13, .68); }
 .skip-clickable { cursor: pointer; }
 .skip-clickable:hover { filter: brightness(1.06); }
 .skip-open { color: #ffd9d9; font-weight: 650; white-space: nowrap; }
+
+/* "Find songs": a result the index has proved gone is marked, not disguised */
+.res-note { font-size: .82rem; color: #ffe6b0; background: rgba(214, 158, 46, .12);
+            border-left: 3px solid #e7b955; border-radius: 8px;
+            padding: .5rem .6rem; margin-bottom: .5rem; line-height: 1.4; }
+.res-note strong { color: #fff; }
+.res-missing span { color: var(--muted); }
