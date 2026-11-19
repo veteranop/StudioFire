@@ -233,6 +233,37 @@ def main():
               and set(r.json()["flags"].values()) <= {"playable", "missing",
                                                       "not_indexed"})
 
+        # ---- 8c. the index must not offer what is not there --------------
+        track(conn, os.path.join(lib, "Alpha", "phantom.mp3"), missing=0)
+        r = client.get("/api/library/search?q=gone.mp3")
+        d = r.json()
+        check("search leaves out a file the index marks missing",
+              all(x["path"] != os.path.join(lib, "Alpha", "gone.mp3")
+                  for x in d["results"])
+              and d["missing_matches"] >= 1, str(d)[:140])
+
+        r = client.get("/api/library/search?q=one.mp3")
+        d = r.json()
+        check("...and still finds the ones that are there",
+              len(d["results"]) >= 1 and "missing_matches" in d, str(d)[:80])
+
+        # adding a file the index claims is present but the disk has lost must be
+        # refused AND must correct the index
+        r = client.post(f"/api/playlists/{keep}/items",
+                        json={"item_type": "file",
+                              "path": os.path.join(lib, "Alpha", "phantom.mp3")})
+        check("adding a file that is gone is refused", r.status_code == 409,
+              str(r.status_code))
+        row = conn.execute("SELECT missing FROM tracks WHERE path = ?",
+                           (os.path.join(lib, "Alpha", "phantom.mp3"),)).fetchone()
+        check("...and the index row is corrected to missing", row and row[0] == 1,
+              str(dict(row) if row else None))
+
+        r = client.post(f"/api/playlists/{keep}/items",
+                        json={"item_type": "file", "path": present})
+        check("adding a file that IS there still works", r.status_code == 201,
+              str(r.status_code))
+
         conn.close()
 
     print(f"LIBRARY HEALTH OK ({passed} checks)")

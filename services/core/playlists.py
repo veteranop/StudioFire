@@ -977,6 +977,21 @@ def register(app: FastAPI) -> None:
         _playlist_or_404(conn, pid)
         if body.item_type not in ITEM_TYPES:
             raise HTTPException(400, f"item_type must be one of {ITEM_TYPES}")
+        # A file added from the index must still be ON the library: the index
+        # can be minutes stale, and a playlist row for a file that has gone is
+        # skipped the first time the list plays. One stat, only while the
+        # library root answers — an offline share must never block an edit.
+        if body.item_type == "file":
+            root = (app.state.cfg.get("nas_music_root") or "").strip()
+            if root and os.path.isdir(alias_path(root)) \
+                    and not os.path.isfile(alias_path(body.path)):
+                with conn:
+                    conn.execute("UPDATE tracks SET missing = 1 "
+                                 "WHERE path = ? AND missing = 0",
+                                 (body.path,))
+                raise HTTPException(
+                    409, "that file is not in the library any more "
+                         "(the index has been corrected)")
         dur = body.duration_sec
         if body.item_type == "file" and not dur:
             dur = probe_duration(conn, body.path)

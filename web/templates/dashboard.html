@@ -583,17 +583,33 @@ async function stopShow() {
 // ---- Global library search: find any song and drop it in live (one-off)
 let libTimer = null;
 function libSearchInput() { clearTimeout(libTimer); libTimer = setTimeout(doLibSearch, 250); }
+let libGone = 0;                    // matches the index has but the library does not
 async function doLibSearch() {
   const q = document.getElementById("lib-search").value.trim();
   const ol = document.getElementById("lib-results");
   if (!q) { ol.innerHTML = ""; return; }
   let rows;
   try {
-    rows = await (await fetch("/api/library/search?q=" +
+    const payload = await (await fetch("/api/library/search?q=" +
       encodeURIComponent(q))).json();
+    rows = payload.results || [];
+    libGone = payload.missing_matches || 0;
   } catch (e) { return; }
   ol.innerHTML = "";
-  if (!rows.length) { ol.innerHTML = "<li class='muted'>No matches</li>"; return; }
+  if (!rows.length) {
+    ol.innerHTML = libGone
+      ? "<li class='muted'>Nothing you can play: " + libGone +
+        " match(es) are not in the library any more.</li>"
+      : "<li class='muted'>No matches</li>";
+    return;
+  }
+  if (libGone) {
+    const note = document.createElement("li");
+    note.className = "res-note";
+    note.textContent = libGone + " more match(es) are not in the library " +
+      "and are not listed.";
+    ol.appendChild(note);
+  }
   for (const t of rows) {
     const li = document.createElement("li");
     const info = document.createElement("span");

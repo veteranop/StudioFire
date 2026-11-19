@@ -366,33 +366,32 @@ function searchLib() {
     const ul = document.getElementById("results");
     ul.innerHTML = "";
     if (!q) return;
-    const rows = await (await fetch(
+    const payload = await (await fetch(
       "/api/library/search?q=" + encodeURIComponent(q))).json();
+    const rows = payload.results || [];
+    const goneN = payload.missing_matches || 0;
     if (!rows.length)
-      ul.innerHTML = "<li class='muted'>No matches</li>";
-    // the index lists files it has proved are gone (so a wrongly-flagged one
-    // is still findable) — say so on the row, or an operator adds one and it
-    // comes in dead with no explanation
-    const gone = rows.filter(t => t.missing).length;
-    if (gone) {
+      ul.innerHTML = goneN
+        ? "<li class='muted'>Nothing you can add: " + goneN +
+          " match(es) in the index are not in the library any more.</li>"
+        : "<li class='muted'>No matches</li>";
+    // results are present files only; say how many matches the index has
+    // but the library does not, so a search for a gone album is not silent
+    if (goneN) {
       const note = document.createElement("li");
       note.className = "res-note";
-      note.innerHTML = "<strong>" + gone + " of these " + rows.length +
-        " match(es) are not in the library.</strong> The index says the file " +
-        "is gone, so adding one puts it in the playlist but it will be " +
-        "skipped on air until the file is back.";
+      note.innerHTML = "<strong>" + goneN + " more match(es) are not in " +
+        "the library.</strong> They are not listed because the files are " +
+        "gone — restore them (NAS recycle bin) and rescan, then they come " +
+        "back here.";
       ul.appendChild(note);
     }
     for (const t of rows) {
       const li = document.createElement("li");
-      if (t.missing) li.classList.add("res-missing");
       const label = (t.artist ? t.artist + " — " : "") + (t.title || t.path);
       const btn = document.createElement("button");
-      btn.className = "btn btn-sm " + (t.missing ? "btn-yellow" : "btn-green");
-      btn.textContent = t.missing ? "+ Add anyway" : "+ Add";
-      if (t.missing)
-        btn.title = "The library index says this file is gone — it will be " +
-                     "skipped on air until it is restored";
+      btn.className = "btn btn-sm btn-green";
+      btn.textContent = "+ Add";
       btn.onclick = async () => {
         if (await addItem("file", t.path, label)) btn.textContent = "✓ Added";
       };
@@ -402,13 +401,7 @@ function searchLib() {
       cue.title = "Play this right after the current song";
       cue.onclick = () => playNext(t.path, label, cue);
       const span = document.createElement("span");
-      span.textContent = label + " ";
-      if (t.missing) {
-        const tag = document.createElement("span");
-        tag.className = "miss-tag is-bad";
-        tag.textContent = "not in library";
-        span.appendChild(tag);
-      }
+      span.textContent = label;
       li.append(btn, cue, span);
       ul.appendChild(li);
     }

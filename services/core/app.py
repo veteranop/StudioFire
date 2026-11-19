@@ -911,20 +911,29 @@ def create_app(cfg: dict) -> FastAPI:
     @app.get("/api/library/search")
     def library_search(q: str = "", conn=Depends(get_conn),
                        _=Depends(api_user)):
+        """Songs you can actually put in a playlist — present files only.
+
+        The index keeps a row for a file that has gone (that is how "missing"
+        works, and it is what lets a restore be recognised), but offering those
+        as addable is a lie: the operator adds one and it is skipped on air the
+        first time the playlist plays (Mark, 2026-11-19, "A Perfect Circle").
+        `missing_matches` says how many were left out, so a search for an artist
+        whose folder has gone still tells the truth instead of looking empty.
+        """
         q = q.strip()
         if not q:
-            return []
+            return {"results": [], "missing_matches": 0}
         like = f"%{q}%"
-        # Include tracks currently flagged missing (marked offline) so the whole
-        # indexed library — including subfolders — is findable even when a flaky
-        # NAS scan wrongly flagged some. Present tracks are listed first.
+        where = "(title LIKE ? OR artist LIKE ? OR album LIKE ? OR path LIKE ?)"
         rows = conn.execute(
             "SELECT id, path, title, artist, album, duration_sec, missing "
-            "FROM tracks WHERE "
-            "  (title LIKE ? OR artist LIKE ? OR album LIKE ? OR path LIKE ?) "
-            "ORDER BY missing ASC, artist, title LIMIT 60",
+            f"FROM tracks WHERE {where} AND missing = 0 "
+            "ORDER BY artist, title LIMIT 60",
             (like, like, like, like)).fetchall()
-        return [dict(r) for r in rows]
+        gone = conn.execute(
+            f"SELECT COUNT(*) FROM tracks WHERE {where} AND missing = 1",
+            (like, like, like, like)).fetchone()[0]
+        return {"results": [dict(r) for r in rows], "missing_matches": gone}
 
     # ---- reports: as-aired / spot playout / proof of performance
     def _report_rows(conn, start: str, end: str, kind: str) -> list[dict]:
