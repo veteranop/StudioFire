@@ -375,6 +375,7 @@ function searchLib() {
         ? "<li class='muted'>Nothing you can add: " + goneN +
           " match(es) in the index are not in the library any more.</li>"
         : "<li class='muted'>No matches</li>";
+    if (!rows.length) return;   // one message, not the list note as well
     // results are present files only; say how many matches the index has
     // but the library does not, so a search for a gone album is not silent
     if (goneN) {
