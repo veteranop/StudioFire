@@ -403,6 +403,16 @@ input {
   white-space: normal;
 }
 .spot-when { color: #7fb2ff; font-weight: 700; }
+/* a HELD spot clock (the station is paused): a live DJ has the air, so the
+   countdown is frozen rather than ticking to a spot that cannot air */
+.spot-held { color: #ffcf70; font-weight: 700; }
+.spot-held-note {
+  margin: .5rem 0 .35rem; padding: .6rem .75rem; border-radius: 10px;
+  background: #3d3014; border-left: 4px solid #ffcf70; color: #ffe6b0;
+  font-size: .92rem; line-height: 1.35;
+}
+.spot-held-note[hidden] { display: none; }
+.spot-held-note strong { color: #fff; }
 .next-when { color: #7ee2a8; font-weight: 700; }
 #sched-now { overflow-wrap: anywhere; }
 #sched-now { line-height: 1.5; }

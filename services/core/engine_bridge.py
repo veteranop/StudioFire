@@ -873,6 +873,64 @@ class Feeder:
                     (entry.get("title") or "")[:60], self.PIN_GRACE_SEC)
         return True
 
+    def _spot_clock(self, conn, status, now: float) -> bool:
+        """Hold the spot clock while the station is paused. True = held.
+
+        Pausing is how the studio hands the air to a live DJ: they plug a
+        laptop into the board, run their own show, then hand back. Wall time
+        keeps passing, so before this the ad/ID rotation kept firing in the
+        background — the spots were inserted into P1's queue and had nowhere
+        to drain, then aired back to back the moment playback resumed (Mark,
+        2026-11-19: a one-hour show came back to four ads at a 15-minute
+        interval).
+
+        Nothing fires while held. The paused instant is persisted in
+        feeder_state, so a core restart in the middle of the show does not
+        lose it, and on the first tick that sees playback again every interval
+        rule's baseline is pushed forward by the held duration — each countdown
+        continues from where it stopped instead of owing the pause away.
+        """
+        with self._lock:
+            st = self._load_state(conn)
+            since = st.get("pause_since")
+            if status.get("paused"):
+                if since is None:
+                    st["pause_since"] = float(now)
+                    self._save_state(conn, st)
+                    log.info("spots: the station is paused — spot clock held; "
+                             "nothing fires and no timers advance")
+                return True
+            if since is None:
+                return False
+            st.pop("pause_since", None)
+            self._save_state(conn, st)
+        try:
+            held = max(0.0, float(now) - float(since))
+        except (TypeError, ValueError):
+            held = 0.0
+        moved = spotmod.shift_interval_baselines(conn, held)
+        log.info("spots: playback resumed after %.0fs paused — %d interval "
+                 "rule(s) continue where they stopped", held, moved)
+        return False
+
+    def spot_clock_held(self, conn, status=None) -> float | None:
+        """The instant the spot clock stopped, or None when it is running.
+
+        Read-only view for the UI: while the station is paused the Spots card
+        must show a frozen countdown rather than ticking to "now" for a spot
+        that cannot air. Falls back to `now` when the pause has not been
+        observed by a feeder tick yet (at most FEED_TICK_SEC).
+        """
+        if status is None:
+            status = self.engine.status() or {}
+        if not status.get("paused"):
+            return None
+        since = self._load_state(conn).get("pause_since")
+        try:
+            return float(since) if since is not None else time.time()
+        except (TypeError, ValueError):
+            return time.time()
+
     def fire_due_spots(self, conn) -> None:
         """Called every tick: fire any spot rule that is due (all trigger
         types except manual). Spots play everywhere, shows included.
@@ -884,10 +942,15 @@ class Feeder:
         Each retry goes through insert_spot, which re-enters self._lock —
         safe, it's an RLock."""
         status = self.engine.status()
-        if status is None or not status.get("now_playing") \
-                or status.get("emergency_mode"):
-            return  # nothing airing / in failover — don't inject
+        if status is None:
+            return
         now = time.time()
+        # paused = a live DJ has the air: the spot clock is held, and nothing
+        # may be queued for a station that is not playing (see _spot_clock).
+        if self._spot_clock(conn, status, now):
+            return
+        if not status.get("now_playing") or status.get("emergency_mode"):
+            return  # nothing airing / in failover — don't inject
         for rule in spotmod.list_enabled(conn):
             if rule["trigger"] == "manual" or not spotmod.due(rule, now):
                 continue
@@ -1842,9 +1905,19 @@ def register(app: FastAPI) -> None:
     @app.get("/api/spots")
     def api_spots(conn=Depends(get_conn), _=Depends(api_user)):
         now = time.time()
+        # While the station is paused — a live DJ is on the board — the spot
+        # clock is held: nothing fires and no timer advances (Feeder._spot_clock).
+        # Report the countdown frozen at the instant it stopped instead of
+        # letting it tick to "now" for a spot that cannot air, so the operator
+        # can see exactly what is left when they go back on air.
+        held_since = feeder.spot_clock_held(conn)
         rules = []
         for r in spotmod.list_all(conn):
             _kind = spotmod.rule_kind(conn, r)
+            held_left = None
+            if held_since is not None:
+                at = spotmod.next_fire_epoch(r, held_since)
+                held_left = None if at is None else max(0.0, at - held_since)
             rules.append({
                 "id": r["id"], "folder_key": r["folder_key"],
                 "file_path": r["file_path"],
@@ -1858,10 +1931,13 @@ def register(app: FastAPI) -> None:
                 # underwriting: the UI can mark those, and deleting the last
                 # one needs a typed confirm.
                 "kind": _kind, "protected": _kind is not None,
-                "next_epoch": spotmod.next_fire_epoch(r, now)})
+                "next_epoch": spotmod.next_fire_epoch(r, now),
+                # seconds left on a held clock (None = timer running)
+                "held_remaining": held_left})
         # soonest first; manual/disabled (next_epoch None) sink to the bottom
         rules.sort(key=lambda x: (x["next_epoch"] is None, x["next_epoch"] or 0))
-        return {"now_epoch": now, "rules": rules}
+        return {"now_epoch": now, "paused": held_since is not None,
+                "paused_since": held_since, "rules": rules}
 
     @app.post("/api/spots", status_code=201)
     def api_spots_add(body: dict, conn=Depends(get_conn), _=Depends(api_user)):

@@ -280,6 +280,37 @@ def mark_fired(conn: sqlite3.Connection, rule: dict, now: float) -> None:
                          (now, rule["id"]))
 
 
+def shift_interval_baselines(conn: sqlite3.Connection, delta_sec: float) -> int:
+    """Push every interval rule's countdown forward by `delta_sec`.
+
+    Called when the station comes back from a pause. A paused station keeps
+    reporting a current song, so the elapsed intervals used to be counted
+    against it: a 15-minute ad rotation held for an hour came back four spots
+    overdue and played them back to back the instant playback resumed — which
+    is exactly what an operator sees after a live DJ show hands the air back
+    (Mark, 2026-11-19). Moving the baseline forward is the clock equivalent of
+    pausing a stopwatch: the remaining time to the next spot is preserved
+    exactly, and nothing is owed.
+
+    Only `interval` rules move. `clock` / `daily` / `weekly` are anchored to
+    wall-clock time (a :00 legal ID belongs at :00, never 47 minutes late) and
+    `once` is a single scheduled moment, so catching those up would be wrong
+    even after a pause. Returns the number of rules moved.
+    """
+    try:
+        delta = float(delta_sec)
+    except (TypeError, ValueError):
+        return 0
+    if delta < 1:
+        return 0   # a blip (a pause shorter than a tick) is not worth a write
+    with conn:
+        cur = conn.execute(
+            "UPDATE spot_rules SET last_fired = "
+            "  COALESCE(last_fired, created_at) + ? "
+            "WHERE trigger = 'interval' AND deleted_at IS NULL", (delta,))
+    return cur.rowcount or 0
+
+
 # ------------------------------------------------------------------- timing
 
 def _in_window(rule: dict, now: float) -> bool:

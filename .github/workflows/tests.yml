@@ -60,6 +60,7 @@ jobs:
             "test_settings_playlists",
             "test_setup_wizard",
             "test_spot_guardrails",
+            "test_spot_pause",
             "test_spots",
             "test_status_verdict",
             "test_streaming_settings",

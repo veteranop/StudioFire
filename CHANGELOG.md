@@ -16,6 +16,21 @@ plain English a non-technical operator can understand.
   because the installer is not yet code-signed, so Windows asks you to click past a
   warning: this is how you check what you are about to run.
 
+### Fixed
+- **Pausing the station now pauses the spot timers too.** A DJ plugs a
+  laptop into the board and runs their own show with StudioFire paused, then
+  hands the air back. Before this, the ads and IDs that came due during the
+  show were queued up in the background and played back to back on resume —
+  an hour off air meant four spots in a row at a 15-minute interval. Pausing
+  now stops the spot clock as well as the audio: nothing is queued while you
+  are off air, and each timer carries on from where it stopped when you go
+  back on air, so the wait for the next spot is exactly what it was when you
+  paused. The Upcoming spots card shows a held timer as "held — in 8m"
+  instead of counting down. Spots set to a time of day still follow the clock
+  (a :00 legal ID belongs at :00, so a show spanning it is not ours to air),
+  and a one-off spot whose time passed while paused still airs once when
+  playback resumes.
+
 ## [1.7.0] - 2026-11-17
 
 ### Added

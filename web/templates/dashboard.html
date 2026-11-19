@@ -104,6 +104,10 @@
   <div class="card">
     <h2>Upcoming spots</h2>
     <div id="spot-empty-banner" class="alert-banner" hidden></div>
+    <div id="spot-held-note" class="spot-held-note" hidden>
+      <strong>The station is paused, so spot timers are held.</strong>
+      Nothing fires and nothing stacks up — each timer carries on from where
+      it stopped when you go back on air.</div>
     <input type="text" id="spot-search" class="rot-search" autocomplete="off"
            placeholder="Search spots by name…" oninput="renderSpots()">
     <ol id="spot-list" class="schedlist"><li class="muted">loading…</li></ol>
@@ -660,6 +664,8 @@ async function refreshHistory() {
 // ---- spots: station IDs / ads / jingles / PSAs between songs
 let spotRules = [];
 let spotSkew = 0;   // server_epoch - client_epoch, to align countdowns
+let spotsHeld = false;  // the station is paused -> the spot clock is held
+                        // (nothing fires, no timer advances; see /api/spots)
 function spotTriggerChange() {
   const t = document.getElementById("spot-trigger").value;
   document.getElementById("spot-p-interval").hidden = t !== "interval";
@@ -708,11 +714,20 @@ function fmtCountdown(next) {
   return "in " + Math.floor(rem / 3600) + "h " +
          Math.floor((rem % 3600) / 60) + "m";
 }
+function fmtHeld(sec) {
+  // seconds left on a HELD clock: shown, never counted down (it is frozen)
+  const rem = Math.max(0, Math.round(sec || 0));
+  if (rem < 60) return "under a minute";
+  if (rem < 3600) return "in " + fmt(rem);
+  return "in " + Math.floor(rem / 3600) + "h " +
+         Math.floor((rem % 3600) / 60) + "m";
+}
 async function refreshSpots() {
   try {
     const d = await (await fetch("/api/spots")).json();
     spotSkew = d.now_epoch - (Date.now() / 1000);
     spotRules = d.rules;
+    spotsHeld = !!d.paused;
     renderSpots();
     refreshSpotUndo();
   } catch (e) { /* next poll */ }
@@ -733,6 +748,8 @@ function renderSpots() {
         "Add a rule below, or Undo a deletion.";
     }
   }
+  const heldNote = document.getElementById("spot-held-note");
+  if (heldNote) heldNote.hidden = !spotsHeld;
   if (!spotRules.length) {
     ol.innerHTML = "<li class='muted'>No spots yet</li>";
     return;
@@ -751,6 +768,14 @@ function renderSpots() {
     const info = document.createElement("div");
     const when = (r.trigger === "manual")
       ? "<span class='muted'>" + esc(r.summary) + "</span>"
+      : (spotsHeld && r.enabled && r.held_remaining != null)
+      // the station is paused: the spot clock is held, so the countdown is
+      // frozen at where it stopped rather than ticking to "now" for a spot
+      // that cannot air (and would all come due at once on resume)
+      ? "<span class='spot-held' title='The station is paused, so this timer is " +
+        "held. It carries on from here when you go back on air.'>❚❚ held — " +
+        fmtHeld(r.held_remaining) + "</span> <span class='muted'>· " +
+        esc(r.summary) + "</span>"
       : "<span class='spot-when' data-next='" + (r.next_epoch ?? "") + "'>" +
         fmtCountdown(r.next_epoch) + "</span> <span class='muted'>· " +
         esc(r.summary) + "</span>";
