@@ -330,6 +330,10 @@
       <tr><td>Royalty reporting</td><td>Your service name, contact details,
         category and reporting option for the SoundExchange report. See
         <a href="#royalty">The royalty report</a>.</td></tr>
+      <tr><td>Library path aliases <span class="muted">(advanced)</span></td>
+        <td>Only for when the music moved: re-points the old start of a path at
+        where those files live now, so songs that could not be found play again.
+        See <a href="#path-aliases">Library path aliases</a>.</td></tr>
       <tr><td>Software updates</td><td>Installs new StudioFire versions. See the
         note below.</td></tr>
       <tr><td>Backup / restore</td><td>Save a copy of your setup, or restore
@@ -340,6 +344,25 @@
     <p class="muted">Settings is grouped down the left: Station, Streaming,
       Equipment, Users, Maintenance, About &amp; updates. Anything you change is
       saved as you leave the field — there is no Save button to forget.</p>
+
+    <h3 id="path-aliases">Library path aliases (advanced)</h3>
+    <p>If the music folder was reorganised, renamed, or the share is known by a
+      name this PC cannot look up, the songs keep the path they were saved with —
+      and StudioFire skips anything it cannot find. One alias fixes that whole
+      class: <strong>if a stored path starts with</strong> the old start,
+      <strong>use this instead</strong> the place the files live now.</p>
+    <table>
+      <tr><th>If a stored path starts with</th><th>Use this instead</th></tr>
+      <tr><td><code>\\NAS\music</code></td><td><code>Z:</code></td></tr>
+    </table>
+    <p>Type the pair into <strong>Settings → Station → Library path aliases</strong>
+      and press <span class="help-key">Save aliases</span>. It takes effect
+      immediately — no restart — and is remembered after a restart.</p>
+    <div class="help-callout">
+      <strong>What it does not do.</strong> Nothing on disk is renamed, copied or
+      deleted, and no playlist is rewritten. A file that is genuinely gone is still
+      skipped exactly as before — use the missing-files report for those.
+    </div>
     <div class="help-callout warn">
       <strong>About updates.</strong> <span class="help-key">Install update</span>
       only installs the same version series you're already on (1.x). A whole new
