@@ -1121,3 +1121,36 @@ dialog.sf-picker::backdrop { background: rgba(6, 9, 13, .68); }
   .wiz-steps { flex-direction: row; flex-wrap: wrap; gap: .4rem; }
   .wiz-step span:last-child { display: none; }
 }
+
+/* ---- Playlists hub (All playlists / Missing files / Library health / Tools) */
+.st-table th.num, .st-table td.num { text-align: right; white-space: nowrap; }
+.pl-table td.num { font-variant-numeric: tabular-nums; }
+.pl-row { cursor: pointer; }
+.pl-row:hover td { background: rgba(255, 255, 255, .03); }
+.is-bad { color: #ff8a8a; font-weight: 650; }
+.is-warn { color: #e7b955; }
+.st-banner-ok { background: rgba(60, 207, 126, .10); border-left: 4px solid #3ccf7e;
+                color: #b9f0d1; }
+.st-banner-ok strong { color: #fff; }
+.miss-folder { font: 12.5px/1.5 ui-monospace, Consolas, monospace; color: var(--muted);
+               margin: -.2rem 0 .7rem; overflow-wrap: anywhere; }
+.miss-list { list-style: none; margin: 0; padding: 0; }
+.miss-list li { padding: .55rem 0; border-top: 1px solid var(--border); }
+.miss-list li:first-child { border-top: 0; }
+.miss-tag { font-size: .68rem; font-weight: 700; text-transform: uppercase;
+            letter-spacing: .04em; padding: .1rem .45rem; border-radius: 999px;
+            background: #2b3644; color: var(--muted); margin-right: .4rem; }
+.miss-tag.is-bad { background: rgba(255, 107, 107, .16); color: #ff8a8a; }
+.miss-tag.is-warn { background: rgba(214, 158, 46, .18); color: #e7b955; }
+.miss-playlist { font-size: .78rem; color: var(--muted); margin-top: .15rem; }
+.miss-path { display: block; font: 12px/1.5 ui-monospace, Consolas, monospace;
+             color: #9fb3c8; margin-top: .2rem; overflow-wrap: anywhere; }
+.miss-hint { font-size: .8rem; color: #9fe3bd; margin-top: .2rem;
+             overflow-wrap: anywhere; }
+
+/* a playlist row whose song cannot be found: still listed (never silently
+   dropped), dulled, and labelled with the same tag as the report */
+.editlist li.item-missing { opacity: .7; }
+.editlist li.item-unknown { opacity: .85; }
+.editlist li.item-missing .item-label strong { text-decoration: line-through;
+                                                text-decoration-color: #ff8a8a; }

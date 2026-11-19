@@ -159,12 +159,32 @@ def get_items(conn: sqlite3.Connection, pid: int) -> list[dict]:
 def item_durations(conn: sqlite3.Connection, pid: int) -> dict[int, float]:
     """{item_id: seconds} for the playlist's file items whose length is known:
     the item's own stored length first, else the music index's. Folder items
-    resolve to a different file each airing, so they have no fixed length."""
-    rows = conn.execute(
-        "SELECT i.id, COALESCE(i.duration_sec, t.duration_sec) AS dur "
+    resolve to a different file each airing, so they have no fixed length.
+
+    The join must not be an exact string compare: the index stores
+    `Z:/G\\Artist\\x.mp3` while the playlists store `Z:\\G\\Artist\\x.mp3` for the
+    same file, and `t.path = i.path` then reports a playlist's whole total as
+    unknown (measured 2026-11-19: an exact join resolves 502 of 6,982 items). The
+    exact join stays first because it uses the path index; anything it misses is
+    retried with the separators flipped, which is the form this station's tools
+    actually disagree about.
+    """
+    rows = [dict(r) for r in conn.execute(
+        "SELECT i.id, i.path, COALESCE(i.duration_sec, t.duration_sec) AS dur "
         "FROM playlist_items i LEFT JOIN tracks t ON t.path = i.path "
-        "WHERE i.playlist_id = ? AND i.item_type = 'file'", (pid,)).fetchall()
-    return {r["id"]: float(r["dur"]) for r in rows if r["dur"]}
+        "WHERE i.playlist_id = ? AND i.item_type = 'file'", (pid,))]
+    out = {r["id"]: float(r["dur"]) for r in rows if r["dur"]}
+    loose = [r for r in rows if not r["dur"]]
+    if loose:
+        for r in loose:
+            raw = r["path"] or ""
+            for variant in (raw.replace("/", "\\"), raw.replace("\\", "/")):
+                hit = conn.execute("SELECT duration_sec FROM tracks WHERE path = ?",
+                                   (variant,)).fetchone()
+                if hit and hit[0]:
+                    out[r["id"]] = float(hit[0])
+                    break
+    return out
 
 
 def playlist_stats(conn: sqlite3.Connection, pid: int) -> dict:

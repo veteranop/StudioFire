@@ -49,6 +49,7 @@ jobs:
             "test_duplicates",
             "test_indexer",
             "test_journal",
+            "test_library_health",
             "test_migrations_13_15",
             "test_path_aliases",
             "test_path_parity",

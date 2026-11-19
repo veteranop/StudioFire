@@ -13,35 +13,159 @@
   <button type="submit" class="btn">Sign out</button>
 </form>
 {% endblock %}
+
 {% block content %}
-<div class="card">
-  <h1>Playlists</h1>
-  <p class="muted">Playlists are ZaraRadio-style <code>.lst</code> files.
-    Open one, change it on the next screen, and every change saves straight
-    back to the same file.</p>
+<div class="sf-settings">
+  <nav class="st-nav" aria-label="Playlist sections">
+    <h1 class="st-title">Playlists</h1>
 
-  <h2>Open a playlist</h2>
-  <div class="row">
-    <button class="btn btn-green btn-big" onclick="openBrowse()"> Open a playlist (.lst)…</button>
-  </div>
+    <button class="st-navitem" data-goto="all" aria-current="true">
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M4 6h11M4 12h11M4 18h7"/><circle cx="18" cy="17" r="2.2"/>
+        <path d="M20.2 17V8.5l-2 .6"/></svg>
+      <span>All playlists</span>
+      <em class="st-badge" id="bad-alls" hidden></em>
+    </button>
 
-  <h2>Start a new playlist</h2>
-  <div class="row">
-    <input id="new-name" placeholder="Name it… e.g. Saturday Night Mix"
-           onkeydown="if (event.key === 'Enter') createPl()">
-    <button class="btn btn-green" onclick="createPl()">Create</button>
+    <button class="st-navitem" data-goto="missing">
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 3v10"/><path d="M8.4 6.4 12 3l3.6 3.4"/>
+        <path d="M4 14v4.4A1.6 1.6 0 0 0 5.6 20h12.8a1.6 1.6 0 0 0 1.6-1.6V14"/></svg>
+      <span>Missing files</span>
+      <em class="st-badge st-badge-warn" id="bad-missing" hidden></em>
+    </button>
+
+    <button class="st-navitem" data-goto="health">
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M3 12h4l2.5-6 3.5 12 2.5-6h5.5"/></svg>
+      <span>Library health</span>
+      <em class="st-badge" id="bad-health" hidden></em>
+    </button>
+
+    <button class="st-navitem" data-goto="tools">
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M14.5 4.5a4 4 0 0 1 5 5L9 20H4v-5z"/></svg>
+      <span>Tools</span>
+    </button>
+  </nav>
+
+  <div class="st-main">
+    <!-- ===== 1. ALL PLAYLISTS ======================================== -->
+    <section class="st-group" id="g-all" data-group="all">
+      <div class="st-head">
+        <div>
+          <h2>All playlists</h2>
+          <p class="st-sub">Every list StudioFire knows, worst first. “Can’t be
+            found” means the music library no longer has that file — those songs
+            are skipped when the list plays.</p>
+        </div>
+        <div class="st-tools">
+          <button class="st-link" onclick="loadAll(true)">Refresh</button>
+        </div>
+      </div>
+
+      <div class="st-card">
+        <div class="st-banner st-banner-warn" id="lib-banner" hidden></div>
+        <table class="st-table pl-table">
+          <thead>
+            <tr>
+              <th>Playlist</th>
+              <th class="num">Songs</th>
+              <th class="num">Can’t be found</th>
+              <th class="num">Not in index</th>
+              <th class="num">%</th>
+              <th class="num">Folders</th>
+              <th>Updated</th>
+              <th>Last aired</th>
+            </tr>
+          </thead>
+          <tbody id="pl-rows"><tr><td class="st-empty">Loading&hellip;</td></tr></tbody>
+        </table>
+        <p class="st-help" style="margin-top:.6rem">
+          Click a playlist to open it. “Not in index” is a path the library index
+          has never seen — that is not the same as a missing file, so it is
+          counted separately and never shown as deleted.
+        </p>
+        <div class="st-flash" id="pl-msg" aria-live="polite"></div>
+      </div>
+    </section>
+
+    <!-- ===== 2. MISSING FILES ======================================== -->
+    <section class="st-group" id="g-missing" data-group="missing" hidden>
+      <div class="st-head">
+        <div>
+          <h2>Missing files</h2>
+          <p class="st-sub">Every song a playlist points at that StudioFire
+            cannot find, grouped by the folder it came from — because that is
+            where the recovery starts.</p>
+        </div>
+        <div class="st-tools">
+          <button class="st-link" onclick="loadMissing(true)">Check now</button>
+          <a class="st-link" href="/reports?report=missing-from-playlists">Open as a report (PDF / CSV)</a>
+        </div>
+      </div>
+      <div id="miss-body">
+        <div class="st-card"><div class="st-empty">Checking&hellip;</div></div>
+      </div>
+    </section>
+
+    <!-- ===== 3. LIBRARY HEALTH ======================================= -->
+    <section class="st-group" id="g-health" data-group="health" hidden>
+      <div class="st-head">
+        <div>
+          <h2>Library health</h2>
+          <p class="st-sub">What the index holds, and when it last looked.
+            Nothing on this page changes or deletes a file.</p>
+        </div>
+      </div>
+      <div id="health-body">
+        <div class="st-card"><div class="st-empty">Loading&hellip;</div></div>
+      </div>
+    </section>
+
+    <!-- ===== 4. TOOLS ================================================ -->
+    <section class="st-group" id="g-tools" data-group="tools" hidden>
+      <div class="st-head">
+        <div>
+          <h2>Tools</h2>
+          <p class="st-sub">Open or create a playlist, and repair paths after the
+            library has been reorganised.</p>
+        </div>
+      </div>
+
+      <div class="st-card">
+        <div class="st-card-head"><h3>Open a playlist</h3></div>
+        <p class="st-help">Playlists are ZaraRadio-style <code>.lst</code> files.
+          Open one, change it, and every change saves straight back to the same
+          file.</p>
+        <div class="st-foot">
+          <button class="btn btn-green" onclick="openBrowse()">Open a playlist (.lst)…</button>
+        </div>
+      </div>
+
+      <div class="st-card">
+        <div class="st-card-head"><h3>Start a new playlist</h3></div>
+        <div class="row">
+          <input id="new-name" placeholder="Name it… e.g. Saturday Night Mix"
+                 onkeydown="if (event.key === 'Enter') createPl()">
+          <button class="btn btn-green" onclick="createPl()">Create</button>
+        </div>
+        <p class="st-help" id="lst-dir-hint"></p>
+      </div>
+
+      <div class="st-card">
+        <div class="st-card-head"><h3>Fix broken file paths</h3></div>
+        <p class="st-help">Playlists imported before the library moved point at
+          old locations. This finds each stale track and re-points it to the real
+          file in your library (matched by file name and folder) — no re-import
+          needed. Best run after the library has finished indexing.</p>
+        <div class="st-foot">
+          <button class="btn btn-green" onclick="relinkAll()">Fix broken paths in all playlists</button>
+        </div>
+        <div id="relink-result" style="margin-top:.7rem"></div>
+      </div>
+    </section>
   </div>
-  <p class="muted" id="lst-dir-hint"></p>
-</div>
-<div class="card">
-  <h2>Fix broken file paths</h2>
-  <p class="muted">Playlists imported before the NAS move point at old file
-    locations. This finds each stale track and re-points it to the real file in
-    your library (matched by file name) — no re-import needed. Best run after
-    the library has finished indexing.</p>
-  <button class="btn btn-green" onclick="relinkAll()">Fix broken paths in
-    all playlists</button>
-  <div id="relink-result" style="margin-top:.7rem"></div>
 </div>
 
 <!-- file explorer (same picker as the On Air page) -->
@@ -61,6 +185,256 @@
 </div>
 
 <script>
+/* ---------- section nav (same shell as Settings) ---------- */
+function plShow(name, push) {
+  for (const b of document.querySelectorAll(".st-navitem"))
+    b.setAttribute("aria-current", b.dataset.goto === name ? "true" : "false");
+  for (const g of document.querySelectorAll(".st-group"))
+    g.hidden = g.dataset.group !== name;
+  if (push !== false) history.replaceState(null, "", "#" + name);
+  if (name === "missing") loadMissing();
+  if (name === "health") loadHealth();
+}
+for (const b of document.querySelectorAll(".st-navitem"))
+  b.addEventListener("click", () => plShow(b.dataset.goto));
+function plGroupFromHash() {
+  const h = (location.hash || "").replace("#", "");
+  return ["all", "missing", "health", "tools"].includes(h) ? h : "all";
+}
+
+/* ---------- helpers ---------- */
+function esc(s) {
+  return (s || "").replace(/[&<>"]/g,
+    c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+}
+function fmtTs(epoch) {
+  if (!epoch) return "<span class='muted'>never</span>";
+  const d = new Date(Number(epoch) * 1000);
+  return d.toLocaleDateString(undefined, {day: "numeric", month: "short"}) + " " +
+         d.toLocaleTimeString(undefined, {hour: "numeric", minute: "2-digit"});
+}
+function fmtGB(bytes) { return (Number(bytes || 0) / 1e9).toFixed(1) + " GB"; }
+function fmtHours(h) {
+  const n = Number(h || 0);
+  return n < 48 ? n.toFixed(1) + " h" : Math.round(n).toLocaleString() + " h";
+}
+
+/* ---------- 1. all playlists ---------- */
+let HEALTH = null;
+
+async function loadAll(fresh) {
+  try {
+    const r = await fetch("/api/library/health" + (fresh ? "?fresh=1" : ""));
+    if (!r.ok) throw new Error("http " + r.status);
+    HEALTH = await r.json();
+  } catch (e) {
+    document.getElementById("pl-rows").innerHTML =
+      "<tr><td class='st-empty'>Could not read the library health right now.</td></tr>";
+    return;
+  }
+  const rows = HEALTH.playlists || [];
+  const tb = document.getElementById("pl-rows");
+  tb.innerHTML = "";
+  if (!rows.length)
+    tb.innerHTML = "<tr><td class='st-empty'>No playlists yet.</td></tr>";
+  for (const p of rows) {
+    const tr = document.createElement("tr");
+    tr.className = "pl-row";
+    const name = document.createElement("td");
+    name.className = "st-name";
+    const a = document.createElement("a");
+    a.href = "/playlists/" + p.id;
+    a.textContent = p.name;
+    name.appendChild(a);
+    if (p.on_air)
+      name.insertAdjacentHTML("beforeend",
+        " <span class='spot-badge badge-ids'>ON AIR</span>");
+    if (p.emergency)
+      name.insertAdjacentHTML("beforeend",
+        " <span class='spot-badge badge-ads' title='Also the emergency fallback'>FALLBACK</span>");
+    tr.appendChild(name);
+    const cell = (txt, cls) => {
+      const td = document.createElement("td");
+      td.className = "num " + (cls || "");
+      td.textContent = txt;
+      return td;
+    };
+    tr.appendChild(cell(p.items.toLocaleString()));
+    tr.appendChild(cell(p.missing ? p.missing.toLocaleString() : "—",
+                        p.missing ? "is-bad" : ""));
+    tr.appendChild(cell(p.not_indexed ? p.not_indexed.toLocaleString() : "—",
+                        p.not_indexed ? "is-warn" : ""));
+    tr.appendChild(cell(p.items ? p.pct_unplayable + "%" : "",
+                        p.pct_unplayable >= 25 ? "is-bad" : ""));
+    tr.appendChild(cell(p.folders ? p.folders : "—"));
+    const upd = document.createElement("td");
+    upd.innerHTML = fmtTs(p.updated_at);
+    tr.appendChild(upd);
+    const air = document.createElement("td");
+    air.innerHTML = fmtTs(p.last_aired);
+    tr.appendChild(air);
+    tr.onclick = (e) => {
+      if (e.target.tagName !== "A") location = "/playlists/" + p.id;
+    };
+    tb.appendChild(tr);
+  }
+  renderBadges();
+}
+
+function renderBadges() {
+  if (!HEALTH) return;
+  const rows = HEALTH.playlists || [];
+  const need = rows.filter(p => p.missing > 0).length;
+  const setBadge = (id, text, warn) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.hidden = !text;
+    el.textContent = text || "";
+    el.className = "st-badge" + (warn ? " st-badge-warn" : "");
+  };
+  setBadge("bad-alls", need ? need + " to fix" : "");
+  setBadge("bad-missing", (HEALTH.snapshot || {}).playlist_missing_paths || "", true);
+  setBadge("bad-health", HEALTH.reachable ? "" : "check");
+  const b = document.getElementById("lib-banner");
+  if (b) {
+    b.hidden = !!HEALTH.reachable;
+    b.innerHTML = "<strong>Can’t reach the music library.</strong> The counts " +
+      "here are from the last scan (" + fmtTs((HEALTH.snapshot || {}).last_scan) +
+      "). Nothing has been deleted — check the network share or the NAS first.";
+  }
+}
+
+/* ---------- 2. missing files ---------- */
+let MISSING = null;
+
+async function loadMissing(fresh) {
+  if (MISSING && !fresh) { renderMissing(); return; }
+  const body = document.getElementById("miss-body");
+  body.innerHTML =
+    "<div class='st-card'><div class='st-empty'>Checking&hellip;</div></div>";
+  try {
+    const r = await fetch("/api/library/missing" + (fresh ? "?fresh=1" : ""));
+    MISSING = await r.json();
+  } catch (e) {
+    body.innerHTML = "<div class='st-card'><div class='st-empty'>" +
+      "Could not read that right now.</div></div>";
+    return;
+  }
+  renderMissing();
+}
+
+function renderMissing() {
+  const body = document.getElementById("miss-body");
+  const d = MISSING || {};
+  const groups = d.groups || [];
+  body.innerHTML = "";
+  const head = document.createElement("div");
+  head.className = "st-card";
+  head.innerHTML = (d.reachable
+      ? "<div class='st-banner st-banner-ok'><strong>" + (d.files || 0) +
+        " item(s) can’t be found.</strong> " + (d.paths || 0) +
+        " distinct file(s) across " + groups.length + " folder(s).</div>"
+      : "<div class='st-banner st-banner-warn'><strong>Can’t reach the music " +
+        "library.</strong> These are the last known results — nothing has been " +
+        "deleted, so check the share before doing anything else.</div>") +
+    "<p class='st-help'>" + (d.moved_hints
+      ? d.moved_hints + " of these look like they moved, and the new location is " +
+        "named on the row. Use Tools → Fix broken paths to re-point them."
+      : "Restore from the library’s recycle bin, then use Tools → Fix broken " +
+        "paths to re-point the list.") + "</p>";
+  body.appendChild(head);
+
+  if (!groups.length) {
+    const ok = document.createElement("div");
+    ok.className = "st-card";
+    ok.innerHTML = "<div class='st-empty'>Nothing missing — every song in " +
+      "every playlist can be found.</div>";
+    body.appendChild(ok);
+    return;
+  }
+
+  for (const g of groups) {
+    const card = document.createElement("div");
+    card.className = "st-card";
+    card.innerHTML = "<div class='st-card-head'><h3>" + g.files.length +
+      " file(s)</h3></div>";
+    const folder = document.createElement("p");
+    folder.className = "miss-folder";
+    folder.textContent = g.folder;
+    card.appendChild(folder);
+    const ul = document.createElement("ul");
+    ul.className = "miss-list";
+    for (const f of g.files) {
+      const li = document.createElement("li");
+      const status = f.status === "missing"
+        ? "<span class='miss-tag is-bad'>can’t be found</span>"
+        : "<span class='miss-tag is-warn'>not in index</span>";
+      const hint = f.hint === "moved"
+        ? "<div class='miss-hint'>Probably moved to " + esc(f.candidate) + "</div>"
+        : f.hint === "ambiguous"
+        ? "<div class='miss-hint'>Needs you — several files share that name</div>"
+        : f.hint === "conflict"
+        ? "<div class='miss-hint'>Left alone — same name, different recording</div>"
+        : "";
+      li.innerHTML = status + " <strong>" + esc(f.title) + "</strong>" +
+        "<div class='miss-playlist'>" + esc(f.playlist) + "</div>" +
+        "<code class='miss-path'>" + esc(f.path) + "</code>" + hint;
+      ul.appendChild(li);
+    }
+    card.appendChild(ul);
+    body.appendChild(card);
+  }
+}
+
+/* ---------- 3. library health ---------- */
+async function loadHealth() {
+  if (!HEALTH) await loadAll(false);
+  renderHealth();
+}
+
+function renderHealth() {
+  const body = document.getElementById("health-body");
+  const h = HEALTH || {};
+  const s = h.snapshot || {};
+  const row = (label, value, why) =>
+    "<tr><td class='st-name'><strong>" + label + "</strong>" +
+    (why ? "<span class='st-desc'>" + why + "</span>" : "") + "</td>" +
+    "<td class='num'>" + value + "</td></tr>";
+  body.innerHTML =
+    "<div class='st-card'>" +
+      (h.reachable
+        ? "<div class='st-banner st-banner-ok'><strong>Library reachable.</strong> " +
+          "The music folder answered just now.</div>"
+        : "<div class='st-banner st-banner-warn'><strong>Can’t reach the music " +
+          "library.</strong> Everything below is from the last scan — that is not " +
+          "proof a file was deleted.</div>") +
+      "<table class='st-table'>" +
+        row("Songs in the index", (s.tracks_total || 0).toLocaleString()) +
+        row("Songs present", (s.tracks_present || 0).toLocaleString()) +
+        row("Hours of music present", fmtHours(s.hours_present)) +
+        row("Size on disk", fmtGB(s.bytes_present)) +
+        row("Playlist items that can’t be found",
+            (s.playlist_missing_paths || 0).toLocaleString(),
+            "The number that matters: songs in a playlist that will be skipped.") +
+        row("Files the index marks missing",
+            (s.tracks_missing || 0).toLocaleString(),
+            "Historical index flags, not playlist damage. A rescan clears the stale ones.") +
+        row("Last index scan", fmtTs(s.last_scan)) +
+        row("Newest file in the library", fmtTs(s.newest_file)) +
+        row("Oldest file in the library", fmtTs(s.oldest_file)) +
+        row("Formats present", (s.formats || [])
+            .map(f => esc(f.format) + " (" + f.n.toLocaleString() + ")")
+            .join(", ") || "—") +
+      "</table>" +
+      "<p class='st-help' style='margin-top:.7rem'>A high “files the index marks " +
+      "missing” next to a low “playlist items” is normal after a library move: " +
+      "the index keeps the old rows, the playlists do not use them. A yellow " +
+      "library warning is never permission to delete anything — the NAS recycle " +
+      "bin is usually where the files are.</p>" +
+    "</div>";
+}
+
+/* ---------- 4. tools (open / create / relink) ---------- */
 let lstDir = "";
 (async () => {
   try {
@@ -72,7 +446,6 @@ let lstDir = "";
   } catch (e) {}
 })();
 
-// ---- file explorer (browse the server's disks/NAS for a .lst)
 let fpPath = "", fpParent = null;
 function joinPath(base, name) {
   return base ? base.replace(/[\\/]$/, "") + "\\" + name : name;
@@ -132,10 +505,7 @@ async function createPl() {
   if (r.status === 201) location = "/playlists/" + (await r.json()).id;
   else alert((await r.json()).detail || "Could not create playlist");
 }
-function esc(s) {
-  return (s || "").replace(/[&<>]/g,
-    c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;"}[c]));
-}
+
 async function relinkAll() {
   if (!confirm("Scan every playlist and re-point tracks whose old path is no " +
                "longer valid to the matching file in your library?")) return;
@@ -153,6 +523,12 @@ async function relinkAll() {
     (b.unmatched_examples && b.unmatched_examples.length
       ? "<br><small class='muted'>Not found (examples): " +
         b.unmatched_examples.slice(0, 10).map(esc).join(", ") + "</small>" : "");
+  MISSING = null;                  // the numbers just changed
+  await loadAll(true);
 }
+
+/* ---------- boot ---------- */
+plShow(plGroupFromHash(), false);
+loadAll(false);
 </script>
 {% endblock %}

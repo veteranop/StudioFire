@@ -8,6 +8,25 @@ plain English a non-technical operator can understand.
 ## [Unreleased]
 
 ### Added
+- **The Playlists page now shows what will actually play.** It opens on a
+  table of every playlist with its song count, how many of those songs can no
+  longer be found, how many are not in the library index yet, and the share
+  that will be skipped — worst first, with the playlist that is on air pinned
+  to the top. Click a playlist and its unplayable rows are marked in place.
+- **New section: Missing files.** Every song a playlist points at that cannot
+  be found, grouped by the folder it came from with the complete path, so the
+  folder can be restored from the NAS recycle bin. Where the library only has
+  one credible match elsewhere it says "probably moved to …" and names it — it
+  never guesses between several, and it never calls a file deleted.
+- **New section: Library health, and two reports to match** ("Missing files —
+  what will not play" and "Library index — snapshot"). They answer "is the
+  library reachable right now, how much music is there, when was it last
+  scanned, and what is dark" — and if the music folder cannot be reached they
+  say so instead of reporting the files as deleted.
+- **Playlist totals are no longer wrong after a library move.** The duration
+  lookup compared paths letter for letter, so a playlist whose files were
+  indexed under a slightly different spelling reported every song's length as
+  unknown. It now matches the same file however the path is written.
 - **Settings → Library path aliases (advanced).** When the music library moves, or the
   share ends up known by a name this PC cannot resolve, every song stored with the
   old path is skipped. This card re-points that old start of the path at where the

@@ -822,7 +822,125 @@ def artist_spins(conn, start: str, end: str) -> dict:
 
 # --------------------------------------------------------------------- registry
 
+# ------------------------------------------------------- library health reports
+
+_STATUS_LABEL = {"missing": "Not found in the library",
+                 "not_indexed": "Not in the index",
+                 "folder": "Folder item"}
+
+
+def _when(v) -> str:
+    if not v:
+        return "never"
+    try:
+        return _dt.datetime.fromtimestamp(float(v)).strftime("%d %b %Y %H:%M")
+    except (TypeError, ValueError, OSError):
+        return str(v)
+
+
+def missing_from_playlists(conn, start, end, cfg=None) -> dict:
+    """Every playlist item that will not play, grouped by the folder it lived in.
+
+    Full paths, because the recovery for a moved library is a folder-shaped job:
+    the operator opens the NAS, goes to the folder named here, and restores. A
+    "probably moved" line appears only where the relinker's own ladder has a
+    decisive winner — never on a bare name match (Dread Zeppelin covers Led
+    Zeppelin's "Black Dog"; a name-only guess would put the wrong recording on
+    air).
+    """
+    from . import library_health as lh
+    data = lh.missing(conn, cfg or {})
+    rows = []
+    for group in data["groups"]:
+        for f in group["files"]:
+            hint = ""
+            if f["status"] == "missing":
+                if f["hint"] == "moved":
+                    hint = "Probably moved to " + (f["candidate"] or "")
+                elif f["hint"] == "ambiguous":
+                    hint = "Needs you — several files share that name"
+                elif f["hint"] == "conflict":
+                    hint = "Left alone — same name, different recording"
+            rows.append({"status": _STATUS_LABEL.get(f["status"], f["status"]),
+                         "playlist": f["playlist"],
+                         "folder": group["folder"],
+                         "title": f["title"],
+                         "path": f["path"],
+                         "hint": hint})
+    snap = lh._snapshot(conn)
+    if not data["reachable"]:
+        banner = ("The music library could not be reached when this ran, so these "
+                  "are the last known results")
+    else:
+        banner = "Library checked as of the last full scan"
+    note = (f"{banner} ({_when(snap.get('last_scan'))}). A row is here because the "
+            "index proved the file is gone, or because the playlist points at a file "
+            "the index has never seen — 'not in the index' is not the same as "
+            "deleted. Nothing has been changed: restore from the library's recycle "
+            "bin, or press Fix broken paths on the Playlists page once the files are "
+            "back. An empty report means every song in every playlist will play.")
+    return {"id": "missing-from-playlists",
+            "title": "Missing files — what will not play",
+            "subtitle": (f"{data['files']} item(s) in {len(data['groups'])} folder(s)"
+                         f" · {data['paths']} distinct file(s)"),
+            "columns": ["status", "playlist", "folder", "title", "path", "hint"],
+            "headers": ["Status", "Playlist", "Folder", "File", "Full path", "Note"],
+            "rows": rows,
+            "note": note}
+
+
+def library_index(conn, start, end, cfg=None) -> dict:
+    """The library at a glance: how much music, how fresh the index, what is dark."""
+    from . import library_health as lh
+    h = lh.health(conn, cfg or {})
+    s, rows = h["snapshot"], []
+
+    def add(item, value, why=""):
+        rows.append({"item": item, "value": value, "why": why})
+
+    add("Music library reachable right now",
+        "yes" if s and h.get("snapshot") is not None and lh.reachable(cfg or {})
+        else "no — results are as of the last scan",
+        "If this says no, nothing below proves a file was deleted.")
+    add("Songs in the index", f"{s['tracks_total']:,}")
+    add("Songs present", f"{s['tracks_present']:,}")
+    add("Hours of music present", f"{s['hours_present']:,}")
+    add("Size on disk (present)", f"{s['bytes_present'] / 1e9:,.1f} GB")
+    add("Files the index marks missing", f"{s['tracks_missing']:,}",
+        "Historical index flags, not playlist damage — a rescan clears the stale ones.")
+    add("Playlist items that cannot be found", f"{s['playlist_missing_paths']:,}",
+        "This is the number that matters: songs in a playlist that will be skipped.")
+    add("Last index scan", _when(s["last_scan"]))
+    add("Newest file in the library", _when(s["newest_file"]))
+    add("Oldest file in the library", _when(s["oldest_file"]))
+    if s["formats"]:
+        add("Formats present",
+            ", ".join(f"{f['format']} ({f['n']:,})" for f in s["formats"]))
+    return {"id": "library-index",
+            "title": "Library index — snapshot",
+            "subtitle": "as of the last scan",
+            "columns": ["item", "value", "why"],
+            "headers": ["Measure", "Value", "What it means"],
+            "rows": rows,
+            "note": ("A high 'files the index marks missing' next to 0 'playlist items "
+                     "that cannot be found' is normal after a library move: the index "
+                     "keeps the old rows, the playlists do not use them. A yellow "
+                     "library warning is never permission to delete anything — the NAS "
+                     "recycle bin is usually where the files are.")}
+
+
+_RUNNERS_PENDING = ("missing-from-playlists", "library-index")
+
+
 CATALOG = [
+    {"id": "missing-from-playlists",
+     "name": "Missing files — what will not play",
+     "blurb": "Every playlist item StudioFire cannot find, grouped by the folder "
+              "it came from, with the full path. Empty means everything plays."},
+    {"id": "library-index",
+     "name": "Library index — snapshot",
+     "blurb": "How much music the library holds, when it was last scanned, and how "
+              "many playlist items cannot be found. Not a play report."},
     {"id": "as-aired", "name": "As aired — everything",
      "blurb": "Every track, legal ID, ad and PSA in order. The proof-of-performance log."},
     {"id": "playlist-airings", "name": "Playlist airings — what played, when",
@@ -844,6 +962,8 @@ CATALOG = [
 ]
 
 _RUNNERS = {
+    "missing-from-playlists": missing_from_playlists,
+    "library-index": library_index,
     "as-aired": as_aired,
     "playlist-airings": playlist_airings,
     "spot-airings": spot_airings,
@@ -864,6 +984,12 @@ def run(report_id: str, conn, start: str, end: str, **kw) -> dict:
     fn = _RUNNERS.get(report_id)
     if fn is None:
         raise ValueError("unknown report")
+    # Library-health reports need the station config (the music-root probe);
+    # play reports do not. Drop the extra kwarg rather than break every runner.
+    if "cfg" in kw:
+        import inspect
+        if "cfg" not in inspect.signature(fn).parameters:
+            kw.pop("cfg")
     return fn(conn, start, end, **kw)
 
 

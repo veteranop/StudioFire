@@ -21,6 +21,7 @@
             {% if not playlist.shuffled_at %}style="display:none"{% endif %}
             title="The running order came from Shuffle">Shuffled</span></h1>
     <p id="pl-stats" class="pl-stats">…</p>
+    <div id="pl-missing" class="st-banner" hidden></div>
     {% if playlist.source_path %}
     <p class="muted" title="Every change on this page saves straight back to this file.">
       {{ playlist.source_path }}</p>
@@ -133,6 +134,39 @@ function fmtLong(sec) {   // "21h 14m" / "47m" / "3:05"
   const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60);
   return h ? h + "h " + m + "m" : m + "m";
 }
+// which songs in this list will not play (from the library index — no share
+// walk, and 'not in the index' is never reported as a missing file)
+async function markMissing() {
+  let d;
+  try {
+    d = await (await fetch(`/api/library/playlist/${PID}/flags`)).json();
+  } catch (e) { return; }
+  const flags = d.flags || {};
+  let bad = 0, unknown = 0;
+  for (const li of document.querySelectorAll('#items li')) {
+    const st = flags[li.dataset.id];
+    if (!st || st === 'playable') continue;
+    li.classList.add(st === 'missing' ? 'item-missing' : 'item-unknown');
+    if (st === 'missing') bad++; else unknown++;
+    const label = li.querySelector('.item-label');
+    if (label && !label.querySelector('.miss-tag')) {
+      const tag = document.createElement('span');
+      tag.className = 'miss-tag ' + (st === 'missing' ? 'is-bad' : 'is-warn');
+      tag.textContent = st === 'missing' ? 'can’t be found' : 'not in index';
+      label.prepend(tag);
+    }
+  }
+  const el = document.getElementById('pl-missing');
+  if (!el) return;
+  el.hidden = !bad && !unknown;
+  el.className = 'st-banner ' + (bad ? 'st-banner-warn' : 'st-banner-ok');
+  el.innerHTML = bad
+    ? ('<strong>' + bad + (bad === 1 ? ' song' : ' songs') + ' can’t be found' +
+       '</strong> — they are skipped when this playlist plays. ' +
+       '<a href="/playlists#missing">See the missing files</a>.')
+    : (unknown + ' item(s) are not in the library index yet — that is not ' +
+       'the same as missing.');
+}
 // song count + how long this playlist runs
 async function refreshStats() {
   const el = document.getElementById("pl-stats");
@@ -147,6 +181,7 @@ async function refreshStats() {
       txt += " · " + s.folders + " folder item" + (s.folders === 1 ? "" : "s");
     el.textContent = txt;
   } catch (e) { el.textContent = ""; }
+  markMissing();
 }
 async function removeItem(btn) {
   const li = btn.closest("li");

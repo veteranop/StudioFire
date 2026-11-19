@@ -22,7 +22,7 @@ from fastapi.responses import (FileResponse, HTMLResponse,
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import (auth, changelog, db, nowplaying_file, reports,
+from . import (auth, changelog, db, library_health, nowplaying_file, reports,
                   setup as setup_mod, spots)
 from . import schedule as sched
 from .. import pathmap
@@ -1189,7 +1189,7 @@ def create_app(cfg: dict) -> FastAPI:
         """Run one report and return it as data (screen tables read this)."""
         s, e = _report_range(start, end)
         try:
-            return reports.run(report_id, conn, s, e)
+            return reports.run(report_id, conn, s, e, cfg=cfg)
         except ValueError:
             raise HTTPException(404, "unknown report")
 
@@ -1198,7 +1198,7 @@ def create_app(cfg: dict) -> FastAPI:
                        conn=Depends(get_conn), _=Depends(api_user)):
         s, e = _report_range(start, end)
         try:
-            rep = reports.run(report_id, conn, s, e)
+            rep = reports.run(report_id, conn, s, e, cfg=cfg)
         except ValueError:
             raise HTTPException(404, "unknown report")
         body = reports.to_csv(rep)
@@ -1218,7 +1218,7 @@ def create_app(cfg: dict) -> FastAPI:
         station's PDF path (no Chrome dependency on the playout box)."""
         s, e = _report_range(start, end)
         try:
-            rep = reports.run(report, conn, s, e)
+            rep = reports.run(report, conn, s, e, cfg=cfg)
         except ValueError:
             raise HTTPException(404, "unknown report")
         return render(request, "report_print.html", role=sess["role"],
@@ -1415,5 +1415,6 @@ def create_app(cfg: dict) -> FastAPI:
     duplicates.register(app)
     streaming.register(app)      # Settings > Streaming: config + live monitor
     settings_playlists.register(app)   # Settings > Playlists: default + emergency
+    library_health.register(app)       # Playlists > library health / missing (read-only)
 
     return app
