@@ -50,6 +50,7 @@ jobs:
             "test_indexer",
             "test_journal",
             "test_migrations_13_15",
+            "test_path_aliases",
             "test_path_parity",
             "test_pathmap",
             "test_playlists",

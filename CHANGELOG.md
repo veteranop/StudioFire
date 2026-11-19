@@ -8,6 +8,13 @@ plain English a non-technical operator can understand.
 ## [Unreleased]
 
 ### Added
+- **Settings → Library path aliases (advanced).** When the music library moves, or the
+  share ends up known by a name this PC cannot resolve, every song stored with the
+  old path is skipped. This card re-points that old start of the path at where the
+  files live now, so a song that could not be found plays again — nothing on disk
+  is renamed, copied or deleted, and a file that is genuinely gone is still skipped
+  exactly as before. It applies the moment you save (no restart) and is remembered
+  across restarts. Only the admin can change it.
 - **Every release now publishes a checksum of its installer.** The releases page
   carries `StudioFire-Setup-<version>.exe.sha256` next to the download, and the same
   hash is printed in the release notes. Run

@@ -860,6 +860,15 @@ select {
 
 /* ---- folder table ---- */
 .st-table { width: 100%; border-collapse: collapse; }
+/* library path aliases: two editable path prefixes per row (Settings >
+   Station). Monospace so a path's shape is readable, and full-width so the
+   placeholder hint is not clipped. */
+.alias-table th { font-size: .68rem; font-weight: 700; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--muted); text-align: left;
+  padding: 0 .6rem .35rem 0; }
+.alias-input { width: 100%; min-width: 13rem; padding: .5rem .65rem;
+  border-radius: 8px; font: 12.5px/1.5 ui-monospace, Consolas, monospace; }
+@media (max-width: 720px) { .alias-input { min-width: 0; } }
 .st-table td { padding: .55rem .2rem; vertical-align: middle; }
 .st-table tr + tr td { border-top: 1px solid var(--border); }
 .st-name strong { display: block; font-size: .9rem; font-weight: 650; }

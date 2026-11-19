@@ -141,6 +141,34 @@
         <div class="st-flash" id="pl-msg" aria-live="polite"></div>
       </div>
 
+      <div class="st-card" id="alias-card">
+        <div class="st-card-head">
+          <h3>Library path aliases</h3>
+          <div class="st-tools">
+            <span class="st-saved" id="alias-saved" hidden>&#10003; Applied</span>
+          </div>
+        </div>
+        <p class="st-help" style="max-width:640px">
+          Only needed when the music moved or the share was renamed: point the
+          old start of a path at where those files live now. StudioFire checks
+          this when it loads a song, so a song that could not be found starts
+          playing again &mdash; nothing is renamed, copied or deleted, and a
+          file that is genuinely gone is still skipped exactly as before.
+          Changes apply immediately, no restart.
+        </p>
+        <table class="st-table alias-table">
+          <thead>
+            <tr><th>If a stored path starts with</th><th>use this instead</th><th></th></tr>
+          </thead>
+          <tbody id="alias-rows"></tbody>
+        </table>
+        <div class="st-foot">
+          <button class="btn btn-ghost btn-sm" onclick="addAliasRow()">Add another</button>
+          <button class="btn btn-green" onclick="saveAliases()">Save aliases</button>
+        </div>
+        <div class="st-flash" id="alias-msg" aria-live="polite"></div>
+      </div>
+
       <div class="st-card">
         <div class="st-tfrow">
           <div>
@@ -1678,9 +1706,104 @@ document.getElementById("sup-contact") &&
     flash("sup-msg", r.ok ? "Saved ✓" : "Could not save that.", !r.ok);
   });
 
+/* ---- library path aliases: rewrite a stored path prefix at load time ---
+   Only paths that do NOT resolve today can match a prefix, so this can turn
+   a skipped item into a playable one and never the reverse. Applied by the
+   server immediately on save — no restart, nothing touched on disk. */
+let aliasRows = [];
+
+async function loadAliases() {
+  try {
+    const d = await (await fetch("/api/settings/path_aliases")).json();
+    aliasRows = d.aliases || [];
+  } catch (e) { aliasRows = []; }
+  renderAliases();
+}
+
+function renderAliases() {
+  const tb = document.getElementById("alias-rows");
+  if (!tb) return;
+  tb.innerHTML = "";
+  if (!aliasRows.length) aliasRows = [{from: "", to: ""}];
+  aliasRows.forEach((row, i) => {
+    const tr = document.createElement("tr");
+    const mk = (which, val, ph) => {
+      const td = document.createElement("td");
+      const inp = document.createElement("input");
+      inp.className = "alias-input";
+      inp.autocomplete = "off";
+      inp.spellcheck = false;
+      inp.dataset.alias = which;
+      inp.value = val || "";
+      inp.placeholder = ph;
+      td.appendChild(inp);
+      return td;
+    };
+    tr.appendChild(mk("from", row.from, "\\\\KDPI-Media\\music"));
+    tr.appendChild(mk("to", row.to, "Z:"));
+    const td = document.createElement("td");
+    if (aliasRows.length > 1) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "st-link";
+      b.textContent = "Remove";
+      b.onclick = () => {
+        aliasRows = collectAliases();
+        aliasRows.splice(i, 1);
+        renderAliases();
+      };
+      td.appendChild(b);
+    }
+    tr.appendChild(td);
+    tb.appendChild(tr);
+  });
+}
+
+function collectAliases() {
+  const out = [];
+  document.querySelectorAll("#alias-rows tr").forEach(tr => {
+    const f = tr.querySelector("input[data-alias='from']");
+    const t = tr.querySelector("input[data-alias='to']");
+    if (f && t) out.push({from: f.value.trim(), to: t.value.trim()});
+  });
+  return out;
+}
+
+function addAliasRow() {
+  aliasRows = collectAliases();
+  aliasRows.push({from: "", to: ""});
+  renderAliases();
+  const ins = document.querySelectorAll("#alias-rows input[data-alias='from']");
+  if (ins.length) ins[ins.length - 1].focus();
+}
+
+async function saveAliases() {
+  const rows = collectAliases().filter(r => r.from || r.to);
+  const r = await fetch("/api/settings/path_aliases", {method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({aliases: rows})});
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    flash("alias-msg", d.detail || "Could not save those aliases.", true);
+    return;
+  }
+  aliasRows = d.aliases || [];
+  renderAliases();
+  const n = d.applied || 0;
+  flash("alias-msg", n
+    ? ("Saved — " + n + " alias" + (n === 1 ? "" : "es") + " in use now.")
+    : "Saved with no aliases.", false);
+  const chip = document.getElementById("alias-saved");
+  if (chip) {
+    chip.hidden = false;
+    setTimeout(() => { chip.hidden = true; }, 4000);
+  }
+}
+
 /* ============================================================ boot */
 stShow(stGroupFromHash(), false);
 loadDirs();
+loadAliases();
 loadPlaylists();
 loadSupportContact();
 loadStreaming();

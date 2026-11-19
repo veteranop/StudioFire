@@ -499,6 +499,119 @@ def create_app(cfg: dict) -> FastAPI:
         db.set_setting(conn, key, path)
         return {"ok": True}
 
+    # ---- library path aliases (advanced) --------------------------------
+    # A stored path that no longer resolves because the library moved, or
+    # because the share is known by a name this PC cannot resolve, can be
+    # re-pointed here. Applied at FEED time by playlists.alias_path(), so it
+    # turns a skipped item into a playable one and never the other way round:
+    # only paths that do not resolve today can match a prefix.
+    MAX_PATH_ALIASES = 16
+
+    def _strip_sep(p: str) -> str:
+        """Both sides of a prefix swap are stored without trailing separators.
+
+        A prefix is replaced character-for-character, so `\\\\NAS\\music\\` →
+        `Z:` would glue the remainder straight onto `Z:` (Z:G\\x). Dropping the
+        trailing separator from each side makes "with a slash" and "without"
+        behave identically, which is what an operator expects from a text box.
+        """
+        return p.rstrip("\\/")
+
+    def _alias_pairs(conn) -> list[dict]:
+        """The alias pairs in force. Saved rows win; when none are saved the
+        factory default from config.json (paths.path_aliases) applies, so an
+        install can ship one and the operator can still edit it here."""
+        raw = db.get_setting(conn, "path_aliases")
+        pairs: list = []
+        if raw:
+            try:
+                saved = json.loads(raw)
+            except ValueError:
+                saved = None
+            if isinstance(saved, list):
+                pairs = saved
+        if not pairs:
+            pairs = [{"from": k, "to": v}
+                     for k, v in (cfg.get("path_aliases") or {}).items()]
+        out = []
+        for p in pairs:
+            if not isinstance(p, dict):
+                continue
+            src = _strip_sep(str(p.get("from") or "").strip())
+            dst = _strip_sep(str(p.get("to") or "").strip())
+            if src and dst:
+                out.append({"from": src, "to": dst})
+        return out
+
+    def _apply_path_aliases(conn) -> int:
+        """Push the pairs into the resolver. Live — the next feed tick uses
+        them, so saving needs no restart."""
+        from . import playlists as pl
+        pairs = _alias_pairs(conn)
+        pl.set_path_aliases({p["from"]: p["to"] for p in pairs},
+                            cfg.get("nas_music_root"))
+        return len(pairs)
+
+    @app.get("/api/settings/path_aliases")
+    def get_path_alias_settings(conn=Depends(get_conn), _=Depends(api_user)):
+        return {"aliases": _alias_pairs(conn), "max": MAX_PATH_ALIASES}
+
+    @app.post("/api/settings/path_aliases")
+    def save_path_alias_settings(body: dict, conn=Depends(get_conn),
+                                 _=Depends(api_admin)):
+        """Save the alias table and apply it immediately.
+
+        Validated: a malformed pair is a silent no-op in the resolver, which
+        reads exactly like "the feature does not work", so the obviously wrong
+        shapes are refused with a reason instead.
+        """
+        rows = body.get("aliases")
+        if not isinstance(rows, list):
+            raise HTTPException(400, "aliases must be a list")
+        clean: list[dict] = []
+        seen: set[str] = set()
+        for row in rows:
+            if not isinstance(row, dict):
+                raise HTTPException(400, "each alias must be a pair")
+            src = _strip_sep(str(row.get("from") or "").strip())
+            dst = _strip_sep(str(row.get("to") or "").strip())
+            if not src and not dst:
+                continue                  # a blank row the screen left behind
+            if not src or not dst:
+                raise HTTPException(400, "both sides of an alias are required")
+            if src.lower() == dst.lower():
+                raise HTTPException(400, "an alias cannot point at itself")
+            # \\host\share, //host/share or \\host\share\folder — a bare drive
+            # letter is not a path and would match nothing useful
+            if len([x for x in src.replace("\\", "/").split("/") if x]) < 2:
+                raise HTTPException(
+                    400, "the left side must be a folder or share path "
+                         "(e.g. \\\\NAS\\music)")
+            key = src.lower()
+            if key in seen:
+                continue                  # last one wins; earlier is dead
+            seen.add(key)
+            clean.append({"from": src, "to": dst})
+        if len(clean) > MAX_PATH_ALIASES:
+            raise HTTPException(400, f"no more than {MAX_PATH_ALIASES} aliases")
+        db.set_setting(conn, "path_aliases", json.dumps(clean))
+        applied = _apply_path_aliases(conn)
+        log.info("path aliases saved and applied: %d pair(s)", applied)
+        return {"ok": True, "aliases": clean, "applied": applied}
+
+    @app.on_event("startup")
+    def _apply_saved_path_aliases():
+        """A saved alias must survive a restart: it lives in the DB, while
+        config.json only supplies the factory default."""
+        try:
+            c = db.connect(cfg["db_path"])
+            try:
+                _apply_path_aliases(c)
+            finally:
+                c.close()
+        except Exception:                 # noqa: BLE001 — startup is sacred
+            log.exception("applying saved path aliases failed")
+
 
     @app.get("/api/settings/support_contact")
     def get_support_contact(conn=Depends(get_conn), _=Depends(api_user)):
