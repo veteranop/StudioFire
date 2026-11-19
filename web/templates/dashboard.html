@@ -1070,6 +1070,16 @@ async function refreshRotation() {
     rotTiming = d.timing || null;
     const t = document.getElementById("rot-title");
     t.textContent = d.playlist ? d.playlist.name : "Now playing list";
+    // the title is a way into the playlist itself: its songs and, on that
+    // page, exactly which of them cannot be found
+    if (d.playlist && d.playlist.id) {
+      t.classList.add("rot-openable");
+      t.title = "Open this playlist — songs and anything missing";
+      t.onclick = () => { location = "/playlists/" + d.playlist.id; };
+    } else {
+      t.classList.remove("rot-openable");
+      t.onclick = null;
+    }
     if (rotIsShow) {
       const b = document.createElement("span");
       b.className = "rot-showbadge"; b.textContent = "SHOW ON AIR";
@@ -1568,12 +1578,20 @@ async function refreshSkips() {
           " more</li>" : "";
       el.innerHTML = "<strong>" + n + " song" + (n === 1 ? "" : "s") +
         " in this playlist " + (n === 1 ? "is" : "are") + " missing</strong> " +
-        "and will be skipped. Check the library folder or use " +
-        "“Fix broken file paths” on the Playlists page." +
+        "and will be skipped." +
+        (rotPid ? " <span class='skip-open'>Open the playlist to see " +
+                  "where they should be ›</span>" : "") +
         "<details class='skip-names'><summary>Show them</summary><ul>" +
         names.map(nm => "<li>" + esc(nm) + "</li>").join("") + more +
         "</ul></details>";
       el.title = names.join("\n");
+      // the whole block is a way in; the "Show them" toggle stays a toggle
+      el.classList.toggle("skip-clickable", !!rotPid);
+      el.onclick = (e) => {
+        if (!rotPid) return;
+        if (e.target.closest("details") || e.target.closest("summary")) return;
+        location = "/playlists/" + rotPid;
+      };
     }
   } catch (e) { /* next poll */ }
 }

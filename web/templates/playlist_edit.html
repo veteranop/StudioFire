@@ -100,6 +100,16 @@
     <div id="fb-path" class="muted fb-path"></div>
     <ul id="fb-list" class="results fb-list"></ul>
   </div>
+
+  <div class="card" id="pl-miss-card">
+    <h2>Missing in this playlist <span id="miss-count" class="muted"></span></h2>
+    <p class="muted" id="miss-hint">Checking the library&hellip;</p>
+    <ul id="pl-miss-list" class="results pl-miss-list"></ul>
+    <div class="row" id="miss-actions" hidden>
+      <a class="btn btn-sm" id="miss-pdf" target="_blank" rel="noopener">Print (PDF)</a>
+      <a class="btn btn-sm" id="miss-csv">Spreadsheet (CSV)</a>
+    </div>
+  </div>
   </div>
 </div>
 
@@ -190,6 +200,66 @@ async function removeItem(btn) {
   li.remove();
   refreshStats();
 }
+function escHtml(s) {
+  return (s || "").replace(/[&<>"]/g,
+    c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+}
+// the songs in THIS playlist that will not play (right column, 20 at a time)
+let MISS_ROWS = [];
+async function loadPlMissing() {
+  try {
+    const d = await (await fetch(`/api/library/missing?playlist=${PID}`)).json();
+    MISS_ROWS = (d.groups || []).flatMap(g =>
+      (g.files || []).map(f => Object.assign({folder: g.folder}, f)));
+  } catch (e) { MISS_ROWS = []; }
+  renderPlMissing();
+}
+function renderPlMissing() {
+  const ul = document.getElementById("pl-miss-list");
+  if (!ul) return;
+  const n = MISS_ROWS.length;
+  const bad = MISS_ROWS.filter(f => f.status === "missing").length;
+  const unk = n - bad;
+  const cnt = document.getElementById("miss-count");
+  // say which is which: the table on the Playlists page splits them, so this
+  // list must not look like it disagrees with it
+  if (cnt) cnt.textContent = n
+    ? "(" + bad + " can’t be found" + (unk ? " · " + unk + " not in index" : "") + ")"
+    : "";
+  const hint = document.getElementById("miss-hint");
+  if (hint) hint.textContent = n
+    ? "In this playlist, but not found in the library — they are skipped on " +
+      "air. Nothing has been deleted; the folder to restore is under each song."
+    : "Every song in this playlist can be found.";
+  const acts = document.getElementById("miss-actions");
+  if (acts) acts.hidden = !n;
+  const pdf = document.getElementById("miss-pdf");
+  const csv = document.getElementById("miss-csv");
+  if (pdf) pdf.href = "/reports/print?report=missing-from-playlists&playlist=" + PID;
+  if (csv) csv.href = "/api/reports/missing-from-playlists.csv?playlist=" + PID;
+  ul.innerHTML = "";
+  for (const f of MISS_ROWS.slice(0, 20)) {
+    const li = document.createElement("li");
+    li.className = "pl-miss-row";
+    li.innerHTML =
+      "<span class='miss-tag " + (f.status === "missing" ? "is-bad" : "is-warn") + "'>" +
+      (f.status === "missing" ? "can’t be found" : "not in index") + "</span> " +
+      "<strong>" + escHtml(f.title) + "</strong>" +
+      "<div class='miss-path'>" + escHtml(f.path) + "</div>" +
+      (f.hint === "moved"
+        ? "<div class='miss-hint'>Probably moved to " + escHtml(f.candidate) + "</div>"
+        : "");
+    ul.appendChild(li);
+  }
+  if (n > 20) {
+    const more = document.createElement("li");
+    more.className = "muted";
+    more.textContent = "…and " + (n - 20) + " more. Print it, or open " +
+      "Missing files on the Playlists page to see them all.";
+    ul.appendChild(more);
+  }
+}
+
 // one row in the playlist list (same markup the server renders)
 function appendItemLi(id, label, durSec) {
   document.getElementById("empty-hint")?.remove();
@@ -395,6 +465,7 @@ async function fbAddAll() {
 }
 
 refreshStats();
+loadPlMissing();
 // reopen the folder you were last browsing (falls back to the drive list)
 fbGo(localStorage.getItem("sf_fb_path") || "", true).then(() => {
   if (!fbPath) fbGo("");

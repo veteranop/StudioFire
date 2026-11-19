@@ -1175,3 +1175,24 @@ dialog.sf-picker::backdrop { background: rgba(6, 9, 13, .68); }
 .miss-group[open] > .miss-sum:before { content: "▾"; }
 .miss-sum .miss-folder { margin: 0; flex: 1 1 auto; }
 #miss-q { width: 100%; max-width: 30rem; }
+
+/* the all-playlists table: readable links on the dark panel, and a table that
+   scrolls inside its card instead of pushing the page sideways */
+.st-main a { color: #8fc2ff; text-decoration: none; }
+.st-main a:hover { color: #ffffff; text-decoration: underline; }
+.table-scroll { overflow-x: auto; margin: 0 -.2rem; padding: 0 .2rem; }
+.pl-table td.st-name a { border-bottom: 1px solid rgba(143, 194, 255, .35); }
+.pl-table td.st-name a:hover { border-bottom-color: #fff; text-decoration: none; }
+
+/* the playlist page's own missing list: 20 shown, the rest scrolls */
+.pl-miss-list { max-height: 22rem; overflow-y: auto; }
+.pl-miss-row { padding: .45rem 0; border-top: 1px solid var(--border); }
+.pl-miss-row:first-child { border-top: 0; }
+.pl-miss-list .miss-path { font-size: 11.5px; }
+
+/* On Air: the playlist title and the red missing block open the playlist */
+.rot-openable { cursor: pointer; }
+.rot-openable:hover { color: #8fc2ff; text-decoration: underline; }
+.skip-clickable { cursor: pointer; }
+.skip-clickable:hover { filter: brightness(1.06); }
+.skip-open { color: #ffd9d9; font-weight: 650; white-space: nowrap; }

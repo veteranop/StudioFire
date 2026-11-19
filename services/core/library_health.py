@@ -302,7 +302,8 @@ def _snapshot(conn) -> dict:
             "formats": fmts}
 
 
-def missing(conn, cfg, fresh: bool = False) -> dict:
+def missing(conn, cfg, fresh: bool = False,
+            playlist_id: int | None = None) -> dict:
     """Every playlist item that will not play, grouped by the folder it lived in.
 
     Grouped by PARENT FOLDER, not by artist: the failure this answers was folder
@@ -313,6 +314,8 @@ def missing(conn, cfg, fresh: bool = False) -> dict:
     rows = []
     for it in items:
         if it["item_type"] != "file":
+            continue
+        if playlist_id and it["playlist_id"] != playlist_id:
             continue
         st = status_of(it, found)
         if st == "playable":
@@ -338,6 +341,7 @@ def missing(conn, cfg, fresh: bool = False) -> dict:
            for f, v in sorted(groups.items(),
                               key=lambda kv: (-len(kv[1]), kv[0].lower()))]
     return {"reachable": reachable(cfg), "groups": out,
+            "playlist_id": playlist_id,
             "files": len(rows),
             "paths": len({normalise(r["resolved"]) for r in rows}),
             "missing": sum(1 for r in rows if r["status"] == "missing"),
@@ -370,8 +374,9 @@ def register(app) -> None:
         return health(conn, cfg, bool(fresh))
 
     @app.get("/api/library/missing")
-    def api_missing(fresh: int = 0, conn=Depends(get_conn), _=Depends(api_user)):
-        return missing(conn, cfg, bool(fresh))
+    def api_missing(fresh: int = 0, playlist: int = 0,
+                    conn=Depends(get_conn), _=Depends(api_user)):
+        return missing(conn, cfg, bool(fresh), playlist or None)
 
     @app.get("/api/library/playlist/{pid}/flags")
     def api_flags(pid: int, conn=Depends(get_conn), _=Depends(api_user)):

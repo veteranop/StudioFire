@@ -186,6 +186,24 @@ def main():
               all(f["title"] != "one.mp3" or f["path"] != present
                   for g in empty["groups"] for f in g["files"]))
 
+        # ---- 8b. a playlist can ask for ITS missing songs ---------------
+        only = lh.missing(conn, cfg, playlist_id=keep)
+        check('missing() can be scoped to one playlist',
+              only['files'] == 3, str(only['files']))
+        check('...and keeps the full path for each', all(f['path'] for g in only['groups']
+              for f in g['files']))
+        rep_pl = reports.run('missing-from-playlists', conn, '2026-11-01',
+                             '2026-11-02', cfg=cfg, playlist_id=keep)
+        check('the report filters to one playlist too', len(rep_pl['rows']) == 3,
+              str(len(rep_pl['rows'])))
+        check('...and names it in the subtitle', 'Keepers' in rep_pl['subtitle'],
+              rep_pl['subtitle'])
+        other_rep = reports.run('missing-from-playlists', conn, '2026-11-01',
+                                '2026-11-02', cfg=cfg, playlist_id=other)
+        check('a different playlist gets its own rows',
+              {r['playlist'] for r in other_rep['rows']} == {'AAA worse'},
+              str({r['playlist'] for r in other_rep['rows']}))
+
         # ---- 9. the API the page calls -----------------------------------
         webtd = os.path.join(td, "web")
         os.makedirs(os.path.join(webtd, "precache"), exist_ok=True)

@@ -66,6 +66,7 @@
 
       <div class="st-card">
         <div class="st-banner st-banner-warn" id="lib-banner" hidden></div>
+        <div class="table-scroll">
         <table class="st-table pl-table">
           <thead>
             <tr>
@@ -81,6 +82,7 @@
           </thead>
           <tbody id="pl-rows"><tr><td class="st-empty">Loading&hellip;</td></tr></tbody>
         </table>
+        </div>
         <p class="st-help" style="margin-top:.6rem">
           Click a playlist to open it. “Not in index” is a path the library index
           has never seen — that is not the same as a missing file, so it is
@@ -214,6 +216,17 @@ function fmtTs(epoch) {
          d.toLocaleTimeString(undefined, {hour: "numeric", minute: "2-digit"});
 }
 function fmtGB(bytes) { return (Number(bytes || 0) / 1e9).toFixed(1) + " GB"; }
+function fmtDay(epoch) {          // "6 Nov" — the table needs the room
+  if (!epoch) return "<span class='muted'>never</span>";
+  return new Date(Number(epoch) * 1000)
+    .toLocaleDateString(undefined, {day: "numeric", month: "short"});
+}
+function fmtShort(epoch) {        // "12 Nov 5pm"
+  if (!epoch) return "<span class='muted'>never</span>";
+  const d = new Date(Number(epoch) * 1000);
+  return d.toLocaleDateString(undefined, {day: "numeric", month: "short"}) + " " +
+         d.toLocaleTimeString(undefined, {hour: "numeric"}).replace(":00", "");
+}
 function fmtHours(h) {
   const n = Number(h || 0);
   return n < 48 ? n.toFixed(1) + " h" : Math.round(n).toLocaleString() + " h";
@@ -268,10 +281,12 @@ async function loadAll(fresh) {
                         p.pct_unplayable >= 25 ? "is-bad" : ""));
     tr.appendChild(cell(p.folders ? p.folders : "—"));
     const upd = document.createElement("td");
-    upd.innerHTML = fmtTs(p.updated_at);
+    upd.innerHTML = fmtDay(p.updated_at);
+    upd.title = "Last changed";
     tr.appendChild(upd);
     const air = document.createElement("td");
-    air.innerHTML = fmtTs(p.last_aired);
+    air.innerHTML = fmtShort(p.last_aired);
+    air.title = "Last aired";
     tr.appendChild(air);
     tr.onclick = (e) => {
       if (e.target.tagName !== "A") location = "/playlists/" + p.id;
@@ -395,9 +410,13 @@ function renderMissing() {
 function filterMissing() {
   const q = (document.getElementById("miss-q").value || "").toLowerCase().trim();
   for (const g of document.querySelectorAll(".miss-group")) {
+    // one box searches songs, folders AND playlist names: a folder match
+    // shows everything that was in that folder
+    const folderTxt = ((g.querySelector("summary") || {}).textContent || "").toLowerCase();
+    const folderHit = !!q && folderTxt.includes(q);
     let hits = 0;
     for (const li of g.querySelectorAll("li")) {
-      const hit = !q || li.textContent.toLowerCase().includes(q);
+      const hit = !q || folderHit || li.textContent.toLowerCase().includes(q);
       li.hidden = !hit;
       if (hit) hits++;
     }

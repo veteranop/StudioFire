@@ -838,7 +838,8 @@ def _when(v) -> str:
         return str(v)
 
 
-def missing_from_playlists(conn, start, end, cfg=None) -> dict:
+def missing_from_playlists(conn, start, end, cfg=None,
+                          playlist_id: int | None = None) -> dict:
     """Every playlist item that will not play, grouped by the folder it lived in.
 
     Full paths, because the recovery for a moved library is a folder-shaped job:
@@ -849,7 +850,12 @@ def missing_from_playlists(conn, start, end, cfg=None) -> dict:
     air).
     """
     from . import library_health as lh
-    data = lh.missing(conn, cfg or {})
+    data = lh.missing(conn, cfg or {}, playlist_id=playlist_id)
+    scope = ""
+    if playlist_id:
+        row = conn.execute("SELECT name FROM playlists WHERE id = ?",
+                           (playlist_id,)).fetchone()
+        scope = (row[0] + " — ") if row else ""
     rows = []
     for group in data["groups"]:
         for f in group["files"]:
@@ -881,7 +887,8 @@ def missing_from_playlists(conn, start, end, cfg=None) -> dict:
             "back. An empty report means every song in every playlist will play.")
     return {"id": "missing-from-playlists",
             "title": "Missing files — what will not play",
-            "subtitle": (f"{data['files']} item(s) in {len(data['groups'])} folder(s)"
+            "subtitle": (scope + f"{data['files']} item(s) in "
+                         f"{len(data['groups'])} folder(s)"
                          f" · {data['paths']} distinct file(s)"),
             "columns": ["status", "playlist", "folder", "title", "path", "hint"],
             "headers": ["Status", "Playlist", "Folder", "File", "Full path", "Note"],
@@ -984,12 +991,12 @@ def run(report_id: str, conn, start: str, end: str, **kw) -> dict:
     fn = _RUNNERS.get(report_id)
     if fn is None:
         raise ValueError("unknown report")
-    # Library-health reports need the station config (the music-root probe);
-    # play reports do not. Drop the extra kwarg rather than break every runner.
-    if "cfg" in kw:
-        import inspect
-        if "cfg" not in inspect.signature(fn).parameters:
-            kw.pop("cfg")
+    # Report runners declare different extras (the library-health ones take
+    # cfg / playlist_id; the play reports take none), so hand each only what
+    # it declares instead of making every caller know the difference.
+    import inspect
+    allowed = set(inspect.signature(fn).parameters) - {"conn", "start", "end"}
+    kw = {k: v for k, v in kw.items() if k in allowed}
     return fn(conn, start, end, **kw)
 
 

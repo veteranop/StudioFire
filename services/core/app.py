@@ -1185,20 +1185,24 @@ def create_app(cfg: dict) -> FastAPI:
 
     @app.get("/api/reports/{report_id}")
     def api_report_run(report_id: str, start: str = "", end: str = "",
+                       playlist: int = 0,
                        conn=Depends(get_conn), _=Depends(api_user)):
         """Run one report and return it as data (screen tables read this)."""
         s, e = _report_range(start, end)
         try:
-            return reports.run(report_id, conn, s, e, cfg=cfg)
+            return reports.run(report_id, conn, s, e, cfg=cfg,
+                               playlist_id=playlist or None)
         except ValueError:
             raise HTTPException(404, "unknown report")
 
     @app.get("/api/reports/{report_id}.csv")
     def api_report_csv(report_id: str, start: str = "", end: str = "",
+                       playlist: int = 0,
                        conn=Depends(get_conn), _=Depends(api_user)):
         s, e = _report_range(start, end)
         try:
-            rep = reports.run(report_id, conn, s, e, cfg=cfg)
+            rep = reports.run(report_id, conn, s, e, cfg=cfg,
+                              playlist_id=playlist or None)
         except ValueError:
             raise HTTPException(404, "unknown report")
         body = reports.to_csv(rep)
@@ -1211,14 +1215,15 @@ def create_app(cfg: dict) -> FastAPI:
 
     @app.get("/reports/print", response_class=HTMLResponse)
     def report_print(request: Request, report: str = "as-aired",
-                     start: str = "", end: str = "",
+                     start: str = "", end: str = "", playlist: int = 0,
                      sess: dict = Depends(page_user),
                      conn=Depends(get_conn)):
         """A print-ready page: the browser's own Print → Save as PDF is the
         station's PDF path (no Chrome dependency on the playout box)."""
         s, e = _report_range(start, end)
         try:
-            rep = reports.run(report, conn, s, e, cfg=cfg)
+            rep = reports.run(report, conn, s, e, cfg=cfg,
+                              playlist_id=playlist or None)
         except ValueError:
             raise HTTPException(404, "unknown report")
         return render(request, "report_print.html", role=sess["role"],
