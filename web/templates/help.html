@@ -158,6 +158,32 @@
       station can never be left pointing at something that no longer exists — if a slot
       ever does go stale, the Settings card says so in red.</p>
 
+    <h2 id="playlists">The Playlists page</h2>
+    <p>The Playlists page is grouped down the left, the same way Settings is.</p>
+    <table>
+      <tr><th>Section</th><th>What it shows</th></tr>
+      <tr><td>All playlists</td><td>Every playlist with its song count, how many of
+        those songs cannot be found, how many are not in the library index yet, and
+        the share that will be skipped. The playlist that is on air is pinned to the
+        top; the rest are worst first.</td></tr>
+      <tr><td>Missing files</td><td>Every song a playlist points at that StudioFire
+        cannot find, grouped by the folder it came from, with the complete path — the
+        folder is what you restore. Where the library holds one credible match
+        somewhere else it says <em>probably moved to …</em> and names it.</td></tr>
+      <tr><td>Library health</td><td>Whether the music folder can be reached right
+        now, how many songs and hours it holds, when it was last scanned, and how
+        much is dark.</td></tr>
+      <tr><td>Tools</td><td>Open a <code>.lst</code>, create a playlist, and
+        <em>Fix broken paths</em> after the library has been reorganised.</td></tr>
+    </table>
+    <div class="help-callout">
+      <strong>Nothing on this page deletes anything.</strong> A song that cannot be
+      found stays listed and is skipped when the playlist plays — StudioFire never
+      removes it for you. "Not in the index" is not the same as missing: it means the
+      library index has not seen that path (yet), so it is counted separately and
+      never called deleted.
+    </div>
+
     <h2 id="spots">Spots, IDs &amp; underwriters</h2>
     <p>"Spots" are everything that isn't music: legal station <strong>IDs</strong>,
       <strong>underwriting</strong> credits, <strong>PSAs</strong> and
