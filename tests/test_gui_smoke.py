@@ -85,14 +85,16 @@ def main():
           TestClient(app, follow_redirects=False).get("/playlists")
           .status_code == 303)
 
-    # ---- library search
-    rows = client.get("/api/library/search?q=highway").json()
+    # ---- library search - present files only: {results, missing_matches}
+    rows = client.get("/api/library/search?q=highway").json()["results"]
     check("search finds by title", len(rows) == 1
           and rows[0]["title"] == "Highway Song")
-    check("search empty q -> []",
-          client.get("/api/library/search?q=").json() == [])
-    check("search no match -> []",
-          client.get("/api/library/search?q=zzzz").json() == [])
+    check("search empty q -> nothing listed",
+          client.get("/api/library/search?q=").json() ==
+          {"results": [], "missing_matches": 0})
+    check("search no match -> nothing listed",
+          client.get("/api/library/search?q=zzzz").json() ==
+          {"results": [], "missing_matches": 0})
 
     # ---- engine-offline degradation (never 500)
     r = client.get("/api/queue")
