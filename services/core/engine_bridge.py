@@ -105,14 +105,43 @@ def record_attribution(conn: sqlite3.Connection, path: str, kind: str,
         log.debug("feeder: could not record attribution", exc_info=True)
 
 
+_MIN_AIRING_SEC = 60.0   # a stretch this short with no song in it is a blip
+
+
 def open_airing(conn: sqlite3.Connection, playlist_id: int | None,
                 name: str | None, trigger: str) -> None:
     """Close the stretch that is on air and open a new one (a playlist or show
     went live). This is what makes "played from 06:00 to 09:00" a fact rather
-    than a guess from consecutive tracks."""
+    than a guess from consecutive tracks.
+
+    A handover can close one stretch and open the next inside the same tick — a
+    show finishes and the next scheduled show begins at the same second — and the
+    stretch squeezed in between played nothing. Writing it down left a permanent
+    "0 hours / 0 tracks" line in the Playlist-airings report on every transition
+    (39 of the first 123 airings on the on-air box were exactly that). So a
+    stretch that aired no song and is younger than a minute is dropped instead of
+    being ended.
+    """
     try:
         now = time.time()
         with conn:
+            row = conn.execute(
+                "SELECT id, started_at FROM playlist_airings "
+                "WHERE ended_at IS NULL ORDER BY id DESC LIMIT 1").fetchone()
+            if row is not None:
+                aired = conn.execute(
+                    "SELECT COUNT(*) FROM play_history "
+                    " WHERE event = 'track_start' "
+                    "   AND julianday(ts) >= julianday(?, 'unixepoch')",
+                    (row[1],)).fetchone()[0]
+                if not aired and (now - float(row[1])) < _MIN_AIRING_SEC:
+                    conn.execute("DELETE FROM playlist_airings WHERE id = ?",
+                                 (row[0],))
+                else:
+                    conn.execute("UPDATE playlist_airings SET ended_at = ?, "
+                                 "ended_reason = ? WHERE id = ?",
+                                 (now, "switched", row[0]))
+            # safety sweep: exactly one stretch is ever on air
             conn.execute("UPDATE playlist_airings SET ended_at = ?, "
                          "ended_reason = ? WHERE ended_at IS NULL",
                          (now, "switched"))

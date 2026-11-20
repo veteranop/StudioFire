@@ -100,6 +100,14 @@ def playlist_airings(conn, start: str, end: str, playlist_id: int | None = None
 
     out = []
     for r in rows:
+        # A handover blip: the feeder used to write a stretch that was opened and
+        # closed in the same tick (a show ending as the next one began), so it
+        # never played anything. 1.7.4 stops creating them; this keeps the ones
+        # already in the database out of the report, where they read as
+        # "0 hours, 0 tracks" lines that mean nothing to an operator.
+        if (r["ended_at"] is not None and not r["tracks_aired"]
+                and _hours_between(r["started_at"], r["ended_at"]) < (1.0 / 60.0)):
+            continue
         start_dt = _dt.datetime.fromtimestamp(r["started_at"])
         end_dt = (_dt.datetime.fromtimestamp(r["ended_at"])
                   if r["ended_at"] else None)

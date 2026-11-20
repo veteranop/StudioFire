@@ -7,6 +7,14 @@ plain English a non-technical operator can understand.
 
 ## [Unreleased]
 
+### Fixed
+- **No more "0 hours, 0 tracks" lines in Playlist airings.** Every time one show
+  handed over to the next, the station wrote down a stretch that was opened and
+  closed in the same second, so the report printed a line that ran for no time and
+  played no songs. Those lines are no longer created, and the ones already in the
+  log no longer appear in the report. A stretch that really aired something is
+  untouched.
+
 ## [1.7.3] - 2026-11-20
 
 ### Fixed

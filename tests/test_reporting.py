@@ -291,6 +291,66 @@ def main():
 
         c2.close()
 
+        # ---- 9. a handover must not leave a "0 hours, 0 tracks" airing -----
+        # The feeder closes a show and opens the rotation, then the next
+        # scheduled show takes over in the SAME tick. Before 1.7.4 that left a
+        # permanent airing row with no songs in it (39 of the first 123 rows on
+        # the on-air box), and the Playlist airings report printed them as
+        # 0 hours / 0 tracks lines on every transition.
+        db3 = os.path.join(td, "airings.db")
+        db.migrate(db3)
+        c3 = db.connect(db3)
+        pid3 = pl.create_playlist(c3, "ROTATION ONE")
+        pl.add_items_bulk(c3, pid3, [
+            {"item_type": "file", "path": "Z:\\G\\R\\01 Real Song.mp3",
+             "title": "Real Song"}])
+        item3 = c3.execute("SELECT id FROM playlist_items WHERE playlist_id = ? "
+                           "ORDER BY id LIMIT 1", (pid3,)).fetchone()[0]
+        # a stretch that really aired something
+        open_airing(c3, pid3, "ROTATION ONE", "rotation")
+        c3.execute("UPDATE playlist_airings SET started_at = ? WHERE ended_at IS NULL",
+                   (time.time() - 600,))
+        c3.execute("INSERT INTO play_history (journal_id, ts, event, path, title, "
+                   "source, extra) VALUES ('air-1', ?, 'track_start', ?, ?, "
+                   "'playlist', ?)",
+                   (__import__("datetime").datetime.fromtimestamp(
+                       time.time() - 300).astimezone().isoformat(),
+                    "/tmp/real.mp3", "A Band - Real Song",
+                    json.dumps({"attr_kind": "playlist", "playlist_id": pid3,
+                                "item_id": item3})))
+        c3.commit()
+        # show takes over, then hands straight back in the same second
+        open_airing(c3, None, "NEXT SHOW", "show")
+        open_airing(c3, pid3, "ROTATION ONE", "rotation")
+        booked = [dict(r) for r in c3.execute(
+            "SELECT name, started_at, ended_at, ended_reason FROM playlist_airings "
+            "ORDER BY id")]
+        names = [r["name"] for r in booked]
+        check("the stretch that aired is kept", "ROTATION ONE" in names, str(names))
+        check("the same-tick show leaves no row", "NEXT SHOW" not in names, str(names))
+        check("no zero-length airing is written",
+              all((r["ended_at"] or 0) - r["started_at"] > 60 for r in booked
+                  if r["ended_at"]), str(booked))
+        check("the rotation is still on air", c3.execute(
+            "SELECT COUNT(*) FROM playlist_airings WHERE ended_at IS NULL"
+        ).fetchone()[0] == 1)
+
+        # a legacy blip already in the database must not reach the report
+        now3 = time.time()
+        c3.execute("INSERT INTO playlist_airings (playlist_id, name, started_at, "
+                   "ended_at, trigger, ended_reason) VALUES (?,?,?,?,?,?)",
+                   (pid3, "LEGACY BLIP", now3 - 20, now3 - 20, "rotation",
+                    "switched"))
+        c3.commit()
+        today3 = time.strftime("%Y-%m-%d")
+        rep9 = reports.run("playlist-airings", c3, today3, today3)
+        listed = [r["playlist"] for r in rep9["rows"]]
+        check("report hides a legacy 0-hour 0-track blip",
+              "LEGACY BLIP" not in listed, str(listed))
+        check("report still shows the real stretch", "ROTATION ONE" in listed,
+              str(listed))
+        c3.close()
+
         conn.close()
 
     print("\nREPORTING OK (%d checks)" % passed)
