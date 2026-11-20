@@ -452,6 +452,26 @@ def spot_detail(conn, start: str, end: str) -> dict:
 
 # ------------------------------------------------------------------- report 6
 
+# ------------------------------------------------------------------ music rows
+#
+# Which play_history rows count as a MUSIC airing.
+#
+# 'playlist' is the rotation. 'show' is counted too, because an airing can stay
+# open for hours after its own items run out, and every rotation song played
+# inside that window is stamped source='show'. Filtering on 'playlist' alone
+# made the music reports read EMPTY for whole days: on 2026-11-19 the on-air box
+# logged 359 track starts and not one of them was 'playlist', so the music mix,
+# artist airplay and play census all rendered blank while the station was on air
+# all day. What separates a real song airing from a whole pre-recorded show file
+# is the item attribution, not the label: a show played as one mp3 carries no
+# item_id, and every query below requires one (the playlist_items join, or the
+# explicit json_extract in the census). Attribution capture itself is unchanged.
+_MUSIC_SOURCE_SQL = ("   AND (ph.source = 'playlist' "
+                     "        OR (ph.source = 'show' "
+                     "            AND json_extract(ph.extra, '$.item_id') "
+                     "                IS NOT NULL)) ")
+
+
 def play_census(conn, start: str, end: str) -> dict:
     """Spins per track - the shape a SoundExchange census wants, INTERNAL only."""
     lo, hi = _day_bounds(start, end)
@@ -460,7 +480,7 @@ def play_census(conn, start: str, end: str) -> dict:
                MAX(ph.ts) AS last_ts
           FROM play_history ph
          WHERE ph.event = 'track_start'
-           AND ph.source = 'playlist'
+""" + _MUSIC_SOURCE_SQL + """
            AND julianday(ph.ts) BETWEEN julianday(?) AND julianday(?)
       GROUP BY ph.title ORDER BY spins DESC""", (lo, hi))
     out = [{
@@ -658,19 +678,38 @@ def _xml(text):
             .replace(">", "&gt;"))
 
 
+def _music_path_sql() -> str:
+    """SQL expression: the LIBRARY path a play came from, separator-normalised.
+
+    Two sources, in order of trust:
+      * playlist_items.path — a real playlist item (integer id) always has one;
+      * play_history.extra.src_path — what the feeder recorded for a .lst or
+        folder show item, whose id ('l12'/'d3') matches no playlist_items row.
+    A whole pre-recorded show file has neither, so it still cannot reach a track
+    row and stays out of the per-song reports.
+    """
+    return ("lower(replace(COALESCE(NULLIF(pi.path, ''), "
+            "json_extract(ph.extra, '$.src_path')), '/', char(92)))")
+
+
 def _music_join(conn, lo: str, hi: str, group_col: str, limit: int | None = None):
     """Plays grouped by a TRACK column (genre / artist).
 
     Only plays we can tie to a real library row are counted — the join goes
-    through the attribution the feeder writes (playlist item -> track path). The
-    caller discloses the coverage so nobody reads a subset as the whole period.
+    through the attribution the feeder writes (playlist item / show item -> track
+    path). The caller discloses the coverage so nobody reads a subset as the
+    whole period.
     """
     furniture_sql, furniture_params = _furniture_clause(conn)
+    music_path = _music_path_sql()
     sql = """
         SELECT COALESCE(NULLIF(TRIM(t.%s), ''), 'Unknown') AS grp,
                COUNT(*) AS spins
           FROM play_history ph
-          JOIN playlist_items pi
+          -- LEFT, not INNER: a .lst/folder show item has no playlist_items row,
+          -- and dropping those rows is what made the charts read EMPTY on a day
+          -- a show owned the air (2026-11-19).
+          LEFT JOIN playlist_items pi
             ON pi.id = json_extract(ph.extra, '$.item_id')
           -- Two things make a naive equality join lie here:
           --  * the index and the playlist rows disagree on the separator
@@ -683,7 +722,7 @@ def _music_join(conn, lo: str, hi: str, group_col: str, limit: int | None = None
           JOIN tracks t ON t.id = (
                SELECT t2.id FROM tracks t2
                 WHERE lower(replace(t2.path, '/', char(92)))
-                    = lower(replace(pi.path, '/', char(92)))
+                    = %s
                 ORDER BY (t2.missing = 0) DESC,
                          (t2.artist IS NOT NULL
                           AND TRIM(t2.artist) <> '') DESC,
@@ -691,11 +730,11 @@ def _music_join(conn, lo: str, hi: str, group_col: str, limit: int | None = None
                          t2.meta_read DESC, t2.id
                 LIMIT 1)
          WHERE ph.event = 'track_start'
-           AND ph.source = 'playlist'
+           AND ph.source IN ('playlist', 'show')
            %s           AND COALESCE(TRIM(t.%s), '') <> ''
            AND julianday(ph.ts) BETWEEN julianday(?) AND julianday(?)
       GROUP BY grp
-      ORDER BY spins DESC""" % (group_col, furniture_sql, group_col)
+      ORDER BY spins DESC""" % (group_col, music_path, furniture_sql, group_col)
     args = furniture_params + [lo, hi]
     if limit:
         sql += " LIMIT %d" % int(limit)
@@ -715,17 +754,21 @@ def _music_coverage(conn, lo: str, hi: str, column: str) -> dict:
         "       SUM(CASE WHEN COALESCE(TRIM(t." + column + "), '') <> '' "
         "                THEN 1 ELSE 0 END) AS matched "
         "  FROM play_history ph "
-        "  JOIN playlist_items pi "
+        "  LEFT JOIN playlist_items pi "
         "    ON pi.id = json_extract(ph.extra, '$.item_id') "
         "  LEFT JOIN tracks t ON t.id = ("
         "       SELECT t2.id FROM tracks t2"
         "        WHERE lower(replace(t2.path, '/', char(92)))"
-        "            = lower(replace(pi.path, '/', char(92)))"
+        "            = " + _music_path_sql() +
         "        ORDER BY (t2.missing = 0) DESC,"
         "                 (COALESCE(TRIM(t2." + column + "), '') <> '') DESC,"
         "                 t2.meta_read DESC, t2.id LIMIT 1) "
         " WHERE ph.event = 'track_start' "
-        "   AND ph.source = 'playlist' "
+        "   AND ph.source IN ('playlist', 'show') "
+        # only plays that ARE a track airing count toward tag coverage — a whole
+        # pre-recorded show file has no per-song tag by definition and would
+        # otherwise sit in the denominator as an untaggable "miss"
+        "   AND " + _music_path_sql() + " IS NOT NULL "
         + furniture_sql +
         "   AND julianday(ph.ts) BETWEEN julianday(?) AND julianday(?)",
         tuple(furniture_params) + (lo, hi)).fetchone()

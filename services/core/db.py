@@ -369,6 +369,17 @@ CREATE INDEX idx_tracks_genre ON tracks(genre);
 CREATE INDEX idx_tracks_path_norm
   ON tracks(lower(replace(path, '/', char(92))));
 """),
+    (18, """
+-- Attribution: remember the LIBRARY path a precache file was fed from.
+-- The precache name is a content hash, so a play can otherwise only be tied
+-- back to a playlist_items row (integer ids). A show built from a .lst or a
+-- folder uses synthetic item ids ('l12', 'd3') that no playlist_items row can
+-- ever satisfy, so the music reports had nothing to join a genre or an artist
+-- from and read EMPTY on any day a show owned the air (2026-11-19: 359 plays,
+-- 0 resolvable). With the source path recorded here, ingest can carry it into
+-- play_history.extra and the reports can join the track row by path.
+ALTER TABLE queue_attribution ADD COLUMN src_path TEXT;
+"""),
 ]
 
 SCHEMA_VERSION = MIGRATIONS[-1][0]

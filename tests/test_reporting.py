@@ -170,6 +170,120 @@ def main():
         except ValueError:
             check("unknown report rejected", True)
 
+        # ---- 8. a SHOW airing that plays real playlist items still counts ----
+        # 2026-11-19 on the on-air box: a one-shot show airing stayed open for
+        # hours, so every rotation song inside it was stamped source='show'.
+        # The music reports filtered on source='playlist' alone and read EMPTY
+        # for the whole day (359 plays, 0 of them 'playlist'). A play that
+        # carries a real item_id is a library airing whatever the airing label
+        # says; a whole pre-recorded show file (no item_id) must still not be
+        # counted as a per-song airing.
+        db2 = os.path.join(td, "show_attribution.db")
+        db.migrate(db2)
+        c2 = db.connect(db2)
+
+        pid2 = pl.create_playlist(c2, "SHOW NIGHT")
+        pl.add_items_bulk(c2, pid2, [
+            {"item_type": "file", "path": "Z:\\G\\S\\01 Show Song.mp3",
+             "title": "Show Song"},
+            {"item_type": "file", "path": "Z:\\G\\S\\Dead Air Show.mp3",
+             "title": "Dead Air Show"},
+        ])
+        items2 = pl.get_items(c2, pid2)
+        for path, artist, genre in ((items2[0]["path"], "A Band", "Rock"),
+                                    (items2[1]["path"], "Dead Air", "Spoken")):
+            c2.execute("INSERT INTO tracks (path, title, artist, album, genre,"
+                       " indexed_at, missing, tags_read, meta_read)"
+                       " VALUES (?,?,?,?,?,?,0,1,1)",
+                       (path, os.path.basename(path), artist, "An Album",
+                        genre, time.time()))
+        c2.commit()
+
+        # the feeder feeds ONE of them from the playlist; the show file is
+        # played whole, so it gets no per-item attribution
+        pa = os.path.join(td, "precache", "eee555.mp3")
+        pb = os.path.join(td, "precache", "fff666.mp3")
+        pc = os.path.join(td, "precache", "ggg777.mp3")
+        record_attribution(c2, pa, "playlist", playlist_id=pid2,
+                           item_id=items2[0]["id"], label="Show Song",
+                           src_path=items2[0]["path"])
+        # a .lst/folder show item: synthetic id, no playlist_items row at all —
+        # the source path is the only way back to the track row
+        c2.execute("INSERT INTO tracks (path, title, artist, album, genre,"
+                   " indexed_at, missing, tags_read, meta_read)"
+                   " VALUES (?,?,?,?,?,?,0,1,1)",
+                   ("Z:\\G\\S\\03 List Song.mp3", "03 List Song", "C Band",
+                    "An Album", "Blues", time.time()))
+        c2.commit()
+        record_attribution(c2, pc, "playlist", playlist_id=pid2,
+                           item_id="l7", label="C Band - List Song",
+                           src_path="Z:\\G\\S\\03 List Song.mp3")
+
+        open_airing(c2, None, "December Playlist #3", "show")
+        c2.execute("UPDATE playlist_airings SET started_at = ? "
+                   "WHERE ended_at IS NULL", (time.time() - 300,))
+        c2.commit()
+
+        journal3 = os.path.join(td, "play_journal_show.jsonl")
+        base3 = time.time()
+        with open(journal3, "w", encoding="utf-8") as f:
+            for i, (path, title) in enumerate(((pa, "A Band - Show Song"),
+                                               (pb, "Dead Air Show"),
+                                               (pc, "C Band - List Song"))):
+                ts = __import__("datetime").datetime.fromtimestamp(
+                    base3 - 120 + i * 30).astimezone().isoformat()
+                f.write(json.dumps({"id": "show-%d" % i, "ts": ts,
+                                    "event": "track_start", "path": path,
+                                    "title": title, "source": "show"}) + "\n")
+        ingest_journal(c2, journal3)
+        shows = [dict(r) for r in c2.execute(
+            "SELECT title, source, extra FROM play_history "
+            "WHERE event='track_start' AND source='show' ORDER BY id")]
+        check("show plays ingested", len(shows) == 3, str(len(shows)))
+        ex_a = json.loads(shows[0]["extra"] or "{}")
+        check("show play of a playlist item keeps its item_id",
+              ex_a.get("item_id") == items2[0]["id"], str(ex_a))
+        check("show play of a playlist item carries its source path",
+              ex_a.get("src_path") == items2[0]["path"], str(ex_a))
+        ex_b = json.loads(shows[1]["extra"] or "{}")
+        check("whole-show play has no item_id", ex_b.get("item_id") is None,
+              str(ex_b))
+        check("whole-show play has no source path",
+              ex_b.get("src_path") is None, str(ex_b))
+        ex_c = json.loads(shows[2]["extra"] or "{}")
+        check("lst show item keeps its synthetic id and source path",
+              ex_c.get("item_id") == "l7"
+              and ex_c.get("src_path") == "Z:\\G\\S\\03 List Song.mp3",
+              str(ex_c))
+
+        census = reports.run("play-census", c2, today, today)
+        check("census counts the songs aired inside a show",
+              sorted(r["track"] for r in census["rows"])
+              == ["A Band - Show Song", "C Band - List Song"],
+              str(census["rows"]))
+        check("census still ignores a whole-show file",
+              all("Dead Air Show" not in r["track"] for r in census["rows"]),
+              str(census["rows"]))
+
+        mix = reports.run("genre-mix", c2, today, today)
+        check("genre mix counts the songs aired inside a show",
+              {r["genre"]: r["plays"] for r in mix["rows"]}
+              == {"Rock": 1, "Blues": 1},
+              str(mix["rows"]))
+        check("genre coverage counts them as attributable plays",
+              mix["coverage"]["total"] == 2, str(mix["coverage"]))
+        check("genre chart is not empty",
+              any(c["title"].startswith("Plays by genre") for c in mix["charts"]),
+              str([c["title"] for c in mix["charts"]]))
+
+        art = reports.run("artist-spins", c2, today, today)
+        check("artist airplay counts the songs aired inside a show",
+              {r["artist"]: r["spins"] for r in art["rows"]}
+              == {"A Band": 1, "C Band": 1},
+              str(art["rows"]))
+
+        c2.close()
+
         conn.close()
 
     print("\nREPORTING OK (%d checks)" % passed)

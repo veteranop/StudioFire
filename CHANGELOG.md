@@ -7,6 +7,21 @@ plain English a non-technical operator can understand.
 
 ## [Unreleased]
 
+### Fixed
+- **"What kind of music played" no longer goes blank on a show day.** The music
+  mix (plays by genre), artist airplay and play census reports only counted
+  songs the rotation fed, so on a day when a show held the air they showed
+  nothing at all — on 19 Nov 2026 the station logged 359 songs and all three
+  reports were empty. A song is now counted because it actually aired and the
+  station knows which file it was, whatever the hour was labelled. The reports
+  also pick up songs played inside a show built from a `.lst` file or a folder,
+  which they previously could not tie to a library file at all. Songs aired
+  before this version still cannot be shown in the genre and artist charts —
+  the file they came from was never recorded at the time — but the play census
+  fills in for them, and everything from this version on is complete. A whole
+  pre-recorded show played as one file is still excluded, because it carries no
+  per-song artist or genre.
+
 ## [1.7.1] - 2026-11-20
 
 ### Added

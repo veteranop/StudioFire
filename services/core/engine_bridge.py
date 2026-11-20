@@ -76,21 +76,28 @@ def record_attribution(conn: sqlite3.Connection, path: str, kind: str,
                        playlist_id: int | None = None,
                        item_id: int | None = None,
                        spot_rule_id: int | None = None,
-                       label: str | None = None) -> None:
+                       label: str | None = None,
+                       src_path: str | None = None) -> None:
     """Remember WHICH playlist item / spot rule a precache file was fed for.
 
     play_history only says "playlist" or "spot"; the journal reports the precache
     path back to us, so this map is the bridge that lets a report answer "which
     playlist aired" and "how many times did this underwriter's spot air".
+
+    src_path is the LIBRARY file the cache copy came from. A .lst or folder show
+    stamps synthetic item ids ('l12', 'd3') that playlist_items cannot satisfy,
+    so without the source path the music reports have no track row to read a
+    genre or an artist from.
     Never raises — bookkeeping must not break a feed.
     """
     try:
         now = time.time()
         conn.execute(
             "REPLACE INTO queue_attribution"
-            "(path, kind, playlist_id, item_id, spot_rule_id, label, fed_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (path, kind, playlist_id, item_id, spot_rule_id, label, now))
+            "(path, kind, playlist_id, item_id, spot_rule_id, label, src_path,"
+            " fed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (path, kind, playlist_id, item_id, spot_rule_id, label, src_path,
+             now))
         conn.execute("DELETE FROM queue_attribution WHERE fed_at < ?",
                      (now - 7 * 86400,))
         conn.commit()
@@ -788,7 +795,7 @@ class Feeder:
                 return False, f"engine said {code}: {resp}"
             st = self._load_state(conn)
             st["queue_version"] = mutation["queue_version"]
-            record_attribution(conn, cached, "spot", label=title)
+            record_attribution(conn, cached, "spot", label=title, src_path=src)
             st["fed"].insert(0, {"id": entry["id"], "path": cached,
                                  "duration": self._duration_of(conn, src),
                                  "title": title, "prog": "spot",
@@ -1162,7 +1169,7 @@ class Feeder:
                         conn, _b["path"],
                         "spot" if _b.get("source") == "spot" else "playlist",
                         playlist_id=_pid, item_id=_fe.get("pl_item_id"),
-                        label=_b.get("title"))
+                        label=_b.get("title"), src_path=_b.get("src"))
                 evict_keep, evict_snapshot = self._pre_evict_snapshot(
                     st, status)
                 result = (True, f"fed {len(batch)} entries")
@@ -1328,7 +1335,8 @@ def _ingest_lines(conn, path: str, offset: int,
                     try:
                         _a = conn.execute(
                             "SELECT kind, playlist_id, item_id, spot_rule_id, "
-                            "label FROM queue_attribution WHERE path = ?",
+                            "label, src_path FROM queue_attribution "
+                            "WHERE path = ?",
                             (ev["path"],)).fetchone()
                     except sqlite3.Error:
                         _a = None
@@ -1339,6 +1347,11 @@ def _ingest_lines(conn, path: str, offset: int,
                             "item_id": _a["item_id"],
                             "spot_rule_id": _a["spot_rule_id"],
                             "attr_label": _a["label"],
+                            # the library file this cache copy came from — the
+                            # only way a .lst/folder show play ('l12'/'d3' item
+                            # ids) can be joined to its track row for genre and
+                            # artist reporting
+                            "src_path": _a["src_path"],
                         })
                 with conn:
                     cur = conn.execute(
