@@ -7,6 +7,15 @@ plain English a non-technical operator can understand.
 
 ## [Unreleased]
 
+### Fixed
+- **The music charts now actually show a show day (1.7.2 was not enough).** 1.7.2
+  taught the reports to count songs played inside a show, but a second filter — the
+  one that keeps ads, PSAs, legal IDs and liners out of the charts — could only look
+  at songs the playlists had fed, so it threw those show songs away again and the
+  charts still came up empty. It now looks wherever the song's file is recorded.
+  Nothing else changes: ads, underwriting, IDs and liners are still excluded exactly
+  as before, and a whole pre-recorded programme still does not appear as songs.
+
 ## [1.7.2] - 2026-11-20
 
 ### Fixed

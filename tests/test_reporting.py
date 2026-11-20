@@ -182,6 +182,13 @@ def main():
         db.migrate(db2)
         c2 = db.connect(db2)
 
+        # a real box has the station-furniture folders configured (ads, PSAs,
+        # IDs, liners). They are excluded from the charts — but the exclusion
+        # must be able to see a SHOW item's library path too, which lives in
+        # play_history.extra.src_path rather than in a playlist_items row.
+        db.set_setting(c2, "dir_ads",
+                       "Z:\\1 - ALL DJ BREAKS - LINERS PSA s UND WRITING")
+
         pid2 = pl.create_playlist(c2, "SHOW NIGHT")
         pl.add_items_bulk(c2, pid2, [
             {"item_type": "file", "path": "Z:\\G\\S\\01 Show Song.mp3",

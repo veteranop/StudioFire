@@ -624,7 +624,12 @@ def _furniture_clause(conn) -> tuple[str, list]:
             pats.append(norm)
     if not pats:
         return "", []
-    path_expr = "lower(replace(pi.path, '/', char(92)))"
+    # The exclusion has to read the SAME path the track join uses: a .lst or
+    # folder show item has no playlist_items row, so its library path lives in
+    # play_history.extra.src_path. Comparing pi.path alone made the predicate
+    # NULL for those rows and `NOT (NULL LIKE …)` is NULL, i.e. the row was
+    # silently dropped — the very plays this filter must let through.
+    path_expr = _music_path_sql()
     clause = ("           AND NOT (" +
               " OR ".join("%s LIKE ?" % path_expr for _ in pats) + ")\n")
     return clause, pats
