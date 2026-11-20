@@ -7,6 +7,8 @@ plain English a non-technical operator can understand.
 
 ## [Unreleased]
 
+## [1.7.2] - 2026-11-20
+
 ### Fixed
 - **"What kind of music played" no longer goes blank on a show day.** The music
   mix (plays by genre), artist airplay and play census reports only counted
