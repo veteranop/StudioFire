@@ -281,6 +281,30 @@ def _backfill_tags(conn: sqlite3.Connection, root: str, t0: float,
     return tagged
 
 
+REINDEX_KEY = "reindex_request"
+
+
+def request_epoch(db_path: str) -> float:
+    """When the operator last pressed 'Reindex now' in Settings (0 = never).
+
+    The Settings button cannot scan anything itself: the indexer lives in P3, and
+    a second writer on an on-air box is how a library gets corrupted. So it drops
+    a timestamp in `settings` and this is the worker's read side. Any error reads
+    as "no request" — a broken settings row must never stop the 15-minute scan.
+    """
+    import sqlite3 as _sq
+    try:
+        conn = _sq.connect(f"file:{db_path}?mode=ro", uri=True)
+        try:
+            row = conn.execute("SELECT value FROM settings WHERE key = ?",
+                               (REINDEX_KEY,)).fetchone()
+        finally:
+            conn.close()
+        return float(row[0]) if row and row[0] else 0.0
+    except (OSError, ValueError, _sq.Error):
+        return 0.0
+
+
 def scan(conn: sqlite3.Connection, root: str,
          stop_check=lambda: False) -> dict:
     """One incremental pass: fast path walk, then tag backfill. Returns

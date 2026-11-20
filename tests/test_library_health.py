@@ -23,7 +23,8 @@ sys.path.insert(0, ROOT)
 
 from fastapi.testclient import TestClient                             # noqa: E402
 
-from services.core import db, library_health as lh                    # noqa: E402
+from services.core import auth, db, library_health as lh                # noqa: E402
+from services.worker.indexer import request_epoch                     # noqa: E402
 from services.core import playlists as pl, reports                    # noqa: E402
 from services.core.app import create_app                              # noqa: E402
 
@@ -263,6 +264,46 @@ def main():
                         json={"item_type": "file", "path": present})
         check("adding a file that IS there still works", r.status_code == 201,
               str(r.status_code))
+
+        # ---- 10. Settings > Library index: status + Reindex now -----------
+        d = client.get("/api/library/index").json()
+        check("index status answers with the fields Settings needs",
+              {"state", "scanning", "pending", "finished_at"} <= set(d), str(d)[:120])
+        check("a fresh station has nothing pending", d["pending"] is False, str(d))
+
+        before = request_epoch(dbp)
+        r = client.post("/api/library/reindex")
+        check("Reindex now is accepted", r.status_code == 200, str(r.status_code))
+        after = request_epoch(dbp)
+        check("...and leaves a request the worker can read", after > before,
+              f"{before} -> {after}")
+        d = client.get("/api/library/index").json()
+        check("the status then reports it as pending", d["pending"] is True, str(d))
+
+        check("the worker's reader ignores a missing request",
+              request_epoch(os.path.join(td, "nope.db")) == 0.0)
+
+        auth.create_user(conn, "op2", "longenough", "operator")
+        opc = TestClient(create_app(app_cfg), follow_redirects=False)
+        opc.post("/login", data={"username": "op2", "password": "longenough"})
+        rr = opc.post("/api/library/reindex")
+        check("an operator cannot trigger a reindex", rr.status_code == 403,
+              str(rr.status_code))
+
+        # ---- 11. the worker honours the request instead of waiting it out
+        from services.worker.main import wait_for_next
+        state = {"n": 0}
+
+        def asked(_p):
+            state["n"] += 1
+            return 0.0 if state["n"] < 3 else 9.0
+
+        check("the worker starts early when Settings asks",
+              wait_for_next("x", 5.0, [], reader=asked, poll=0.02) == "requested",
+              state)
+        check("...and simply waits when nobody asked",
+              wait_for_next("x", 0.1, [], reader=lambda _p: 1.0,
+                            poll=0.02) == "timeout")
 
         conn.close()
 

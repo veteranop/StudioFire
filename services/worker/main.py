@@ -22,7 +22,7 @@ import time
 from services.core import db as coredb
 from services.core.config import load_config
 
-from .indexer import scan
+from .indexer import request_epoch, scan
 
 log = logging.getLogger("worker")
 
@@ -53,6 +53,26 @@ def lower_priority() -> None:
         ctypes.windll.kernel32.SetPriorityClass(handle, BELOW_NORMAL)
     except Exception:  # non-Windows dev box — fine
         pass
+
+
+def wait_for_next(db_path: str, seconds: float, stop: list,
+                  reader=None, poll: float = 5.0) -> str:
+    """Wait out the scan interval, but start early if Settings asked.
+
+    Returns "requested" when a Reindex request arrived (the caller scans again
+    immediately) or "timeout" when the interval simply elapsed. Small and pure
+    enough to test without a music share: `reader` defaults to the indexer's
+    settings read.
+    """
+    read = reader or request_epoch
+    seen = read(db_path)
+    deadline = time.monotonic() + seconds
+    while not stop and time.monotonic() < deadline:
+        time.sleep(poll)
+        if read(db_path) > seen:
+            log.info("reindex requested from Settings - scanning now")
+            return "requested"
+    return "timeout"
 
 
 def main() -> int:
@@ -86,9 +106,8 @@ def main() -> int:
                 conn.close()
         else:
             log.warning("nas_music_root not set/reachable (%r) — idle", root)
-        deadline = time.monotonic() + SCAN_INTERVAL
-        while not stop and time.monotonic() < deadline:
-            time.sleep(1)
+        # the seen request is already honoured by the pass that just ran
+        wait_for_next(cfg["db_path"], SCAN_INTERVAL, stop)
     log.info("worker shutting down")
     return 0
 

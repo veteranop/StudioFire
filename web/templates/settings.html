@@ -141,6 +141,27 @@
         <div class="st-flash" id="pl-msg" aria-live="polite"></div>
       </div>
 
+      <div class="st-card" id="index-card">
+        <div class="st-card-head">
+          <h3>Library index</h3>
+          <div class="st-tools">
+            <span class="st-saved" id="idx-saved" hidden>&#10003; Requested</span>
+          </div>
+        </div>
+        <p class="st-help" style="max-width:640px">
+          StudioFire keeps a list of every song on the music share so search and
+          playlists are instant. It refreshes itself automatically; a reindex only
+          <em>reads</em> the share and never changes, moves or deletes a file.
+        </p>
+        <table class="st-table"><tbody id="idx-rows">
+          <tr><td class="st-empty">Loading&hellip;</td></tr></tbody></table>
+        <div class="st-foot">
+          <button class="btn btn-green" id="idx-go" onclick="reindexNow()">
+            Reindex the library now</button>
+        </div>
+        <div class="st-flash" id="idx-msg" aria-live="polite"></div>
+      </div>
+
       <div class="st-card" id="alias-card">
         <div class="st-card-head">
           <h3>Library path aliases</h3>
@@ -1800,9 +1821,55 @@ async function saveAliases() {
   }
 }
 
+/* ---- library index: what the worker is doing, and a rescan request --- */
+let idxTimer = null;
+async function loadIndex() {
+  let d;
+  try { d = await (await fetch("/api/library/index")).json(); } catch (e) { return; }
+  renderIndex(d);
+}
+function renderIndex(d) {
+  const tb = document.getElementById("idx-rows");
+  if (!tb) return;
+  const when = v => v ? new Date(Number(v) * 1000).toLocaleString() : "never";
+  const scanning = !!d.scanning;
+  const state = scanning ? "Scanning now" : (d.pending ? "Queued — starting" : "Idle");
+  const changed = (d.added || 0) + " added · " + (d.updated || 0) + " updated · " +
+                  (d.missing || 0) + " newly missing";
+  tb.innerHTML =
+    "<tr><td class='st-name'><strong>What it is doing</strong></td><td>" + state + "</td></tr>" +
+    "<tr><td class='st-name'><strong>Last finished</strong></td><td>" + when(d.finished_at) + "</td></tr>" +
+    "<tr><td class='st-name'><strong>Songs found on the share</strong></td><td>" +
+      (d.scanned == null ? "—" : Number(d.scanned).toLocaleString()) + "</td></tr>" +
+    "<tr><td class='st-name'><strong>Last run changed</strong></td><td>" + changed + "</td></tr>";
+  const btn = document.getElementById("idx-go");
+  if (btn) {
+    btn.disabled = scanning || !!d.pending;
+    btn.textContent = scanning ? "Scanning…" : (d.pending ? "Queued…" :
+                                              "Reindex the library now");
+  }
+  clearTimeout(idxTimer);
+  if (scanning || d.pending) idxTimer = setTimeout(loadIndex, 4000);
+}
+async function reindexNow() {
+  const r = await fetch("/api/library/reindex", {method: "POST"});
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    flash("idx-msg", d.detail || "Could not ask for a reindex.", true);
+    return;
+  }
+  flash("idx-msg", d.scanning
+    ? "A scan is already running — it will pick up any changes by itself."
+    : "Requested — the worker starts within a few seconds.", false);
+  const chip = document.getElementById("idx-saved");
+  if (chip) { chip.hidden = false; setTimeout(() => { chip.hidden = true; }, 4000); }
+  loadIndex();
+}
+
 /* ============================================================ boot */
 stShow(stGroupFromHash(), false);
 loadDirs();
+loadIndex();
 loadAliases();
 loadPlaylists();
 loadSupportContact();

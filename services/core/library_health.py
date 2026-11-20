@@ -25,7 +25,10 @@ import os
 import sqlite3
 import time
 
+from . import db as coredb
 from . import playlists as pl
+
+log = __import__("logging").getLogger("core.library_health")
 
 # A well-known junk bucket: never offer a match from inside it.
 QUARANTINE = pl.QUARANTINE_DIR
@@ -360,6 +363,58 @@ def playlist_items_flags(conn, pid: int) -> dict[int, str]:
     return out
 
 
+# ------------------------------------------------------------- index status
+
+REINDEX_KEY = "reindex_request"
+
+
+def index_status(conn) -> dict:
+    """What the indexer is doing, and whether a reindex has been asked for.
+
+    `indexer_status` is written by the worker (P3) around each scan; this reads
+    it and adds the operator's request, so Settings can show one honest line and
+    a button without reaching into the worker.
+    """
+    import json
+    raw = None
+    try:
+        row = conn.execute("SELECT value FROM settings WHERE key='indexer_status'"
+                           ).fetchone()
+        raw = row[0] if row else None
+    except sqlite3.Error:
+        raw = None
+    st = {}
+    if raw:
+        try:
+            st = json.loads(raw) or {}
+        except ValueError:
+            st = {}
+    req = 0.0
+    try:
+        req = float(conn.execute("SELECT value FROM settings WHERE key=?",
+                                 (REINDEX_KEY,)).fetchone()[0] or 0)
+    except (TypeError, ValueError, sqlite3.Error):
+        req = 0.0
+    scanning = (st.get("state") == "scanning")
+    started = st.get("started_at") or 0
+    # a worker killed mid-scan leaves state="scanning" behind for ever; a scan
+    # older than six hours is stale, not running (the next pass rewrites it)
+    if scanning and started and (time.time() - float(started)) > 6 * 3600:
+        scanning = False
+    # a request only counts as pending until a scan STARTS after it
+    pending = bool(req and (not started or float(started) < req) and not scanning)
+    return {"state": st.get("state") or "unknown",
+            "phase": st.get("phase"),
+            "started_at": st.get("started_at"),
+            "finished_at": st.get("finished_at"),
+            "scanned": st.get("scanned"),
+            "added": st.get("added"), "updated": st.get("updated"),
+            "missing": st.get("missing"), "errors": st.get("errors"),
+            "tags_left": st.get("tags_left"),
+            "scanning": scanning, "pending": pending,
+            "requested_at": req or None}
+
+
 # ------------------------------------------------------------------- routes
 
 def register(app) -> None:
@@ -367,6 +422,7 @@ def register(app) -> None:
 
     get_conn = app.state.get_conn
     api_user = app.state.api_user
+    api_admin = app.state.api_admin
     cfg = app.state.cfg
 
     @app.get("/api/library/health")
@@ -381,3 +437,27 @@ def register(app) -> None:
     @app.get("/api/library/playlist/{pid}/flags")
     def api_flags(pid: int, conn=Depends(get_conn), _=Depends(api_user)):
         return {"flags": playlist_items_flags(conn, pid)}
+
+    @app.get("/api/library/index")
+    def api_index(conn=Depends(get_conn), _=Depends(api_user)):
+        return index_status(conn)
+
+    @app.post("/api/library/reindex")
+    def api_reindex(conn=Depends(get_conn), _=Depends(api_admin)):
+        """Ask the worker to rescan the library now.
+
+        This does NOT scan here: the indexer lives on P3 by design, and a second
+        writer on the on-air box is how a library gets corrupted. The request is
+        a timestamp in `settings`; the worker picks it up between passes (it
+        polls while it waits) and scans. The operator keeps working — a scan is
+        a read-only walk of the share.
+        """
+        st = index_status(conn)
+        if st["scanning"]:
+            return {"ok": True, "scanning": True,
+                    "detail": "A scan is already running — it will pick up any "
+                              "changes by itself.",
+                    "started_at": st["started_at"]}
+        coredb.set_setting(conn, REINDEX_KEY, repr(time.time()))
+        log.info("library reindex requested from Settings")
+        return {"ok": True, "scanning": False, "requested_at": time.time()}
