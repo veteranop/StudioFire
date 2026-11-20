@@ -7,6 +7,8 @@ plain English a non-technical operator can understand.
 
 ## [Unreleased]
 
+## [1.7.1] - 2026-11-20
+
 ### Added
 - **Settings > Library index**: what the indexer is doing (scanning / idle, last finish, songs found, what the last pass changed) and a **Reindex the library now** button. The button asks the worker rather than scanning in the web process, so it can never become a second writer on the library; the worker picks the request up within seconds instead of waiting out its interval. A reindex only reads the share.
 - **The Playlists page now shows what will actually play.** It opens on a
