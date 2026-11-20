@@ -7,6 +7,8 @@ plain English a non-technical operator can understand.
 
 ## [Unreleased]
 
+## [1.7.3] - 2026-11-20
+
 ### Fixed
 - **The music charts now actually show a show day (1.7.2 was not enough).** 1.7.2
   taught the reports to count songs played inside a show, but a second filter — the
