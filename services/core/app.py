@@ -1192,18 +1192,13 @@ def create_app(cfg: dict) -> FastAPI:
             s = e - datetime.timedelta(days=400)
         return s.isoformat(), e.isoformat()
 
-    @app.get("/api/reports/{report_id}")
-    def api_report_run(report_id: str, start: str = "", end: str = "",
-                       playlist: int = 0,
-                       conn=Depends(get_conn), _=Depends(api_user)):
-        """Run one report and return it as data (screen tables read this)."""
-        s, e = _report_range(start, end)
-        try:
-            return reports.run(report_id, conn, s, e, cfg=cfg,
-                               playlist_id=playlist or None)
-        except ValueError:
-            raise HTTPException(404, "unknown report")
-
+    # NOTE ON ORDER: the .csv route MUST be declared before the generic
+    # /api/reports/{report_id} route. Starlette matches in declaration order, so
+    # with the generic route first, "/api/reports/as-aired.csv" was captured as
+    # report_id="as-aired.csv" and EVERY per-report CSV download from the Reports
+    # screen answered {"detail":"unknown report"} — for every report, for as long
+    # as the route has existed. (Found 2026-11-20 while adding a new report in the
+    # 2.0 line, where the same ordering lived.)
     @app.get("/api/reports/{report_id}.csv")
     def api_report_csv(report_id: str, start: str = "", end: str = "",
                        playlist: int = 0,
@@ -1221,6 +1216,18 @@ def create_app(cfg: dict) -> FastAPI:
         return Response(content=body, media_type="text/csv; charset=utf-8",
                         headers={"Content-Disposition":
                                  f'attachment; filename="{fname}"'})
+
+    @app.get("/api/reports/{report_id}")
+    def api_report_run(report_id: str, start: str = "", end: str = "",
+                       playlist: int = 0,
+                       conn=Depends(get_conn), _=Depends(api_user)):
+        """Run one report and return it as data (screen tables read this)."""
+        s, e = _report_range(start, end)
+        try:
+            return reports.run(report_id, conn, s, e, cfg=cfg,
+                               playlist_id=playlist or None)
+        except ValueError:
+            raise HTTPException(404, "unknown report")
 
     @app.get("/reports/print", response_class=HTMLResponse)
     def report_print(request: Request, report: str = "as-aired",

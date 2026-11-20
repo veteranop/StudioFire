@@ -7,6 +7,11 @@ plain English a non-technical operator can understand.
 
 ## [Unreleased]
 
+### Fixed
+- The **Spreadsheet (CSV)** option on the Reports screen now downloads the file. It had
+  been answering "unknown report" for every report — the download link was being read as
+  part of the report's name, so the request never reached a report at all.
+
 ## [1.7.4] - 2026-11-20
 
 ### Fixed

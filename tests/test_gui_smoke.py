@@ -85,6 +85,26 @@ def main():
           TestClient(app, follow_redirects=False).get("/playlists")
           .status_code == 303)
 
+    # ---- per-report CSV download (regression, 1.7.5) -------------------
+    # The .csv route was declared AFTER the generic /api/reports/{report_id}
+    # route, so Starlette matched "/api/reports/as-aired.csv" as a report whose
+    # id was "as-aired.csv" and every CSV export from the Reports screen answered
+    # {"detail":"unknown report"}. A content-type check is the point: the bug
+    # returned 404 JSON, which a "status == 200" assertion on the wrong URL would
+    # not have caught.
+    today = datetime.date.today().isoformat()
+    r = client.get(f"/api/reports/as-aired.csv?start={today}&end={today}")
+    check("per-report CSV download works", r.status_code == 200)
+    check("per-report CSV is served as a file, not JSON",
+          "text/csv" in r.headers.get("content-type", ""))
+    check("the CSV carries the report's header row",
+          b"What aired" in r.content)
+    r = client.get(f"/api/reports/as-aired?start={today}&end={today}")
+    check("the JSON report endpoint still answers", r.status_code == 200
+          and r.json().get("id") == "as-aired")
+    check("an unknown report is still a 404",
+          client.get("/api/reports/no-such-report").status_code == 404)
+
     # ---- library search - present files only: {results, missing_matches}
     rows = client.get("/api/library/search?q=highway").json()["results"]
     check("search finds by title", len(rows) == 1
