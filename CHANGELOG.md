@@ -7,6 +7,8 @@ plain English a non-technical operator can understand.
 
 ## [Unreleased]
 
+## [1.7.4] - 2026-11-20
+
 ### Fixed
 - **No more "0 hours, 0 tracks" lines in Playlist airings.** Every time one show
   handed over to the next, the station wrote down a stretch that was opened and
